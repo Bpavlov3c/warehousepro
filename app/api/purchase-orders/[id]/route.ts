@@ -3,10 +3,14 @@ import { createServerClient, handleSupabaseError } from "@/lib/supabase"
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const id = Number.parseInt(params.id)
     const body = await request.json()
+    const id = Number.parseInt(params.id)
 
-    console.log(`🔄 Updating purchase order ${id}:`, body)
+    if (isNaN(id)) {
+      return NextResponse.json({ error: "Invalid purchase order ID" }, { status: 400 })
+    }
+
+    console.log(`📝 Updating purchase order ${id} in Supabase:`, body)
 
     const supabase = createServerClient()
 
@@ -14,6 +18,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       .from("purchase_orders")
       .update({
         status: body.status,
+        notes: body.notes,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
@@ -48,10 +53,26 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   try {
     const id = Number.parseInt(params.id)
 
-    console.log(`🗑️ Deleting purchase order ${id}`)
+    if (isNaN(id)) {
+      return NextResponse.json({ error: "Invalid purchase order ID" }, { status: 400 })
+    }
+
+    console.log(`🗑️ Deleting purchase order ${id} from Supabase`)
 
     const supabase = createServerClient()
 
+    // First delete related po_items
+    const { error: itemsError } = await supabase.from("po_items").delete().eq("po_id", id)
+
+    if (itemsError) {
+      console.error("❌ Error deleting PO items:", itemsError)
+      return NextResponse.json(
+        { error: "Failed to delete purchase order items", details: handleSupabaseError(itemsError) },
+        { status: 500 },
+      )
+    }
+
+    // Then delete the purchase order
     const { error } = await supabase.from("purchase_orders").delete().eq("id", id)
 
     if (error) {

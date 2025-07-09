@@ -7,22 +7,40 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient()
 
-    const { data: inventory, error } = await supabase
-      .from("inventory")
+    // Use the product_inventory_summary view for aggregated data
+    const { data: inventorySummary, error: summaryError } = await supabase
+      .from("product_inventory_summary")
       .select("*")
-      .order("created_at", { ascending: false })
+      .order("product_name", { ascending: true })
 
-    if (error) {
-      console.error("❌ Supabase error:", error)
+    if (summaryError) {
+      console.error("❌ Supabase inventory summary query failed:", summaryError)
       return NextResponse.json(
-        { error: "Failed to fetch inventory", details: handleSupabaseError(error) },
+        { error: "Failed to fetch inventory summary", details: handleSupabaseError(summaryError) },
         { status: 500 },
       )
     }
 
-    console.log(`✅ Found ${inventory?.length || 0} inventory items`)
+    // Also get detailed inventory records
+    const { data: inventoryDetails, error: detailsError } = await supabase
+      .from("inventory")
+      .select("*")
+      .order("created_at", { ascending: false })
 
-    return NextResponse.json(inventory || [])
+    if (detailsError) {
+      console.error("❌ Supabase inventory details query failed:", detailsError)
+      return NextResponse.json(
+        { error: "Failed to fetch inventory details", details: handleSupabaseError(detailsError) },
+        { status: 500 },
+      )
+    }
+
+    console.log(`✅ Found ${inventorySummary?.length || 0} inventory items`)
+
+    return NextResponse.json({
+      summary: inventorySummary || [],
+      details: inventoryDetails || [],
+    })
   } catch (error) {
     console.error("❌ Error fetching inventory:", error)
 
@@ -39,7 +57,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log("📝 Creating inventory item in Supabase:", body)
+    console.log("📝 Creating inventory record in Supabase:", body)
 
     const supabase = createServerClient()
 
@@ -51,7 +69,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: newItem, error } = await supabase
+    const { data: newInventory, error } = await supabase
       .from("inventory")
       .insert({
         sku: body.sku,
@@ -70,20 +88,20 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("❌ Supabase error:", error)
       return NextResponse.json(
-        { error: "Failed to create inventory item", details: handleSupabaseError(error) },
+        { error: "Failed to create inventory record", details: handleSupabaseError(error) },
         { status: 500 },
       )
     }
 
-    console.log("✅ Inventory item created:", newItem.id)
+    console.log("✅ Inventory record created:", newInventory.id)
 
-    return NextResponse.json(newItem, { status: 201 })
+    return NextResponse.json(newInventory, { status: 201 })
   } catch (error) {
-    console.error("❌ Error creating inventory item:", error)
+    console.error("❌ Error creating inventory record:", error)
 
     return NextResponse.json(
       {
-        error: "Failed to create inventory item",
+        error: "Failed to create inventory record",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },

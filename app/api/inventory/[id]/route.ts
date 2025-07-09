@@ -3,17 +3,23 @@ import { createServerClient, handleSupabaseError } from "@/lib/supabase"
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const id = Number.parseInt(params.id)
     const body = await request.json()
+    const id = Number.parseInt(params.id)
 
-    console.log(`🔄 Updating inventory item ${id}:`, body)
+    if (isNaN(id)) {
+      return NextResponse.json({ error: "Invalid inventory ID" }, { status: 400 })
+    }
+
+    console.log(`📝 Updating inventory ${id} in Supabase:`, body)
 
     const supabase = createServerClient()
 
-    const { data: updatedItem, error } = await supabase
+    const { data: updatedInventory, error } = await supabase
       .from("inventory")
       .update({
-        ...body,
+        quantity_remaining: body.quantity_remaining,
+        location: body.location,
+        expiry_date: body.expiry_date,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
@@ -23,20 +29,20 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (error) {
       console.error("❌ Supabase error:", error)
       return NextResponse.json(
-        { error: "Failed to update inventory item", details: handleSupabaseError(error) },
+        { error: "Failed to update inventory", details: handleSupabaseError(error) },
         { status: 500 },
       )
     }
 
-    console.log("✅ Inventory item updated:", updatedItem.id)
+    console.log("✅ Inventory updated:", updatedInventory.id)
 
-    return NextResponse.json(updatedItem)
+    return NextResponse.json(updatedInventory)
   } catch (error) {
-    console.error("❌ Error updating inventory item:", error)
+    console.error("❌ Error updating inventory:", error)
 
     return NextResponse.json(
       {
-        error: "Failed to update inventory item",
+        error: "Failed to update inventory",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
@@ -48,7 +54,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   try {
     const id = Number.parseInt(params.id)
 
-    console.log(`🗑️ Deleting inventory item ${id}`)
+    if (isNaN(id)) {
+      return NextResponse.json({ error: "Invalid inventory ID" }, { status: 400 })
+    }
+
+    console.log(`🗑️ Deleting inventory ${id} from Supabase`)
 
     const supabase = createServerClient()
 
@@ -57,20 +67,20 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     if (error) {
       console.error("❌ Supabase error:", error)
       return NextResponse.json(
-        { error: "Failed to delete inventory item", details: handleSupabaseError(error) },
+        { error: "Failed to delete inventory", details: handleSupabaseError(error) },
         { status: 500 },
       )
     }
 
-    console.log("✅ Inventory item deleted:", id)
+    console.log("✅ Inventory deleted:", id)
 
-    return NextResponse.json({ message: "Inventory item deleted successfully" })
+    return NextResponse.json({ message: "Inventory deleted successfully" })
   } catch (error) {
-    console.error("❌ Error deleting inventory item:", error)
+    console.error("❌ Error deleting inventory:", error)
 
     return NextResponse.json(
       {
-        error: "Failed to delete inventory item",
+        error: "Failed to delete inventory",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
