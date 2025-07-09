@@ -1,134 +1,89 @@
-import { Pool, type PoolClient } from "pg"
+import { Pool } from "pg"
 
-// Database configuration from environment variables
-const dbConfig = {
+// Create a connection pool with environment variables
+const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
   port: Number.parseInt(process.env.DB_PORT || "5432"),
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-  // Connection pool settings
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
   connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
-}
-
-// Create a single pool instance
-const pool = new Pool(dbConfig)
-
-// Handle pool errors
-pool.on("error", (err) => {
-  console.error("Unexpected error on idle client", err)
-  process.exit(-1)
 })
 
-// Log pool events in development
-if (process.env.NODE_ENV === "development") {
-  pool.on("connect", () => {
-    console.log("🔗 New database connection established")
-  })
+// Test the connection on startup
+pool.on("connect", (client) => {
+  console.log("🔗 New database client connected")
+})
 
-  pool.on("remove", () => {
-    console.log("🔌 Database connection removed from pool")
-  })
-}
+pool.on("error", (err) => {
+  console.error("❌ Unexpected error on idle database client:", err)
+})
 
-// Get a client from the pool
-export async function getClient(): Promise<PoolClient> {
-  return pool.connect()
-}
-
-// Execute a query with automatic connection management
-export async function query(text: string, params?: any[]): Promise<any> {
+// Export a query function that uses the pool
+export async function query(text: string, params?: any[]) {
   const start = Date.now()
+
   try {
-    const res = await pool.query(text, params)
+    console.log(`🔍 Executing query: ${text.substring(0, 100)}${text.length > 100 ? "..." : ""}`)
+    if (params && params.length > 0) {
+      console.log(`📝 Query params:`, params)
+    }
+
+    const result = await pool.query(text, params)
     const duration = Date.now() - start
-    console.log("📊 Query executed", { text: text.substring(0, 100), duration, rows: res.rowCount })
-    return res
-  } catch (error) {
-    console.error("❌ Database query error:", error)
-    console.error("Query:", text)
-    console.error("Params:", params)
-    throw error
-  }
-}
 
-// Execute a transaction
-export async function transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getClient()
-
-  try {
-    await client.query("BEGIN")
-    const result = await callback(client)
-    await client.query("COMMIT")
+    console.log(`✅ Query executed successfully in ${duration}ms, returned ${result.rowCount} rows`)
     return result
   } catch (error) {
-    await client.query("ROLLBACK")
+    const duration = Date.now() - start
+    console.error(`❌ Query failed after ${duration}ms:`, error)
+    console.error(`📝 Failed query: ${text}`)
+    if (params && params.length > 0) {
+      console.error(`📝 Failed params:`, params)
+    }
     throw error
-  } finally {
-    client.release()
   }
 }
 
-// Test database connection
-export async function testConnection(): Promise<boolean> {
-  try {
-    const result = await query("SELECT NOW() as current_time, version() as version")
-    console.log("✅ Database connection successful")
-    console.log("📅 Server time:", result.rows[0].current_time)
-    console.log(
-      "🗄️ PostgreSQL version:",
-      result.rows[0].version.split(" ")[0] + " " + result.rows[0].version.split(" ")[1],
-    )
-    return true
-  } catch (error) {
-    console.error("❌ Database connection failed:", error)
-    return false
-  }
-}
+// Export the pool for advanced usage
+export { pool }
 
-// Close all connections (useful for graceful shutdown)
-export async function closePool(): Promise<void> {
-  await pool.end()
-  console.log("🔒 Database pool closed")
-}
+// Graceful shutdown handlers
+process.on("SIGINT", () => {
+  console.log("🔄 Gracefully shutting down database connections...")
+  pool.end(() => {
+    console.log("✅ Database pool has ended")
+    process.exit(0)
+  })
+})
+
+process.on("SIGTERM", () => {
+  console.log("🔄 Gracefully shutting down database connections...")
+  pool.end(() => {
+    console.log("✅ Database pool has ended")
+    process.exit(0)
+  })
+})
 
 // Health check function
-export async function healthCheck(): Promise<{
-  status: "healthy" | "unhealthy"
-  details: {
-    connected: boolean
-    totalConnections?: number
-    idleConnections?: number
-    waitingConnections?: number
-    error?: string
-  }
-}> {
+export async function checkDatabaseHealth() {
   try {
-    // Test basic connectivity
-    await query("SELECT 1")
-
+    const result = await query("SELECT NOW() as current_time, version() as version")
     return {
       status: "healthy",
-      details: {
-        connected: true,
-        totalConnections: pool.totalCount,
-        idleConnections: pool.idleCount,
-        waitingConnections: pool.waitingCount,
-      },
+      timestamp: result.rows[0].current_time,
+      version: result.rows[0].version,
+      poolSize: pool.totalCount,
+      idleConnections: pool.idleCount,
+      waitingClients: pool.waitingCount,
     }
   } catch (error) {
     return {
       status: "unhealthy",
-      details: {
-        connected: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
+      error: error instanceof Error ? error.message : "Unknown error",
     }
   }
 }
-
-// Default export for convenience
-export default pool
