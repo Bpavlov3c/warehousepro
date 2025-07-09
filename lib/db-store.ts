@@ -382,55 +382,6 @@ export class PurchaseOrderStore {
     const result = await executeQuery("DELETE FROM purchase_orders WHERE id = $1", [id])
     return result.rowCount > 0
   }
-
-  static async addItem(poId: number, item: CreatePOItemData): Promise<POItem | null> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, po_id, sku, product_name, quantity, unit_cost, total_cost, created_at
-    `,
-      [poId, item.sku, item.product_name, item.quantity, item.unit_cost],
-    )
-    return result.rows[0] || null
-  }
-
-  static async updateItem(itemId: number, data: Partial<CreatePOItemData>): Promise<POItem | null> {
-    await this.ensureTable()
-    const fields = []
-    const values = []
-    let paramCount = 1
-
-    Object.entries(data).forEach(([key, value]) => {
-      if (value !== undefined) {
-        fields.push(`${key} = $${paramCount++}`)
-        values.push(value)
-      }
-    })
-
-    if (fields.length === 0) return null
-
-    values.push(itemId)
-
-    const result = await executeQuery(
-      `
-      UPDATE po_items 
-      SET ${fields.join(", ")}
-      WHERE id = $${paramCount}
-      RETURNING id, po_id, sku, product_name, quantity, unit_cost, total_cost, created_at
-    `,
-      values,
-    )
-
-    return result.rows[0] || null
-  }
-
-  static async deleteItem(itemId: number): Promise<boolean> {
-    await this.ensureTable()
-    const result = await executeQuery("DELETE FROM po_items WHERE id = $1", [itemId])
-    return result.rowCount > 0
-  }
 }
 
 // Product Store
@@ -946,8 +897,29 @@ export class ShopifyOrderStore {
       [storeId, limit, offset],
     )
 
+    // Get items for each order
+    const orders = await Promise.all(
+      result.rows.map(async (order) => {
+        const itemsResult = await executeQuery(
+          `
+          SELECT 
+            id, order_id, sku, product_name, quantity, 
+            unit_price, total_price, created_at
+          FROM shopify_order_items 
+          WHERE order_id = $1
+          ORDER BY created_at
+        `,
+          [order.id],
+        )
+        return {
+          ...order,
+          items: itemsResult.rows,
+        }
+      }),
+    )
+
     return {
-      data: result.rows,
+      data: orders,
       total,
     }
   }
