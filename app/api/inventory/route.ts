@@ -3,46 +3,40 @@ import { query } from "@/lib/database"
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("🔍 Fetching inventory data...")
+    console.log("🔄 Fetching inventory data...")
 
-    // Query to get inventory with product details
-    const inventoryQuery = `
+    // Get inventory summary with proper column references
+    const result = await query(`
       SELECT 
-        p.id as product_id,
         p.sku,
-        p.name as product_name,
-        p.description,
-        p.min_stock,
-        p.max_stock,
-        COALESCE(SUM(i.quantity_available), 0) as current_stock,
-        COALESCE(AVG(i.unit_cost), 0) as avg_cost,
-        COALESCE(SUM(i.quantity_available * i.unit_cost), 0) as total_value,
-        COUNT(i.id) as inventory_batches
+        p.product_name,
+        p.category,
+        p.reorder_level,
+        COALESCE(SUM(i.quantity_remaining), 0) as current_stock,
+        COALESCE(AVG(i.unit_cost), 0) as avg_unit_cost,
+        COALESCE(SUM(i.quantity_remaining * i.unit_cost), 0) as total_value,
+        COUNT(i.id) as batch_count
       FROM products p
-      LEFT JOIN inventory i ON p.id = i.product_id
-      GROUP BY p.id, p.sku, p.name, p.description, p.min_stock, p.max_stock
-      ORDER BY p.sku
-    `
+      LEFT JOIN inventory i ON p.sku = i.sku
+      GROUP BY p.id, p.sku, p.product_name, p.category, p.reorder_level
+      ORDER BY p.product_name ASC
+    `)
 
-    const result = await query(inventoryQuery)
+    console.log(`✅ Found ${result.rows.length} inventory items`)
 
-    // Convert string numbers to actual numbers
-    const inventoryData = result.rows.map((row: any) => ({
+    // Format the data to ensure numbers are properly typed
+    const formattedData = result.rows.map((row) => ({
       ...row,
       current_stock: Number.parseInt(row.current_stock) || 0,
-      avg_cost: Number.parseFloat(row.avg_cost) || 0,
+      avg_unit_cost: Number.parseFloat(row.avg_unit_cost) || 0,
       total_value: Number.parseFloat(row.total_value) || 0,
-      min_stock: Number.parseInt(row.min_stock) || 0,
-      max_stock: Number.parseInt(row.max_stock) || 0,
-      inventory_batches: Number.parseInt(row.inventory_batches) || 0,
+      reorder_level: Number.parseInt(row.reorder_level) || 0,
+      batch_count: Number.parseInt(row.batch_count) || 0,
     }))
 
-    console.log(`✅ Successfully fetched ${inventoryData.length} inventory items`)
-
-    return NextResponse.json(inventoryData)
+    return NextResponse.json(formattedData)
   } catch (error) {
     console.error("❌ Error fetching inventory:", error)
-
     return NextResponse.json(
       {
         error: "Failed to fetch inventory",
@@ -56,33 +50,44 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { product_id, po_item_id, quantity_available, unit_cost, purchase_date } = body
+    console.log("📝 Creating inventory item:", body)
 
-    console.log("📦 Creating new inventory record:", body)
+    // Validate required fields
+    if (!body.sku || !body.product_name || !body.quantity_remaining || !body.unit_cost) {
+      return NextResponse.json(
+        { error: "Missing required fields: sku, product_name, quantity_remaining, unit_cost" },
+        { status: 400 },
+      )
+    }
 
-    const insertQuery = `
-      INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date)
-      VALUES ($1, $2, $3, $4, $5)
+    const result = await query(
+      `
+      INSERT INTO inventory (
+        sku, product_name, po_id, batch_date, quantity_received, 
+        quantity_remaining, unit_cost, location, expiry_date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `
+    `,
+      [
+        body.sku,
+        body.product_name,
+        body.po_id || null,
+        body.batch_date || new Date().toISOString().split("T")[0],
+        body.quantity_received || body.quantity_remaining,
+        body.quantity_remaining,
+        body.unit_cost,
+        body.location || null,
+        body.expiry_date || null,
+      ],
+    )
 
-    const result = await query(insertQuery, [
-      product_id,
-      po_item_id,
-      Number.parseInt(quantity_available),
-      Number.parseFloat(unit_cost),
-      purchase_date,
-    ])
-
-    console.log("✅ Successfully created inventory record")
-
+    console.log("✅ Inventory item created:", result.rows[0])
     return NextResponse.json(result.rows[0], { status: 201 })
   } catch (error) {
-    console.error("❌ Error creating inventory record:", error)
-
+    console.error("❌ Error creating inventory item:", error)
     return NextResponse.json(
       {
-        error: "Failed to create inventory record",
+        error: "Failed to create inventory item",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },

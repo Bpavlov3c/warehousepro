@@ -21,8 +21,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { toast } from "@/hooks/use-toast"
-import { Plus, MoreHorizontal, RefreshCw, Package, DollarSign, Clock, CheckCircle } from "lucide-react"
+import { toast } from "sonner"
+import { Plus, MoreHorizontal, RefreshCw, Package, DollarSign, Clock, CheckCircle, AlertTriangle } from "lucide-react"
 
 interface PurchaseOrder {
   id: number
@@ -32,8 +32,19 @@ interface PurchaseOrder {
   delivery_cost: number
   status: string
   notes: string
+  created_at: string
+  updated_at: string
+  items?: POItem[]
+}
+
+interface POItem {
+  id: number
+  po_id: number
+  sku: string
+  product_name: string
+  quantity: number
+  unit_cost: number
   total_cost: number
-  item_count: number
   created_at: string
 }
 
@@ -72,6 +83,7 @@ export default function PurchaseOrdersPage() {
     try {
       setLoading(true)
       setError(null)
+      console.log("🔄 Fetching purchase orders...")
 
       const response = await fetch("/api/purchase-orders")
 
@@ -80,11 +92,16 @@ export default function PurchaseOrdersPage() {
         throw new Error(`Failed to fetch purchase orders: ${response.status} ${errorData}`)
       }
 
-      const data = await response.json()
-      setPurchaseOrders(data)
+      const result = await response.json()
+      console.log("✅ Received purchase orders data:", result)
+
+      // Handle both array and object with data property
+      const ordersArray = Array.isArray(result) ? result : result.data || []
+      setPurchaseOrders(ordersArray)
     } catch (error) {
-      console.error("Error fetching purchase orders:", error)
+      console.error("❌ Error fetching purchase orders:", error)
       setError(error instanceof Error ? error.message : "Failed to fetch purchase orders")
+      setPurchaseOrders([]) // Ensure it's always an array
     } finally {
       setLoading(false)
     }
@@ -92,8 +109,10 @@ export default function PurchaseOrdersPage() {
 
   const updateStatus = async (id: number, newStatus: string) => {
     try {
+      console.log(`🔄 Updating status for order ${id} to ${newStatus}`)
+
       const response = await fetch(`/api/purchase-orders/${id}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
@@ -101,23 +120,18 @@ export default function PurchaseOrdersPage() {
       })
 
       if (!response.ok) {
-        throw new Error("Failed to update status")
+        const errorData = await response.text()
+        throw new Error(`Failed to update status: ${errorData}`)
       }
 
       // Update local state
       setPurchaseOrders((prev) => prev.map((po) => (po.id === id ? { ...po, status: newStatus } : po)))
 
-      toast({
-        title: "Status Updated",
-        description: `Purchase order status changed to ${newStatus}`,
-      })
+      toast.success(`Status updated to ${newStatus}`)
+      console.log("✅ Status updated successfully")
     } catch (error) {
-      console.error("Error updating status:", error)
-      toast({
-        title: "Error",
-        description: "Failed to update status",
-        variant: "destructive",
-      })
+      console.error("❌ Error updating status:", error)
+      toast.error("Failed to update status")
     }
   }
 
@@ -126,6 +140,8 @@ export default function PurchaseOrdersPage() {
     setIsSubmitting(true)
 
     try {
+      console.log("📝 Creating new purchase order:", formData)
+
       const response = await fetch("/api/purchase-orders", {
         method: "POST",
         headers: {
@@ -143,6 +159,8 @@ export default function PurchaseOrdersPage() {
       }
 
       const newPO = await response.json()
+      console.log("✅ Purchase order created:", newPO)
+
       setPurchaseOrders((prev) => [newPO, ...prev])
 
       setIsDialogOpen(false)
@@ -155,17 +173,10 @@ export default function PurchaseOrdersPage() {
         notes: "",
       })
 
-      toast({
-        title: "Success",
-        description: "Purchase order created successfully",
-      })
+      toast.success("Purchase order created successfully")
     } catch (error) {
-      console.error("Error creating purchase order:", error)
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to create purchase order",
-        variant: "destructive",
-      })
+      console.error("❌ Error creating purchase order:", error)
+      toast.error(error instanceof Error ? error.message : "Failed to create purchase order")
     } finally {
       setIsSubmitting(false)
     }
@@ -185,10 +196,18 @@ export default function PurchaseOrdersPage() {
   }
 
   const calculateStats = () => {
-    const total = purchaseOrders.length
-    const pending = purchaseOrders.filter((po) => po.status === "Pending").length
-    const delivered = purchaseOrders.filter((po) => po.status === "Delivered").length
-    const totalValue = purchaseOrders.reduce((sum, po) => sum + Number.parseFloat(po.total_cost?.toString() || "0"), 0)
+    // Ensure purchaseOrders is always an array
+    const orders = Array.isArray(purchaseOrders) ? purchaseOrders : []
+
+    const total = orders.length
+    const pending = orders.filter((po) => po.status === "Pending").length
+    const delivered = orders.filter((po) => po.status === "Delivered").length
+
+    const totalValue = orders.reduce((sum, po) => {
+      const itemsTotal = po.items?.reduce((itemSum, item) => itemSum + (item.total_cost || 0), 0) || 0
+      const deliveryCost = Number.parseFloat(po.delivery_cost?.toString() || "0")
+      return sum + itemsTotal + deliveryCost
+    }, 0)
 
     return { total, pending, delivered, totalValue }
   }
@@ -211,6 +230,7 @@ export default function PurchaseOrdersPage() {
       <div className="container mx-auto p-6">
         <Card>
           <CardContent className="flex flex-col items-center justify-center h-64">
+            <AlertTriangle className="h-8 w-8 text-red-500 mb-4" />
             <p className="text-red-600 mb-4">{error}</p>
             <Button onClick={fetchPurchaseOrders}>
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -257,6 +277,7 @@ export default function PurchaseOrdersPage() {
                       value={formData.po_number}
                       onChange={(e) => setFormData((prev) => ({ ...prev, po_number: e.target.value }))}
                       className="col-span-3"
+                      placeholder="PO-2024-001"
                       required
                     />
                   </div>
@@ -269,6 +290,7 @@ export default function PurchaseOrdersPage() {
                       value={formData.supplier_name}
                       onChange={(e) => setFormData((prev) => ({ ...prev, supplier_name: e.target.value }))}
                       className="col-span-3"
+                      placeholder="Supplier Inc."
                       required
                     />
                   </div>
@@ -293,9 +315,11 @@ export default function PurchaseOrdersPage() {
                       id="delivery_cost"
                       type="number"
                       step="0.01"
+                      min="0"
                       value={formData.delivery_cost}
                       onChange={(e) => setFormData((prev) => ({ ...prev, delivery_cost: e.target.value }))}
                       className="col-span-3"
+                      placeholder="0.00"
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
@@ -327,6 +351,7 @@ export default function PurchaseOrdersPage() {
                       onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
                       className="col-span-3"
                       rows={3}
+                      placeholder="Additional notes..."
                     />
                   </div>
                 </div>
@@ -361,7 +386,7 @@ export default function PurchaseOrdersPage() {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.pending}</div>
+            <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
           </CardContent>
         </Card>
         <Card>
@@ -370,7 +395,7 @@ export default function PurchaseOrdersPage() {
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.delivered}</div>
+            <div className="text-2xl font-bold text-green-600">{stats.delivered}</div>
           </CardContent>
         </Card>
         <Card>
@@ -412,52 +437,59 @@ export default function PurchaseOrdersPage() {
                   <TableHead>Date</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Delivery Cost</TableHead>
-                  <TableHead>Total Cost</TableHead>
+                  <TableHead>Total Value</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {purchaseOrders.map((po) => (
-                  <TableRow key={po.id}>
-                    <TableCell className="font-medium">{po.po_number}</TableCell>
-                    <TableCell>{po.supplier_name}</TableCell>
-                    <TableCell>{formatDate(po.po_date)}</TableCell>
-                    <TableCell>{po.item_count || 0}</TableCell>
-                    <TableCell>${formatAmount(po.delivery_cost)}</TableCell>
-                    <TableCell>${formatAmount(po.total_cost)}</TableCell>
-                    <TableCell>
-                      <Badge
-                        className={statusColors[po.status as keyof typeof statusColors] || "bg-gray-100 text-gray-800"}
-                      >
-                        {po.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => updateStatus(po.id, "Pending")}>
-                            Set to Pending
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => updateStatus(po.id, "Approved")}>
-                            Set to Approved
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => updateStatus(po.id, "Delivered")}>
-                            Set to Delivered
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => updateStatus(po.id, "Cancelled")}>
-                            Set to Cancelled
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {purchaseOrders.map((po) => {
+                  const itemsTotal = po.items?.reduce((sum, item) => sum + (item.total_cost || 0), 0) || 0
+                  const totalValue = itemsTotal + (po.delivery_cost || 0)
+
+                  return (
+                    <TableRow key={po.id}>
+                      <TableCell className="font-medium">{po.po_number}</TableCell>
+                      <TableCell>{po.supplier_name}</TableCell>
+                      <TableCell>{formatDate(po.po_date)}</TableCell>
+                      <TableCell>{po.items?.length || 0} items</TableCell>
+                      <TableCell>${formatAmount(po.delivery_cost)}</TableCell>
+                      <TableCell className="font-medium">${formatAmount(totalValue)}</TableCell>
+                      <TableCell>
+                        <Badge
+                          className={
+                            statusColors[po.status as keyof typeof statusColors] || "bg-gray-100 text-gray-800"
+                          }
+                        >
+                          {po.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => updateStatus(po.id, "Pending")}>
+                              Set to Pending
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => updateStatus(po.id, "Approved")}>
+                              Set to Approved
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => updateStatus(po.id, "Delivered")}>
+                              Set to Delivered
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => updateStatus(po.id, "Cancelled")}>
+                              Set to Cancelled
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           )}
