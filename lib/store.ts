@@ -84,40 +84,6 @@ interface InventoryLayer {
   purchaseDate: string
 }
 
-// Mock store management functions
-export interface Store {
-  id: number
-  name: string
-  type: "shopify" | "woocommerce" | "custom"
-  status: "active" | "inactive"
-  lastSync: string
-}
-
-export const mockStores: Store[] = [
-  {
-    id: 1,
-    name: "TechGadgets Pro",
-    type: "shopify",
-    status: "active",
-    lastSync: "2024-01-15T10:30:00Z",
-  },
-  {
-    id: 2,
-    name: "Electronics World",
-    type: "shopify",
-    status: "active",
-    lastSync: "2024-01-16T14:20:00Z",
-  },
-]
-
-export function getStores(): Store[] {
-  return mockStores
-}
-
-export function getStoreById(id: number): Store | undefined {
-  return mockStores.find((store) => store.id === id)
-}
-
 class DataStore {
   private purchaseOrders: PurchaseOrder[] = []
   private inventory: Map<string, InventoryItem> = new Map()
@@ -669,4 +635,4 @@ class DataStore {
 export const dataStore = new DataStore()
 
 // Export types
-export type { PurchaseOrder, POItem, InventoryItem, ShopifyStore, ShopifyOrder, ShopifyOrderItem, Store }
+export type { PurchaseOrder, POItem, InventoryItem, ShopifyStore, ShopifyOrder, ShopifyOrderItem }
