@@ -38,7 +38,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { Plus, Edit, Trash2, Package, Calendar, DollarSign, AlertTriangle, FileX } from "lucide-react"
+import { Plus, Edit, Trash2, Package, Calendar, AlertTriangle, FileX, Truck } from "lucide-react"
 import { toast } from "sonner"
 
 interface PurchaseOrder {
@@ -46,19 +46,30 @@ interface PurchaseOrder {
   po_number: string
   supplier_name: string
   po_date: string
-  expected_delivery?: string
-  status: "pending" | "approved" | "received" | "cancelled"
-  total_amount: number
+  delivery_cost: number
+  status: "Pending" | "Approved" | "Delivered" | "Cancelled"
   notes?: string
+  items?: POItem[]
   created_at: string
   updated_at: string
 }
 
+interface POItem {
+  id: number
+  po_id: number
+  sku: string
+  product_name: string
+  quantity: number
+  unit_cost: number
+  total_cost: number
+  created_at: string
+}
+
 const statusColors = {
-  pending: "bg-yellow-100 text-yellow-800",
-  approved: "bg-blue-100 text-blue-800",
-  received: "bg-green-100 text-green-800",
-  cancelled: "bg-red-100 text-red-800",
+  Pending: "bg-yellow-100 text-yellow-800",
+  Approved: "bg-blue-100 text-blue-800",
+  Delivered: "bg-green-100 text-green-800",
+  Cancelled: "bg-red-100 text-red-800",
 }
 
 export default function PurchaseOrdersPage() {
@@ -76,9 +87,8 @@ export default function PurchaseOrdersPage() {
     po_number: "",
     supplier_name: "",
     po_date: "",
-    expected_delivery: "",
-    status: "pending" as const,
-    total_amount: "",
+    delivery_cost: "",
+    status: "Pending" as const,
     notes: "",
   })
 
@@ -145,8 +155,8 @@ export default function PurchaseOrdersPage() {
     if (!formData.po_date) {
       errors.po_date = "PO Date is required"
     }
-    if (formData.total_amount && isNaN(Number.parseFloat(formData.total_amount))) {
-      errors.total_amount = "Total Amount must be a valid number"
+    if (formData.delivery_cost && isNaN(Number.parseFloat(formData.delivery_cost))) {
+      errors.delivery_cost = "Delivery Cost must be a valid number"
     }
 
     setFormErrors(errors)
@@ -158,9 +168,8 @@ export default function PurchaseOrdersPage() {
       po_number: "",
       supplier_name: "",
       po_date: "",
-      expected_delivery: "",
-      status: "pending",
-      total_amount: "",
+      delivery_cost: "",
+      status: "Pending",
       notes: "",
     })
     setEditingOrder(null)
@@ -188,7 +197,7 @@ export default function PurchaseOrdersPage() {
         },
         body: JSON.stringify({
           ...formData,
-          total_amount: formData.total_amount ? Number.parseFloat(formData.total_amount) : 0,
+          delivery_cost: formData.delivery_cost ? Number.parseFloat(formData.delivery_cost) : 0,
         }),
       })
 
@@ -219,9 +228,8 @@ export default function PurchaseOrdersPage() {
       po_number: order.po_number,
       supplier_name: order.supplier_name,
       po_date: order.po_date,
-      expected_delivery: order.expected_delivery || "",
+      delivery_cost: order.delivery_cost.toString(),
       status: order.status,
-      total_amount: order.total_amount.toString(),
       notes: order.notes || "",
     })
     setFormErrors({})
@@ -254,6 +262,10 @@ export default function PurchaseOrdersPage() {
   const formatAmount = (amount: number | null | undefined): string => {
     const safeAmount = amount || 0
     return safeAmount.toFixed(2)
+  }
+
+  const calculateTotalValue = () => {
+    return purchaseOrders.reduce((sum, po) => sum + (po.delivery_cost || 0), 0)
   }
 
   if (loading) {
@@ -345,48 +357,37 @@ export default function PurchaseOrdersPage() {
                   {formErrors.po_date && <p className="text-red-500 text-sm mt-1">{formErrors.po_date}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="expected_delivery">Expected Delivery</Label>
+                  <Label htmlFor="delivery_cost">Delivery Cost</Label>
                   <Input
-                    id="expected_delivery"
-                    type="date"
-                    value={formData.expected_delivery}
-                    onChange={(e) => setFormData({ ...formData, expected_delivery: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="status">Status</Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value: any) => setFormData({ ...formData, status: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="approved">Approved</SelectItem>
-                      <SelectItem value="received">Received</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="total_amount">Total Amount</Label>
-                  <Input
-                    id="total_amount"
+                    id="delivery_cost"
                     type="number"
                     step="0.01"
                     min="0"
-                    value={formData.total_amount}
-                    onChange={(e) => setFormData({ ...formData, total_amount: e.target.value })}
+                    value={formData.delivery_cost}
+                    onChange={(e) => setFormData({ ...formData, delivery_cost: e.target.value })}
                     placeholder="0.00"
-                    className={formErrors.total_amount ? "border-red-500" : ""}
+                    className={formErrors.delivery_cost ? "border-red-500" : ""}
                   />
-                  {formErrors.total_amount && <p className="text-red-500 text-sm mt-1">{formErrors.total_amount}</p>}
+                  {formErrors.delivery_cost && <p className="text-red-500 text-sm mt-1">{formErrors.delivery_cost}</p>}
                 </div>
+              </div>
+
+              <div>
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value: any) => setFormData({ ...formData, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Pending">Pending</SelectItem>
+                    <SelectItem value="Approved">Approved</SelectItem>
+                    <SelectItem value="Delivered">Delivered</SelectItem>
+                    <SelectItem value="Cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>
@@ -428,27 +429,25 @@ export default function PurchaseOrdersPage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "pending").length}</div>
+            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "Pending").length}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Total Delivery Cost</CardTitle>
+            <Truck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              ${formatAmount(purchaseOrders.reduce((sum, po) => sum + (po.total_amount || 0), 0))}
-            </div>
+            <div className="text-2xl font-bold">${formatAmount(calculateTotalValue())}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Received</CardTitle>
+            <CardTitle className="text-sm font-medium">Delivered</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "received").length}</div>
+            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "Delivered").length}</div>
           </CardContent>
         </Card>
       </div>
@@ -486,9 +485,9 @@ export default function PurchaseOrdersPage() {
                       <TableHead>PO Number</TableHead>
                       <TableHead>Supplier</TableHead>
                       <TableHead>PO Date</TableHead>
-                      <TableHead>Expected Delivery</TableHead>
+                      <TableHead>Delivery Cost</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Total Amount</TableHead>
+                      <TableHead>Items</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -498,15 +497,11 @@ export default function PurchaseOrdersPage() {
                         <TableCell className="font-medium">{order.po_number}</TableCell>
                         <TableCell>{order.supplier_name}</TableCell>
                         <TableCell>{new Date(order.po_date).toLocaleDateString()}</TableCell>
+                        <TableCell>${formatAmount(order.delivery_cost)}</TableCell>
                         <TableCell>
-                          {order.expected_delivery ? new Date(order.expected_delivery).toLocaleDateString() : "Not set"}
+                          <Badge className={statusColors[order.status]}>{order.status}</Badge>
                         </TableCell>
-                        <TableCell>
-                          <Badge className={statusColors[order.status]}>
-                            {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>${formatAmount(order.total_amount)}</TableCell>
+                        <TableCell>{order.items ? order.items.length : 0} items</TableCell>
                         <TableCell>
                           <div className="flex space-x-2">
                             <Button variant="outline" size="sm" onClick={() => handleEdit(order)}>

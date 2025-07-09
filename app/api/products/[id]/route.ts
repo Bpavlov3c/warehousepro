@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { PurchaseOrderStore } from "@/lib/db-store"
+import { ProductStore } from "@/lib/db-store"
 
 // Add CORS headers
 function addCorsHeaders(response: NextResponse) {
@@ -21,18 +21,18 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return addCorsHeaders(response)
     }
 
-    const purchaseOrder = await PurchaseOrderStore.getById(id)
-    if (!purchaseOrder) {
-      const response = NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
+    const product = await ProductStore.getById(id)
+    if (!product) {
+      const response = NextResponse.json({ error: "Product not found" }, { status: 404 })
       return addCorsHeaders(response)
     }
 
-    const response = NextResponse.json(purchaseOrder)
+    const response = NextResponse.json(product)
     return addCorsHeaders(response)
   } catch (error) {
-    console.error("❌ Error fetching purchase order:", error)
+    console.error("❌ Error fetching product:", error)
     const response = NextResponse.json(
-      { error: "Failed to fetch purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to fetch product", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
     return addCorsHeaders(response)
@@ -48,37 +48,37 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     const body = await request.json()
-    console.log(`📝 Updating purchase order ${id}:`, body)
+    console.log(`📝 Updating product ${id}:`, body)
 
-    // Convert total_amount and delivery_cost to number if provided
-    if (body.total_amount !== undefined) {
-      body.total_amount = Number.parseFloat(body.total_amount) || 0
+    // Convert numeric fields
+    if (body.min_stock !== undefined) {
+      body.min_stock = Number.parseInt(body.min_stock) || 0
     }
-    if (body.delivery_cost !== undefined) {
-      body.delivery_cost = Number.parseFloat(body.delivery_cost) || 0
+    if (body.max_stock !== undefined) {
+      body.max_stock = Number.parseInt(body.max_stock) || 100
     }
 
-    const updatedPurchaseOrder = await PurchaseOrderStore.update(id, body)
+    const updatedProduct = await ProductStore.update(id, body)
 
-    if (!updatedPurchaseOrder) {
-      const response = NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
+    if (!updatedProduct) {
+      const response = NextResponse.json({ error: "Product not found" }, { status: 404 })
       return addCorsHeaders(response)
     }
 
-    console.log("✅ Purchase order updated:", updatedPurchaseOrder.id)
-    const response = NextResponse.json(updatedPurchaseOrder)
+    console.log("✅ Product updated:", updatedProduct.id)
+    const response = NextResponse.json(updatedProduct)
     return addCorsHeaders(response)
   } catch (error) {
-    console.error("❌ Error updating purchase order:", error)
+    console.error("❌ Error updating product:", error)
 
     // Handle unique constraint violation
     if (error instanceof Error && error.message.includes("duplicate key")) {
-      const response = NextResponse.json({ error: "PO Number already exists" }, { status: 409 })
+      const response = NextResponse.json({ error: "SKU already exists" }, { status: 409 })
       return addCorsHeaders(response)
     }
 
     const response = NextResponse.json(
-      { error: "Failed to update purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to update product", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
     return addCorsHeaders(response)
@@ -93,21 +93,21 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return addCorsHeaders(response)
     }
 
-    console.log(`🗑️ Deleting purchase order ${id}`)
-    const deleted = await PurchaseOrderStore.delete(id)
+    console.log(`🗑️ Deleting product ${id}`)
+    const deleted = await ProductStore.delete(id)
 
     if (!deleted) {
-      const response = NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
+      const response = NextResponse.json({ error: "Product not found" }, { status: 404 })
       return addCorsHeaders(response)
     }
 
-    console.log("✅ Purchase order deleted:", id)
-    const response = NextResponse.json({ message: "Purchase order deleted successfully" })
+    console.log("✅ Product deleted:", id)
+    const response = NextResponse.json({ message: "Product deleted successfully" })
     return addCorsHeaders(response)
   } catch (error) {
-    console.error("❌ Error deleting purchase order:", error)
+    console.error("❌ Error deleting product:", error)
     const response = NextResponse.json(
-      { error: "Failed to delete purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to delete product", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
     return addCorsHeaders(response)

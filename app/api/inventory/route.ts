@@ -1,27 +1,41 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { InventoryStore } from "@/lib/db-store"
 
+// Add CORS headers
+function addCorsHeaders(response: NextResponse) {
+  response.headers.set("Access-Control-Allow-Origin", "*")
+  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+  return response
+}
+
+export async function OPTIONS() {
+  return addCorsHeaders(new NextResponse(null, { status: 200 }))
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const page = Number.parseInt(searchParams.get("page") || "1")
     const limit = Number.parseInt(searchParams.get("limit") || "10")
 
-    console.log(`📦 Fetching inventory items - Page: ${page}, Limit: ${limit}`)
+    console.log(`📦 Fetching inventory summary - Page: ${page}, Limit: ${limit}`)
 
-    const result = await InventoryStore.getAll(page, limit)
+    const result = await InventoryStore.getInventorySummary(page, limit)
     console.log(`✅ Found ${result.data.length} inventory items (${result.total} total)`)
 
-    return NextResponse.json(result)
+    const response = NextResponse.json(result)
+    return addCorsHeaders(response)
   } catch (error) {
-    console.error("❌ Error fetching inventory items:", error)
-    return NextResponse.json(
+    console.error("❌ Error fetching inventory:", error)
+    const response = NextResponse.json(
       {
-        error: "Failed to fetch inventory items",
+        error: "Failed to fetch inventory",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
+    return addCorsHeaders(response)
   }
 }
 

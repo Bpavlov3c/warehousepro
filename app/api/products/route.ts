@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { PurchaseOrderStore } from "@/lib/db-store"
+import { ProductStore } from "@/lib/db-store"
 
 // Add CORS headers
 function addCorsHeaders(response: NextResponse) {
@@ -19,18 +19,18 @@ export async function GET(request: NextRequest) {
     const page = Number.parseInt(searchParams.get("page") || "1")
     const limit = Number.parseInt(searchParams.get("limit") || "10")
 
-    console.log(`📦 Fetching purchase orders - Page: ${page}, Limit: ${limit}`)
+    console.log(`📦 Fetching products - Page: ${page}, Limit: ${limit}`)
 
-    const result = await PurchaseOrderStore.getAll(page, limit)
-    console.log(`✅ Found ${result.data.length} purchase orders (${result.total} total)`)
+    const result = await ProductStore.getAll(page, limit)
+    console.log(`✅ Found ${result.data.length} products (${result.total} total)`)
 
     const response = NextResponse.json(result)
     return addCorsHeaders(response)
   } catch (error) {
-    console.error("❌ Error fetching purchase orders:", error)
+    console.error("❌ Error fetching products:", error)
     const response = NextResponse.json(
       {
-        error: "Failed to fetch purchase orders",
+        error: "Failed to fetch products",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
@@ -42,41 +42,36 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log("📝 Creating purchase order:", body)
+    console.log("📝 Creating product:", body)
 
     // Validate required fields
-    if (!body.po_number || !body.supplier_name || !body.po_date) {
-      const response = NextResponse.json(
-        { error: "Missing required fields: po_number, supplier_name, po_date" },
-        { status: 400 },
-      )
+    if (!body.sku || !body.name) {
+      const response = NextResponse.json({ error: "Missing required fields: sku, name" }, { status: 400 })
       return addCorsHeaders(response)
     }
 
-    const purchaseOrder = await PurchaseOrderStore.create({
-      po_number: body.po_number,
-      supplier_name: body.supplier_name,
-      po_date: body.po_date,
-      delivery_cost: Number.parseFloat(body.delivery_cost) || 0,
-      status: body.status || "Pending",
-      notes: body.notes,
-      items: body.items || [],
+    const product = await ProductStore.create({
+      sku: body.sku,
+      name: body.name,
+      description: body.description,
+      min_stock: Number.parseInt(body.min_stock) || 0,
+      max_stock: Number.parseInt(body.max_stock) || 100,
     })
 
-    console.log("✅ Purchase order created:", purchaseOrder.id)
-    const response = NextResponse.json(purchaseOrder, { status: 201 })
+    console.log("✅ Product created:", product.id)
+    const response = NextResponse.json(product, { status: 201 })
     return addCorsHeaders(response)
   } catch (error) {
-    console.error("❌ Error creating purchase order:", error)
+    console.error("❌ Error creating product:", error)
 
     // Handle unique constraint violation
     if (error instanceof Error && error.message.includes("duplicate key")) {
-      const response = NextResponse.json({ error: "PO Number already exists" }, { status: 409 })
+      const response = NextResponse.json({ error: "SKU already exists" }, { status: 409 })
       return addCorsHeaders(response)
     }
 
     const response = NextResponse.json(
-      { error: "Failed to create purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to create product", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
     return addCorsHeaders(response)
