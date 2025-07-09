@@ -1,36 +1,66 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAllShopifyStores, createShopifyStore } from "@/lib/db-store"
+import { ShopifyStoreStore } from "@/lib/db-store"
+
+// Add CORS headers
+function addCorsHeaders(response: NextResponse) {
+  response.headers.set("Access-Control-Allow-Origin", "*")
+  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+  return response
+}
+
+export async function OPTIONS() {
+  return addCorsHeaders(new NextResponse(null, { status: 200 }))
+}
 
 export async function GET() {
   try {
-    const stores = await getAllShopifyStores()
-    return NextResponse.json(stores)
+    console.log("🏪 Fetching Shopify stores...")
+    const stores = await ShopifyStoreStore.getAll()
+    console.log(`✅ Found ${stores.length} Shopify stores`)
+
+    const response = NextResponse.json(stores)
+    return addCorsHeaders(response)
   } catch (error) {
-    console.error("Error fetching Shopify stores:", error)
-    return NextResponse.json({ error: "Failed to fetch Shopify stores" }, { status: 500 })
+    console.error("❌ Error fetching Shopify stores:", error)
+    const response = NextResponse.json(
+      { error: "Failed to fetch Shopify stores", details: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 },
+    )
+    return addCorsHeaders(response)
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    console.log("📝 Creating Shopify store:", body)
 
     // Validate required fields
-    if (!body.store_name || !body.shop_domain) {
-      return NextResponse.json({ error: "Missing required fields: store_name, shop_domain" }, { status: 400 })
+    if (!body.store_name || !body.shop_domain || !body.access_token) {
+      const response = NextResponse.json(
+        { error: "Missing required fields: store_name, shop_domain, access_token" },
+        { status: 400 },
+      )
+      return addCorsHeaders(response)
     }
 
-    const store = await createShopifyStore({
+    const store = await ShopifyStoreStore.create({
       store_name: body.store_name,
       shop_domain: body.shop_domain,
       access_token: body.access_token,
       is_active: body.is_active !== undefined ? body.is_active : true,
-      last_sync: body.last_sync,
     })
 
-    return NextResponse.json(store, { status: 201 })
+    console.log("✅ Shopify store created:", store.id)
+    const response = NextResponse.json(store, { status: 201 })
+    return addCorsHeaders(response)
   } catch (error) {
-    console.error("Error creating Shopify store:", error)
-    return NextResponse.json({ error: "Failed to create Shopify store" }, { status: 500 })
+    console.error("❌ Error creating Shopify store:", error)
+    const response = NextResponse.json(
+      { error: "Failed to create Shopify store", details: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 },
+    )
+    return addCorsHeaders(response)
   }
 }

@@ -1,43 +1,38 @@
 import { NextResponse } from "next/server"
 
+// Add CORS headers
+function addCorsHeaders(response: NextResponse) {
+  response.headers.set("Access-Control-Allow-Origin", "*")
+  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+  return response
+}
+
+export async function OPTIONS() {
+  return addCorsHeaders(new NextResponse(null, { status: 200 }))
+}
+
 export async function GET() {
   try {
-    // This is a test endpoint to simulate Shopify API calls
-    const mockShopifyData = {
-      shop: {
-        name: "Test Store",
-        domain: "test-store.myshopify.com",
-        email: "test@example.com",
-      },
-      orders: [
-        {
-          id: 1001,
-          order_number: "#1001",
-          total_price: "149.99",
-          created_at: new Date().toISOString(),
-          customer: {
-            email: "customer@example.com",
-            first_name: "John",
-            last_name: "Doe",
-          },
-        },
-      ],
+    const testResult = {
+      status: "success",
+      message: "Shopify API test endpoint working",
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || "development",
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "Shopify API test successful",
-      data: mockShopifyData,
-    })
+    console.log("✅ Shopify test endpoint called")
+    const response = NextResponse.json(testResult)
+    return addCorsHeaders(response)
   } catch (error) {
-    console.error("Shopify API test error:", error)
-    return NextResponse.json(
+    console.error("❌ Shopify test error:", error)
+    const response = NextResponse.json(
       {
-        success: false,
-        error: "Shopify API test failed",
-        details: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+        error: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
+    return addCorsHeaders(response)
   }
 }

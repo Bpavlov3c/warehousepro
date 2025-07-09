@@ -4,11 +4,10 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "db:create": "psql -h localhost -U warehouse_user -d postgres -f scripts/create-database.sql",
-    "db:reset": "npm run db:setup && npm run db:create && npm run db:seed",
-    "db:seed": "psql -h localhost -U warehouse_user -d postgres -f scripts/seed-sample-data.sql",
-    "db:setup": "psql -h localhost -U postgres -f scripts/setup-database.sql",
-    "db:test": "tsx scripts/test-db.ts",
+    "db:create": "npx tsx scripts/create-tables.ts",
+    "db:reset": "npm run db:create && npm run db:seed",
+    "db:seed": "npx tsx scripts/seed-data.ts",
+    "db:test": "npx tsx scripts/test-db.ts",
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start"
@@ -63,6 +62,7 @@
     "sonner": "latest",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.7.0",
     "vaul": "latest",
     "zod": "^3.22.4"
   },
@@ -76,7 +76,6 @@
     "eslint-config-next": "14.1.0",
     "postcss": "^8.5",
     "tailwindcss": "^3.3.0",
-    "tsx": "^4.7.0",
     "typescript": "^5"
   }
 }

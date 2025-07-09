@@ -1,41 +1,70 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAllInventoryItems, createInventoryItem } from "@/lib/db-store"
+import { InventoryStore } from "@/lib/db-store"
+
+// Add CORS headers
+function addCorsHeaders(response: NextResponse) {
+  response.headers.set("Access-Control-Allow-Origin", "*")
+  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+  return response
+}
+
+export async function OPTIONS() {
+  return addCorsHeaders(new NextResponse(null, { status: 200 }))
+}
 
 export async function GET() {
   try {
-    const inventoryItems = await getAllInventoryItems()
-    return NextResponse.json(inventoryItems)
+    console.log("📋 Fetching inventory items...")
+    const inventoryItems = await InventoryStore.getAll()
+    console.log(`✅ Found ${inventoryItems.length} inventory items`)
+
+    const response = NextResponse.json(inventoryItems)
+    return addCorsHeaders(response)
   } catch (error) {
-    console.error("Error fetching inventory items:", error)
-    return NextResponse.json({ error: "Failed to fetch inventory items" }, { status: 500 })
+    console.error("❌ Error fetching inventory items:", error)
+    const response = NextResponse.json(
+      { error: "Failed to fetch inventory items", details: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 },
+    )
+    return addCorsHeaders(response)
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    console.log("📝 Creating inventory item:", body)
 
     // Validate required fields
-    if (!body.sku || !body.product_name) {
-      return NextResponse.json({ error: "Missing required fields: sku, product_name" }, { status: 400 })
+    if (!body.sku || !body.name || !body.category || body.unit_price === undefined) {
+      const response = NextResponse.json(
+        { error: "Missing required fields: sku, name, category, unit_price" },
+        { status: 400 },
+      )
+      return addCorsHeaders(response)
     }
 
-    const inventoryItem = await createInventoryItem({
+    const inventoryItem = await InventoryStore.create({
       sku: body.sku,
-      product_name: body.product_name,
+      name: body.name,
       description: body.description,
       category: body.category,
-      quantity_on_hand: body.quantity_on_hand || 0,
-      quantity_reserved: body.quantity_reserved || 0,
-      reorder_point: body.reorder_point || 10,
-      unit_cost: body.unit_cost || 0,
-      selling_price: body.selling_price || 0,
-      location: body.location,
+      quantity: body.quantity || 0,
+      unit_price: body.unit_price,
+      reorder_level: body.reorder_level || 10,
+      supplier: body.supplier || "",
     })
 
-    return NextResponse.json(inventoryItem, { status: 201 })
+    console.log("✅ Inventory item created:", inventoryItem.id)
+    const response = NextResponse.json(inventoryItem, { status: 201 })
+    return addCorsHeaders(response)
   } catch (error) {
-    console.error("Error creating inventory item:", error)
-    return NextResponse.json({ error: "Failed to create inventory item" }, { status: 500 })
+    console.error("❌ Error creating inventory item:", error)
+    const response = NextResponse.json(
+      { error: "Failed to create inventory item", details: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 },
+    )
+    return addCorsHeaders(response)
   }
 }

@@ -1,504 +1,308 @@
-import { query, transaction } from "./database"
-import type { PoolClient } from "pg"
+import { executeQuery } from "./database"
 
-// Types
+// Purchase Order interfaces
 export interface PurchaseOrder {
-  id: string
+  id: number
   po_number: string
   supplier_name: string
   order_date: string
   expected_delivery?: string
-  status: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled"
-  total_cost: number
+  status: "pending" | "approved" | "received" | "cancelled"
+  total_amount: number
   notes?: string
   created_at: string
   updated_at: string
 }
 
-export interface PurchaseOrderItem {
-  id: string
-  purchase_order_id: string
-  product_name: string
-  sku?: string
-  quantity: number
-  unit_cost: number
-  total_cost: number
-  created_at: string
-}
-
-export interface InventoryItem {
-  id: string
-  sku: string
-  product_name: string
-  description?: string
-  category?: string
-  quantity_on_hand: number
-  quantity_reserved: number
-  quantity_available: number
-  reorder_point: number
-  unit_cost: number
-  selling_price: number
-  location?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface ShopifyStore {
-  id: string
-  store_name: string
-  shop_domain: string
-  access_token?: string
-  is_active: boolean
-  last_sync?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface ShopifyOrder {
-  id: string
-  shopify_order_id: number
-  store_id: string
-  order_number: string
-  customer_email?: string
-  customer_name?: string
-  total_price: number
-  currency: string
-  fulfillment_status?: string
-  financial_status?: string
+export interface CreatePurchaseOrderData {
+  po_number: string
+  supplier_name: string
   order_date: string
-  shipping_address?: any
-  line_items?: any
-  created_at: string
-  updated_at: string
+  expected_delivery?: string
+  status?: "pending" | "approved" | "received" | "cancelled"
+  total_amount?: number
+  notes?: string
 }
 
-// Purchase Orders
-export async function getAllPurchaseOrders(): Promise<PurchaseOrder[]> {
-  const result = await query(`
-    SELECT * FROM purchase_orders 
-    ORDER BY created_at DESC
-  `)
-  return result.rows
-}
-
-export async function getPurchaseOrderById(id: string): Promise<PurchaseOrder | null> {
-  const result = await query("SELECT * FROM purchase_orders WHERE id = $1", [id])
-  return result.rows[0] || null
-}
-
-export async function createPurchaseOrder(
-  data: Omit<PurchaseOrder, "id" | "created_at" | "updated_at" | "total_cost">,
-): Promise<PurchaseOrder> {
-  const result = await query(
-    `
-    INSERT INTO purchase_orders (po_number, supplier_name, order_date, expected_delivery, status, notes)
-    VALUES ($1, $2, $3, $4, $5, $6)
-    RETURNING *
-  `,
-    [data.po_number, data.supplier_name, data.order_date, data.expected_delivery, data.status, data.notes],
-  )
-
-  return result.rows[0]
-}
-
-export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>): Promise<PurchaseOrder | null> {
-  const fields = []
-  const values = []
-  let paramCount = 1
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key !== "id" && key !== "created_at" && key !== "updated_at" && value !== undefined) {
-      fields.push(`${key} = $${paramCount}`)
-      values.push(value)
-      paramCount++
-    }
+// Purchase Order Store
+export class PurchaseOrderStore {
+  static async getAll(): Promise<PurchaseOrder[]> {
+    const result = await executeQuery(`
+      SELECT * FROM purchase_orders 
+      ORDER BY created_at DESC
+    `)
+    return result.rows
   }
 
-  if (fields.length === 0) return null
-
-  values.push(id)
-  const result = await query(
-    `
-    UPDATE purchase_orders 
-    SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $${paramCount}
-    RETURNING *
-  `,
-    values,
-  )
-
-  return result.rows[0] || null
-}
-
-export async function deletePurchaseOrder(id: string): Promise<boolean> {
-  const result = await query("DELETE FROM purchase_orders WHERE id = $1", [id])
-  return result.rowCount > 0
-}
-
-// Purchase Order Items
-export async function getPurchaseOrderItems(purchaseOrderId: string): Promise<PurchaseOrderItem[]> {
-  const result = await query(
-    `
-    SELECT * FROM purchase_order_items 
-    WHERE purchase_order_id = $1 
-    ORDER BY created_at ASC
-  `,
-    [purchaseOrderId],
-  )
-  return result.rows
-}
-
-export async function createPurchaseOrderItem(
-  data: Omit<PurchaseOrderItem, "id" | "created_at" | "total_cost">,
-): Promise<PurchaseOrderItem> {
-  const result = await query(
-    `
-    INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
-  `,
-    [data.purchase_order_id, data.product_name, data.sku, data.quantity, data.unit_cost],
-  )
-
-  return result.rows[0]
-}
-
-export async function updatePurchaseOrderItem(
-  id: string,
-  data: Partial<PurchaseOrderItem>,
-): Promise<PurchaseOrderItem | null> {
-  const fields = []
-  const values = []
-  let paramCount = 1
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key !== "id" && key !== "created_at" && key !== "total_cost" && value !== undefined) {
-      fields.push(`${key} = $${paramCount}`)
-      values.push(value)
-      paramCount++
-    }
+  static async getById(id: number): Promise<PurchaseOrder | null> {
+    const result = await executeQuery("SELECT * FROM purchase_orders WHERE id = $1", [id])
+    return result.rows[0] || null
   }
 
-  if (fields.length === 0) return null
-
-  values.push(id)
-  const result = await query(
-    `
-    UPDATE purchase_order_items 
-    SET ${fields.join(", ")}
-    WHERE id = $${paramCount}
-    RETURNING *
-  `,
-    values,
-  )
-
-  return result.rows[0] || null
-}
-
-export async function deletePurchaseOrderItem(id: string): Promise<boolean> {
-  const result = await query("DELETE FROM purchase_order_items WHERE id = $1", [id])
-  return result.rowCount > 0
-}
-
-// Inventory
-export async function getAllInventoryItems(): Promise<InventoryItem[]> {
-  const result = await query(`
-    SELECT * FROM inventory 
-    ORDER BY product_name ASC
-  `)
-  return result.rows
-}
-
-export async function getInventoryItemById(id: string): Promise<InventoryItem | null> {
-  const result = await query("SELECT * FROM inventory WHERE id = $1", [id])
-  return result.rows[0] || null
-}
-
-export async function getInventoryItemBySku(sku: string): Promise<InventoryItem | null> {
-  const result = await query("SELECT * FROM inventory WHERE sku = $1", [sku])
-  return result.rows[0] || null
-}
-
-export async function createInventoryItem(
-  data: Omit<InventoryItem, "id" | "created_at" | "updated_at" | "quantity_available">,
-): Promise<InventoryItem> {
-  const result = await query(
-    `
-    INSERT INTO inventory (sku, product_name, description, category, quantity_on_hand, quantity_reserved, reorder_point, unit_cost, selling_price, location)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    RETURNING *
-  `,
-    [
-      data.sku,
-      data.product_name,
-      data.description,
-      data.category,
-      data.quantity_on_hand,
-      data.quantity_reserved,
-      data.reorder_point,
-      data.unit_cost,
-      data.selling_price,
-      data.location,
-    ],
-  )
-
-  return result.rows[0]
-}
-
-export async function updateInventoryItem(id: string, data: Partial<InventoryItem>): Promise<InventoryItem | null> {
-  const fields = []
-  const values = []
-  let paramCount = 1
-
-  for (const [key, value] of Object.entries(data)) {
-    if (
-      key !== "id" &&
-      key !== "created_at" &&
-      key !== "updated_at" &&
-      key !== "quantity_available" &&
-      value !== undefined
-    ) {
-      fields.push(`${key} = $${paramCount}`)
-      values.push(value)
-      paramCount++
-    }
-  }
-
-  if (fields.length === 0) return null
-
-  values.push(id)
-  const result = await query(
-    `
-    UPDATE inventory 
-    SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $${paramCount}
-    RETURNING *
-  `,
-    values,
-  )
-
-  return result.rows[0] || null
-}
-
-export async function deleteInventoryItem(id: string): Promise<boolean> {
-  const result = await query("DELETE FROM inventory WHERE id = $1", [id])
-  return result.rowCount > 0
-}
-
-// Shopify Stores
-export async function getAllShopifyStores(): Promise<ShopifyStore[]> {
-  const result = await query(`
-    SELECT * FROM shopify_stores 
-    ORDER BY store_name ASC
-  `)
-  return result.rows
-}
-
-export async function getShopifyStoreById(id: string): Promise<ShopifyStore | null> {
-  const result = await query("SELECT * FROM shopify_stores WHERE id = $1", [id])
-  return result.rows[0] || null
-}
-
-export async function createShopifyStore(
-  data: Omit<ShopifyStore, "id" | "created_at" | "updated_at">,
-): Promise<ShopifyStore> {
-  const result = await query(
-    `
-    INSERT INTO shopify_stores (store_name, shop_domain, access_token, is_active, last_sync)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
-  `,
-    [data.store_name, data.shop_domain, data.access_token, data.is_active, data.last_sync],
-  )
-
-  return result.rows[0]
-}
-
-export async function updateShopifyStore(id: string, data: Partial<ShopifyStore>): Promise<ShopifyStore | null> {
-  const fields = []
-  const values = []
-  let paramCount = 1
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key !== "id" && key !== "created_at" && key !== "updated_at" && value !== undefined) {
-      fields.push(`${key} = $${paramCount}`)
-      values.push(value)
-      paramCount++
-    }
-  }
-
-  if (fields.length === 0) return null
-
-  values.push(id)
-  const result = await query(
-    `
-    UPDATE shopify_stores 
-    SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $${paramCount}
-    RETURNING *
-  `,
-    values,
-  )
-
-  return result.rows[0] || null
-}
-
-export async function deleteShopifyStore(id: string): Promise<boolean> {
-  const result = await query("DELETE FROM shopify_stores WHERE id = $1", [id])
-  return result.rowCount > 0
-}
-
-// Shopify Orders
-export async function getAllShopifyOrders(): Promise<ShopifyOrder[]> {
-  const result = await query(`
-    SELECT so.*, ss.store_name 
-    FROM shopify_orders so
-    LEFT JOIN shopify_stores ss ON so.store_id = ss.id
-    ORDER BY so.order_date DESC
-  `)
-  return result.rows
-}
-
-export async function getShopifyOrderById(id: string): Promise<ShopifyOrder | null> {
-  const result = await query(
-    `
-    SELECT so.*, ss.store_name 
-    FROM shopify_orders so
-    LEFT JOIN shopify_stores ss ON so.store_id = ss.id
-    WHERE so.id = $1
-  `,
-    [id],
-  )
-  return result.rows[0] || null
-}
-
-export async function createShopifyOrder(
-  data: Omit<ShopifyOrder, "id" | "created_at" | "updated_at">,
-): Promise<ShopifyOrder> {
-  const result = await query(
-    `
-    INSERT INTO shopify_orders (shopify_order_id, store_id, order_number, customer_email, customer_name, total_price, currency, fulfillment_status, financial_status, order_date, shipping_address, line_items)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    RETURNING *
-  `,
-    [
-      data.shopify_order_id,
-      data.store_id,
-      data.order_number,
-      data.customer_email,
-      data.customer_name,
-      data.total_price,
-      data.currency,
-      data.fulfillment_status,
-      data.financial_status,
-      data.order_date,
-      data.shipping_address,
-      data.line_items,
-    ],
-  )
-
-  return result.rows[0]
-}
-
-export async function updateShopifyOrder(id: string, data: Partial<ShopifyOrder>): Promise<ShopifyOrder | null> {
-  const fields = []
-  const values = []
-  let paramCount = 1
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key !== "id" && key !== "created_at" && key !== "updated_at" && value !== undefined) {
-      fields.push(`${key} = $${paramCount}`)
-      values.push(value)
-      paramCount++
-    }
-  }
-
-  if (fields.length === 0) return null
-
-  values.push(id)
-  const result = await query(
-    `
-    UPDATE shopify_orders 
-    SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $${paramCount}
-    RETURNING *
-  `,
-    values,
-  )
-
-  return result.rows[0] || null
-}
-
-export async function deleteShopifyOrder(id: string): Promise<boolean> {
-  const result = await query("DELETE FROM shopify_orders WHERE id = $1", [id])
-  return result.rowCount > 0
-}
-
-// Complex operations with transactions
-export async function createPurchaseOrderWithItems(
-  orderData: Omit<PurchaseOrder, "id" | "created_at" | "updated_at" | "total_cost">,
-  items: Omit<PurchaseOrderItem, "id" | "purchase_order_id" | "created_at" | "total_cost">[],
-): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] }> {
-  return await transaction(async (client: PoolClient) => {
-    // Create the purchase order
-    const orderResult = await client.query(
+  static async create(data: CreatePurchaseOrderData): Promise<PurchaseOrder> {
+    const result = await executeQuery(
       `
-      INSERT INTO purchase_orders (po_number, supplier_name, order_date, expected_delivery, status, notes)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO purchase_orders (
+        po_number, supplier_name, order_date, expected_delivery, 
+        status, total_amount, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `,
       [
-        orderData.po_number,
-        orderData.supplier_name,
-        orderData.order_date,
-        orderData.expected_delivery,
-        orderData.status,
-        orderData.notes,
+        data.po_number,
+        data.supplier_name,
+        data.order_date,
+        data.expected_delivery || null,
+        data.status || "pending",
+        data.total_amount || 0,
+        data.notes || null,
       ],
     )
+    return result.rows[0]
+  }
 
-    const order = orderResult.rows[0]
+  static async update(id: number, data: Partial<CreatePurchaseOrderData>): Promise<PurchaseOrder | null> {
+    const fields = []
+    const values = []
+    let paramCount = 1
 
-    // Create the items
-    const createdItems: PurchaseOrderItem[] = []
-    for (const item of items) {
-      const itemResult = await client.query(
-        `
-        INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *
-      `,
-        [order.id, item.product_name, item.sku, item.quantity, item.unit_cost],
-      )
-
-      createdItems.push(itemResult.rows[0])
+    if (data.po_number !== undefined) {
+      fields.push(`po_number = $${paramCount++}`)
+      values.push(data.po_number)
+    }
+    if (data.supplier_name !== undefined) {
+      fields.push(`supplier_name = $${paramCount++}`)
+      values.push(data.supplier_name)
+    }
+    if (data.order_date !== undefined) {
+      fields.push(`order_date = $${paramCount++}`)
+      values.push(data.order_date)
+    }
+    if (data.expected_delivery !== undefined) {
+      fields.push(`expected_delivery = $${paramCount++}`)
+      values.push(data.expected_delivery)
+    }
+    if (data.status !== undefined) {
+      fields.push(`status = $${paramCount++}`)
+      values.push(data.status)
+    }
+    if (data.total_amount !== undefined) {
+      fields.push(`total_amount = $${paramCount++}`)
+      values.push(data.total_amount)
+    }
+    if (data.notes !== undefined) {
+      fields.push(`notes = $${paramCount++}`)
+      values.push(data.notes)
     }
 
-    // Get the updated order with calculated total
-    const updatedOrderResult = await client.query("SELECT * FROM purchase_orders WHERE id = $1", [order.id])
-
-    return {
-      order: updatedOrderResult.rows[0],
-      items: createdItems,
+    if (fields.length === 0) {
+      return this.getById(id)
     }
-  })
+
+    fields.push(`updated_at = NOW()`)
+    values.push(id)
+
+    const result = await executeQuery(
+      `
+      UPDATE purchase_orders 
+      SET ${fields.join(", ")}
+      WHERE id = $${paramCount}
+      RETURNING *
+    `,
+      values,
+    )
+
+    return result.rows[0] || null
+  }
+
+  static async delete(id: number): Promise<boolean> {
+    const result = await executeQuery("DELETE FROM purchase_orders WHERE id = $1", [id])
+    return result.rowCount > 0
+  }
 }
 
-// Analytics and reporting functions
-export async function getDashboardStats() {
-  const [totalPurchaseOrders, pendingOrders, totalInventoryValue, lowStockItems, recentOrders] = await Promise.all([
-    query("SELECT COUNT(*) as count FROM purchase_orders"),
-    query("SELECT COUNT(*) as count FROM purchase_orders WHERE status = 'pending'"),
-    query("SELECT SUM(quantity_on_hand * unit_cost) as total FROM inventory"),
-    query("SELECT COUNT(*) as count FROM inventory WHERE quantity_available <= reorder_point"),
-    query("SELECT COUNT(*) as count FROM shopify_orders WHERE order_date >= CURRENT_DATE - INTERVAL '7 days'"),
-  ])
+// Inventory Item interfaces
+export interface InventoryItem {
+  id: number
+  sku: string
+  name: string
+  description?: string
+  category: string
+  quantity: number
+  unit_price: number
+  reorder_level: number
+  supplier: string
+  created_at: string
+  updated_at: string
+}
 
-  return {
-    totalPurchaseOrders: Number.parseInt(totalPurchaseOrders.rows[0].count),
-    pendingOrders: Number.parseInt(pendingOrders.rows[0].count),
-    totalInventoryValue: Number.parseFloat(totalInventoryValue.rows[0].total || "0"),
-    lowStockItems: Number.parseInt(lowStockItems.rows[0].count),
-    recentOrders: Number.parseInt(recentOrders.rows[0].count),
+export interface CreateInventoryItemData {
+  sku: string
+  name: string
+  description?: string
+  category: string
+  quantity: number
+  unit_price: number
+  reorder_level: number
+  supplier: string
+}
+
+// Inventory Store
+export class InventoryStore {
+  static async getAll(): Promise<InventoryItem[]> {
+    const result = await executeQuery(`
+      SELECT * FROM inventory_items 
+      ORDER BY name ASC
+    `)
+    return result.rows
+  }
+
+  static async getById(id: number): Promise<InventoryItem | null> {
+    const result = await executeQuery("SELECT * FROM inventory_items WHERE id = $1", [id])
+    return result.rows[0] || null
+  }
+
+  static async create(data: CreateInventoryItemData): Promise<InventoryItem> {
+    const result = await executeQuery(
+      `
+      INSERT INTO inventory_items (
+        sku, name, description, category, quantity, 
+        unit_price, reorder_level, supplier
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `,
+      [
+        data.sku,
+        data.name,
+        data.description || null,
+        data.category,
+        data.quantity,
+        data.unit_price,
+        data.reorder_level,
+        data.supplier,
+      ],
+    )
+    return result.rows[0]
+  }
+
+  static async update(id: number, data: Partial<CreateInventoryItemData>): Promise<InventoryItem | null> {
+    const fields = []
+    const values = []
+    let paramCount = 1
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount++}`)
+        values.push(value)
+      }
+    })
+
+    if (fields.length === 0) {
+      return this.getById(id)
+    }
+
+    fields.push(`updated_at = NOW()`)
+    values.push(id)
+
+    const result = await executeQuery(
+      `
+      UPDATE inventory_items 
+      SET ${fields.join(", ")}
+      WHERE id = $${paramCount}
+      RETURNING *
+    `,
+      values,
+    )
+
+    return result.rows[0] || null
+  }
+
+  static async delete(id: number): Promise<boolean> {
+    const result = await executeQuery("DELETE FROM inventory_items WHERE id = $1", [id])
+    return result.rowCount > 0
+  }
+}
+
+// Shopify Store interfaces
+export interface ShopifyStore {
+  id: number
+  store_name: string
+  shop_domain: string
+  access_token: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateShopifyStoreData {
+  store_name: string
+  shop_domain: string
+  access_token: string
+  is_active?: boolean
+}
+
+// Shopify Store Store
+export class ShopifyStoreStore {
+  static async getAll(): Promise<ShopifyStore[]> {
+    const result = await executeQuery(`
+      SELECT * FROM shopify_stores 
+      ORDER BY store_name ASC
+    `)
+    return result.rows
+  }
+
+  static async getById(id: number): Promise<ShopifyStore | null> {
+    const result = await executeQuery("SELECT * FROM shopify_stores WHERE id = $1", [id])
+    return result.rows[0] || null
+  }
+
+  static async create(data: CreateShopifyStoreData): Promise<ShopifyStore> {
+    const result = await executeQuery(
+      `
+      INSERT INTO shopify_stores (
+        store_name, shop_domain, access_token, is_active
+      ) VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `,
+      [data.store_name, data.shop_domain, data.access_token, data.is_active !== undefined ? data.is_active : true],
+    )
+    return result.rows[0]
+  }
+
+  static async update(id: number, data: Partial<CreateShopifyStoreData>): Promise<ShopifyStore | null> {
+    const fields = []
+    const values = []
+    let paramCount = 1
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount++}`)
+        values.push(value)
+      }
+    })
+
+    if (fields.length === 0) {
+      return this.getById(id)
+    }
+
+    fields.push(`updated_at = NOW()`)
+    values.push(id)
+
+    const result = await executeQuery(
+      `
+      UPDATE shopify_stores 
+      SET ${fields.join(", ")}
+      WHERE id = $${paramCount}
+      RETURNING *
+    `,
+      values,
+    )
+
+    return result.rows[0] || null
+  }
+
+  static async delete(id: number): Promise<boolean> {
+    const result = await executeQuery("DELETE FROM shopify_stores WHERE id = $1", [id])
+    return result.rowCount > 0
   }
 }

@@ -1,5 +1,8 @@
--- Setup script for Warehouse Management System Database
--- This script will use the existing 'postgres' database
+-- Setup script for warehouse management system
+-- This creates the necessary database structure
+
+-- Enable UUID extension if needed
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Create user if it doesn't exist
 DO $$
@@ -13,19 +16,27 @@ $$;
 -- Grant privileges on postgres database
 GRANT ALL PRIVILEGES ON DATABASE postgres TO warehouse_user;
 
--- Connect to the postgres database
-\c postgres;
-
 -- Grant schema privileges
 GRANT ALL ON SCHEMA public TO warehouse_user;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO warehouse_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO warehouse_user;
 
--- Set default privileges for future tables
+-- Grant default privileges for future objects
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO warehouse_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO warehouse_user;
 
-\echo 'Database user setup completed successfully!'
-\echo 'Database: postgres'
+-- Make warehouse_user a superuser for development (optional, for easier development)
+-- ALTER USER warehouse_user WITH SUPERUSER;
+
+-- Create tables will be handled by the TypeScript script
+-- This file is kept for reference and manual setup if needed
+
+-- You can run the TypeScript scripts instead:
+-- npm run db:create  (creates tables)
+-- npm run db:seed   (adds sample data)
+-- npm run db:reset  (does both)
+
+\echo 'Database setup completed successfully!'
 \echo 'User: warehouse_user'
+\echo 'Database: postgres'
 \echo 'Password: 1'
