@@ -26,27 +26,99 @@ export interface CreatePurchaseOrderData {
 
 // Purchase Order Store
 export class PurchaseOrderStore {
-  static async getAll(): Promise<PurchaseOrder[]> {
-    const result = await executeQuery(`
-      SELECT * FROM purchase_orders 
-      ORDER BY created_at DESC
+  private static async ensureTable() {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS purchase_orders (
+        id SERIAL PRIMARY KEY,
+        po_number VARCHAR(50) NOT NULL UNIQUE,
+        supplier_name VARCHAR(255) NOT NULL,
+        order_date DATE NOT NULL,
+        expected_delivery DATE,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        total_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `)
-    return result.rows
+  }
+
+  static async getAll(page = 1, limit = 10): Promise<{ data: PurchaseOrder[]; total: number }> {
+    await this.ensureTable()
+
+    const offset = (page - 1) * limit
+
+    const countResult = await executeQuery("SELECT COUNT(*) FROM purchase_orders")
+    const total = Number.parseInt(countResult.rows[0].count)
+
+    const result = await executeQuery(
+      `
+      SELECT 
+        id,
+        po_number,
+        supplier_name,
+        order_date,
+        expected_delivery,
+        status,
+        COALESCE(total_amount, 0) as total_amount,
+        notes,
+        created_at,
+        updated_at
+      FROM purchase_orders 
+      ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2
+    `,
+      [limit, offset],
+    )
+
+    return {
+      data: result.rows,
+      total,
+    }
   }
 
   static async getById(id: number): Promise<PurchaseOrder | null> {
-    const result = await executeQuery("SELECT * FROM purchase_orders WHERE id = $1", [id])
+    await this.ensureTable()
+    const result = await executeQuery(
+      `
+      SELECT 
+        id,
+        po_number,
+        supplier_name,
+        order_date,
+        expected_delivery,
+        status,
+        COALESCE(total_amount, 0) as total_amount,
+        notes,
+        created_at,
+        updated_at
+      FROM purchase_orders 
+      WHERE id = $1
+    `,
+      [id],
+    )
     return result.rows[0] || null
   }
 
   static async create(data: CreatePurchaseOrderData): Promise<PurchaseOrder> {
+    await this.ensureTable()
     const result = await executeQuery(
       `
       INSERT INTO purchase_orders (
         po_number, supplier_name, order_date, expected_delivery, 
         status, total_amount, notes
       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *
+      RETURNING 
+        id,
+        po_number,
+        supplier_name,
+        order_date,
+        expected_delivery,
+        status,
+        COALESCE(total_amount, 0) as total_amount,
+        notes,
+        created_at,
+        updated_at
     `,
       [
         data.po_number,
@@ -62,6 +134,7 @@ export class PurchaseOrderStore {
   }
 
   static async update(id: number, data: Partial<CreatePurchaseOrderData>): Promise<PurchaseOrder | null> {
+    await this.ensureTable()
     const fields = []
     const values = []
     let paramCount = 1
@@ -107,7 +180,17 @@ export class PurchaseOrderStore {
       UPDATE purchase_orders 
       SET ${fields.join(", ")}
       WHERE id = $${paramCount}
-      RETURNING *
+      RETURNING 
+        id,
+        po_number,
+        supplier_name,
+        order_date,
+        expected_delivery,
+        status,
+        COALESCE(total_amount, 0) as total_amount,
+        notes,
+        created_at,
+        updated_at
     `,
       values,
     )
@@ -116,6 +199,7 @@ export class PurchaseOrderStore {
   }
 
   static async delete(id: number): Promise<boolean> {
+    await this.ensureTable()
     const result = await executeQuery("DELETE FROM purchase_orders WHERE id = $1", [id])
     return result.rowCount > 0
   }
@@ -149,27 +233,103 @@ export interface CreateInventoryItemData {
 
 // Inventory Store
 export class InventoryStore {
-  static async getAll(): Promise<InventoryItem[]> {
-    const result = await executeQuery(`
-      SELECT * FROM inventory_items 
-      ORDER BY name ASC
+  private static async ensureTable() {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS inventory_items (
+        id SERIAL PRIMARY KEY,
+        sku VARCHAR(50) NOT NULL UNIQUE,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        category VARCHAR(100) NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        unit_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+        reorder_level INTEGER NOT NULL DEFAULT 0,
+        supplier VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `)
-    return result.rows
+  }
+
+  static async getAll(page = 1, limit = 10): Promise<{ data: InventoryItem[]; total: number }> {
+    await this.ensureTable()
+
+    const offset = (page - 1) * limit
+
+    const countResult = await executeQuery("SELECT COUNT(*) FROM inventory_items")
+    const total = Number.parseInt(countResult.rows[0].count)
+
+    const result = await executeQuery(
+      `
+      SELECT 
+        id,
+        sku,
+        name,
+        description,
+        category,
+        COALESCE(quantity, 0) as quantity,
+        COALESCE(unit_price, 0) as unit_price,
+        COALESCE(reorder_level, 0) as reorder_level,
+        supplier,
+        created_at,
+        updated_at
+      FROM inventory_items 
+      ORDER BY name ASC
+      LIMIT $1 OFFSET $2
+    `,
+      [limit, offset],
+    )
+
+    return {
+      data: result.rows,
+      total,
+    }
   }
 
   static async getById(id: number): Promise<InventoryItem | null> {
-    const result = await executeQuery("SELECT * FROM inventory_items WHERE id = $1", [id])
+    await this.ensureTable()
+    const result = await executeQuery(
+      `
+      SELECT 
+        id,
+        sku,
+        name,
+        description,
+        category,
+        COALESCE(quantity, 0) as quantity,
+        COALESCE(unit_price, 0) as unit_price,
+        COALESCE(reorder_level, 0) as reorder_level,
+        supplier,
+        created_at,
+        updated_at
+      FROM inventory_items 
+      WHERE id = $1
+    `,
+      [id],
+    )
     return result.rows[0] || null
   }
 
   static async create(data: CreateInventoryItemData): Promise<InventoryItem> {
+    await this.ensureTable()
     const result = await executeQuery(
       `
       INSERT INTO inventory_items (
         sku, name, description, category, quantity, 
         unit_price, reorder_level, supplier
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
+      RETURNING 
+        id,
+        sku,
+        name,
+        description,
+        category,
+        COALESCE(quantity, 0) as quantity,
+        COALESCE(unit_price, 0) as unit_price,
+        COALESCE(reorder_level, 0) as reorder_level,
+        supplier,
+        created_at,
+        updated_at
     `,
       [
         data.sku,
@@ -186,6 +346,7 @@ export class InventoryStore {
   }
 
   static async update(id: number, data: Partial<CreateInventoryItemData>): Promise<InventoryItem | null> {
+    await this.ensureTable()
     const fields = []
     const values = []
     let paramCount = 1
@@ -209,7 +370,18 @@ export class InventoryStore {
       UPDATE inventory_items 
       SET ${fields.join(", ")}
       WHERE id = $${paramCount}
-      RETURNING *
+      RETURNING 
+        id,
+        sku,
+        name,
+        description,
+        category,
+        COALESCE(quantity, 0) as quantity,
+        COALESCE(unit_price, 0) as unit_price,
+        COALESCE(reorder_level, 0) as reorder_level,
+        supplier,
+        created_at,
+        updated_at
     `,
       values,
     )
@@ -218,91 +390,8 @@ export class InventoryStore {
   }
 
   static async delete(id: number): Promise<boolean> {
+    await this.ensureTable()
     const result = await executeQuery("DELETE FROM inventory_items WHERE id = $1", [id])
-    return result.rowCount > 0
-  }
-}
-
-// Shopify Store interfaces
-export interface ShopifyStore {
-  id: number
-  store_name: string
-  shop_domain: string
-  access_token: string
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateShopifyStoreData {
-  store_name: string
-  shop_domain: string
-  access_token: string
-  is_active?: boolean
-}
-
-// Shopify Store Store
-export class ShopifyStoreStore {
-  static async getAll(): Promise<ShopifyStore[]> {
-    const result = await executeQuery(`
-      SELECT * FROM shopify_stores 
-      ORDER BY store_name ASC
-    `)
-    return result.rows
-  }
-
-  static async getById(id: number): Promise<ShopifyStore | null> {
-    const result = await executeQuery("SELECT * FROM shopify_stores WHERE id = $1", [id])
-    return result.rows[0] || null
-  }
-
-  static async create(data: CreateShopifyStoreData): Promise<ShopifyStore> {
-    const result = await executeQuery(
-      `
-      INSERT INTO shopify_stores (
-        store_name, shop_domain, access_token, is_active
-      ) VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `,
-      [data.store_name, data.shop_domain, data.access_token, data.is_active !== undefined ? data.is_active : true],
-    )
-    return result.rows[0]
-  }
-
-  static async update(id: number, data: Partial<CreateShopifyStoreData>): Promise<ShopifyStore | null> {
-    const fields = []
-    const values = []
-    let paramCount = 1
-
-    Object.entries(data).forEach(([key, value]) => {
-      if (value !== undefined) {
-        fields.push(`${key} = $${paramCount++}`)
-        values.push(value)
-      }
-    })
-
-    if (fields.length === 0) {
-      return this.getById(id)
-    }
-
-    fields.push(`updated_at = NOW()`)
-    values.push(id)
-
-    const result = await executeQuery(
-      `
-      UPDATE shopify_stores 
-      SET ${fields.join(", ")}
-      WHERE id = $${paramCount}
-      RETURNING *
-    `,
-      values,
-    )
-
-    return result.rows[0] || null
-  }
-
-  static async delete(id: number): Promise<boolean> {
-    const result = await executeQuery("DELETE FROM shopify_stores WHERE id = $1", [id])
     return result.rowCount > 0
   }
 }

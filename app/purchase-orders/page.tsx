@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,7 +30,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Plus, Edit, Trash2, Package, Calendar, DollarSign, AlertTriangle } from "lucide-react"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import { Plus, Edit, Trash2, Package, Calendar, DollarSign, AlertTriangle, FileX } from "lucide-react"
 import { toast } from "sonner"
 
 interface PurchaseOrder {
@@ -60,39 +67,90 @@ export default function PurchaseOrdersPage() {
   const [error, setError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const itemsPerPage = 10
+
   const [formData, setFormData] = useState({
     po_number: "",
     supplier_name: "",
     order_date: "",
     expected_delivery: "",
     status: "pending" as const,
-    total_amount: 0,
+    total_amount: "",
     notes: "",
   })
 
-  useEffect(() => {
-    fetchPurchaseOrders()
-  }, [])
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
-  const fetchPurchaseOrders = async () => {
+  useEffect(() => {
+    fetchPurchaseOrders(currentPage)
+  }, [currentPage])
+
+  const fetchPurchaseOrders = async (page: number) => {
     try {
       setLoading(true)
       setError(null)
-      const response = await fetch("/api/purchase-orders")
+      console.log(`🔄 Fetching purchase orders for page ${page}...`)
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+      const response = await fetch(`/api/purchase-orders?page=${page}&limit=${itemsPerPage}`)
+
+      // Helper to safely extract the body regardless of Content-Type
+      const safeParse = async () => {
+        try {
+          if (response.headers.get("content-type")?.includes("application/json")) {
+            return await response.json()
+          }
+          return await response.text()
+        } catch {
+          return await response.text()
+        }
       }
 
-      const data = await response.json()
-      setPurchaseOrders(data)
+      if (!response.ok) {
+        const errorPayload = await safeParse()
+        const message =
+          typeof errorPayload === "string"
+            ? errorPayload
+            : errorPayload?.details || errorPayload?.error || `HTTP error! status: ${response.status}`
+        throw new Error(message)
+      }
+
+      const result = await safeParse()
+      console.log("✅ Received data:", result)
+
+      setPurchaseOrders(result.data || [])
+      setTotalItems(result.total || 0)
+      setTotalPages(Math.ceil((result.total || 0) / itemsPerPage))
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "An error occurred"
+      console.error("❌ Fetch error:", err)
       setError(errorMessage)
       toast.error("Failed to fetch purchase orders: " + errorMessage)
     } finally {
       setLoading(false)
     }
+  }
+
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {}
+
+    if (!formData.po_number.trim()) {
+      errors.po_number = "PO Number is required"
+    }
+    if (!formData.supplier_name.trim()) {
+      errors.supplier_name = "Supplier Name is required"
+    }
+    if (!formData.order_date) {
+      errors.order_date = "Order Date is required"
+    }
+    if (formData.total_amount && isNaN(Number.parseFloat(formData.total_amount))) {
+      errors.total_amount = "Total Amount must be a valid number"
+    }
+
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
   }
 
   const resetForm = () => {
@@ -102,17 +160,18 @@ export default function PurchaseOrdersPage() {
       order_date: "",
       expected_delivery: "",
       status: "pending",
-      total_amount: 0,
+      total_amount: "",
       notes: "",
     })
     setEditingOrder(null)
+    setFormErrors({})
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.po_number || !formData.supplier_name || !formData.order_date) {
-      toast.error("Please fill in all required fields")
+    if (!validateForm()) {
+      toast.error("Please fix the form errors")
       return
     }
 
@@ -120,12 +179,17 @@ export default function PurchaseOrdersPage() {
       const url = editingOrder ? `/api/purchase-orders/${editingOrder.id}` : "/api/purchase-orders"
       const method = editingOrder ? "PUT" : "POST"
 
+      console.log(`🔄 ${method} request to ${url}:`, formData)
+
       const response = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          total_amount: formData.total_amount ? Number.parseFloat(formData.total_amount) : 0,
+        }),
       })
 
       if (!response.ok) {
@@ -134,18 +198,17 @@ export default function PurchaseOrdersPage() {
       }
 
       const result = await response.json()
+      console.log("✅ Save result:", result)
 
-      if (editingOrder) {
-        setPurchaseOrders((prev) => prev.map((po) => (po.id === result.id ? result : po)))
-        toast.success("Purchase order updated successfully")
-      } else {
-        setPurchaseOrders((prev) => [result, ...prev])
-        toast.success("Purchase order created successfully")
-      }
+      toast.success(editingOrder ? "Purchase order updated successfully" : "Purchase order created successfully")
 
       setIsDialogOpen(false)
       resetForm()
+
+      // Refresh the current page
+      await fetchPurchaseOrders(currentPage)
     } catch (err) {
+      console.error("❌ Save error:", err)
       toast.error(err instanceof Error ? err.message : "An error occurred")
     }
   }
@@ -158,27 +221,39 @@ export default function PurchaseOrdersPage() {
       order_date: order.order_date,
       expected_delivery: order.expected_delivery || "",
       status: order.status,
-      total_amount: order.total_amount,
+      total_amount: order.total_amount.toString(),
       notes: order.notes || "",
     })
+    setFormErrors({})
     setIsDialogOpen(true)
   }
 
   const handleDelete = async (id: number) => {
     try {
+      console.log(`🗑️ Deleting purchase order ${id}`)
+
       const response = await fetch(`/api/purchase-orders/${id}`, {
         method: "DELETE",
       })
 
       if (!response.ok) {
-        throw new Error("Failed to delete purchase order")
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to delete purchase order")
       }
 
-      setPurchaseOrders((prev) => prev.filter((po) => po.id !== id))
       toast.success("Purchase order deleted successfully")
+
+      // Refresh the current page
+      await fetchPurchaseOrders(currentPage)
     } catch (err) {
+      console.error("❌ Delete error:", err)
       toast.error(err instanceof Error ? err.message : "Failed to delete purchase order")
     }
+  }
+
+  const formatAmount = (amount: number | null | undefined): string => {
+    const safeAmount = amount || 0
+    return safeAmount.toFixed(2)
   }
 
   if (loading) {
@@ -201,7 +276,7 @@ export default function PurchaseOrdersPage() {
           <div className="text-center">
             <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
             <p className="text-red-600 mb-4">{error}</p>
-            <Button onClick={fetchPurchaseOrders}>Try Again</Button>
+            <Button onClick={() => fetchPurchaseOrders(currentPage)}>Try Again</Button>
           </div>
         </div>
       </div>
@@ -240,8 +315,9 @@ export default function PurchaseOrdersPage() {
                     value={formData.po_number}
                     onChange={(e) => setFormData({ ...formData, po_number: e.target.value })}
                     placeholder="PO-2024-001"
-                    required
+                    className={formErrors.po_number ? "border-red-500" : ""}
                   />
+                  {formErrors.po_number && <p className="text-red-500 text-sm mt-1">{formErrors.po_number}</p>}
                 </div>
                 <div>
                   <Label htmlFor="supplier_name">Supplier Name *</Label>
@@ -250,8 +326,9 @@ export default function PurchaseOrdersPage() {
                     value={formData.supplier_name}
                     onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
                     placeholder="Enter supplier name"
-                    required
+                    className={formErrors.supplier_name ? "border-red-500" : ""}
                   />
+                  {formErrors.supplier_name && <p className="text-red-500 text-sm mt-1">{formErrors.supplier_name}</p>}
                 </div>
               </div>
 
@@ -263,8 +340,9 @@ export default function PurchaseOrdersPage() {
                     type="date"
                     value={formData.order_date}
                     onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
-                    required
+                    className={formErrors.order_date ? "border-red-500" : ""}
                   />
+                  {formErrors.order_date && <p className="text-red-500 text-sm mt-1">{formErrors.order_date}</p>}
                 </div>
                 <div>
                   <Label htmlFor="expected_delivery">Expected Delivery</Label>
@@ -303,9 +381,11 @@ export default function PurchaseOrdersPage() {
                     step="0.01"
                     min="0"
                     value={formData.total_amount}
-                    onChange={(e) => setFormData({ ...formData, total_amount: Number.parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => setFormData({ ...formData, total_amount: e.target.value })}
                     placeholder="0.00"
+                    className={formErrors.total_amount ? "border-red-500" : ""}
                   />
+                  {formErrors.total_amount && <p className="text-red-500 text-sm mt-1">{formErrors.total_amount}</p>}
                 </div>
               </div>
 
@@ -339,7 +419,7 @@ export default function PurchaseOrdersPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.length}</div>
+            <div className="text-2xl font-bold">{totalItems}</div>
           </CardContent>
         </Card>
         <Card>
@@ -358,7 +438,7 @@ export default function PurchaseOrdersPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              ${purchaseOrders.reduce((sum, po) => sum + po.total_amount, 0).toFixed(2)}
+              ${formatAmount(purchaseOrders.reduce((sum, po) => sum + (po.total_amount || 0), 0))}
             </div>
           </CardContent>
         </Card>
@@ -377,73 +457,135 @@ export default function PurchaseOrdersPage() {
       <Card>
         <CardHeader>
           <CardTitle>Purchase Orders</CardTitle>
-          <CardDescription>A list of all purchase orders with their current status and details.</CardDescription>
+          <CardDescription>
+            {totalItems > 0
+              ? `A list of all purchase orders with their current status and details. Showing ${purchaseOrders.length} of ${totalItems} items.`
+              : "No purchase orders found in the database."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {purchaseOrders.length === 0 ? (
-            <div className="text-center py-8">
-              <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">No purchase orders found</p>
-              <p className="text-sm text-gray-400">Create your first purchase order to get started</p>
+          {totalItems === 0 ? (
+            <div className="text-center py-16">
+              <FileX className="h-16 w-16 text-gray-300 mx-auto mb-6" />
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Records Available</h3>
+              <p className="text-gray-500 mb-6 max-w-md mx-auto">
+                There are currently no purchase orders in the database. Get started by creating your first purchase
+                order.
+              </p>
+              <Button onClick={resetForm} className="mx-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                Create First Purchase Order
+              </Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>PO Number</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Order Date</TableHead>
-                  <TableHead>Expected Delivery</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Total Amount</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {purchaseOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="font-medium">{order.po_number}</TableCell>
-                    <TableCell>{order.supplier_name}</TableCell>
-                    <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      {order.expected_delivery ? new Date(order.expected_delivery).toLocaleDateString() : "Not set"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={statusColors[order.status]}>
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>${order.total_amount.toFixed(2)}</TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button variant="outline" size="sm" onClick={() => handleEdit(order)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              <Trash2 className="h-4 w-4" />
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>PO Number</TableHead>
+                      <TableHead>Supplier</TableHead>
+                      <TableHead>Order Date</TableHead>
+                      <TableHead>Expected Delivery</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Total Amount</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {purchaseOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">{order.po_number}</TableCell>
+                        <TableCell>{order.supplier_name}</TableCell>
+                        <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          {order.expected_delivery ? new Date(order.expected_delivery).toLocaleDateString() : "Not set"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={statusColors[order.status]}>
+                            {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>${formatAmount(order.total_amount)}</TableCell>
+                        <TableCell>
+                          <div className="flex space-x-2">
+                            <Button variant="outline" size="sm" onClick={() => handleEdit(order)}>
+                              <Edit className="h-4 w-4" />
                             </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This action cannot be undone. This will permanently delete the purchase order.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(order.id)}>Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="outline" size="sm">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This action cannot be undone. This will permanently delete the purchase order "
+                                    {order.po_number}".
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDelete(order.id)}>Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="mt-6">
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            if (currentPage > 1) setCurrentPage(currentPage - 1)
+                          }}
+                          className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              setCurrentPage(page)
+                            }}
+                            isActive={currentPage === page}
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            if (currentPage < totalPages) setCurrentPage(currentPage + 1)
+                          }}
+                          className={currentPage >= totalPages ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

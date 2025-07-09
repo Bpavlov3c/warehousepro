@@ -5,7 +5,6 @@
   "scripts": {
     "build": "next build",
     "db:create": "npx tsx scripts/create-tables.ts",
-    "db:reset": "npm run db:create && npm run db:seed",
     "db:seed": "npx tsx scripts/seed-data.ts",
     "db:test": "npx tsx scripts/test-db.ts",
     "dev": "next dev",
@@ -13,7 +12,6 @@
     "start": "next start"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.3.4",
     "@radix-ui/react-accordion": "latest",
     "@radix-ui/react-alert-dialog": "latest",
     "@radix-ui/react-aspect-ratio": "latest",
@@ -33,7 +31,6 @@
     "@radix-ui/react-scroll-area": "latest",
     "@radix-ui/react-select": "latest",
     "@radix-ui/react-separator": "latest",
-    "@radix-ui/react-sheet": "^1.0.4",
     "@radix-ui/react-slider": "latest",
     "@radix-ui/react-slot": "latest",
     "@radix-ui/react-switch": "latest",
@@ -62,20 +59,18 @@
     "sonner": "latest",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "tsx": "^4.7.0",
-    "vaul": "latest",
-    "zod": "^3.22.4"
+    "vaul": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "@types/pg": "^8.11.0",
+    "@types/pg": "^8.11.6",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "14.1.0",
+    "eslint-config-next": "14.2.3",
     "postcss": "^8.5",
-    "tailwindcss": "^3.3.0",
+    "tailwindcss": "^3.4.1",
+    "tsx": "^4.7.0",
     "typescript": "^5"
   }
 }

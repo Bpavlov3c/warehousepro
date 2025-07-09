@@ -49,43 +49,6 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-// Health check function
-export async function healthCheck() {
-  let client: PoolClient | null = null
-  try {
-    client = await pool.connect()
-
-    // Get basic database info
-    const timeResult = await client.query("SELECT NOW() as server_time")
-    const dbResult = await client.query("SELECT current_database() as database, current_user as user")
-
-    // Count tables in our schema
-    const tableResult = await client.query(`
-      SELECT COUNT(*) as table_count 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_name IN ('purchase_orders', 'inventory_items', 'shopify_stores', 'shopify_orders')
-    `)
-
-    return {
-      status: "healthy",
-      server_time: timeResult.rows[0].server_time,
-      database: dbResult.rows[0].database,
-      user: dbResult.rows[0].user,
-      table_count: Number.parseInt(tableResult.rows[0].table_count),
-    }
-  } catch (error) {
-    return {
-      status: "unhealthy",
-      error: error instanceof Error ? error.message : "Unknown error",
-    }
-  } finally {
-    if (client) {
-      client.release()
-    }
-  }
-}
-
 // Execute query with error handling
 export async function executeQuery(text: string, params?: any[]) {
   let client: PoolClient | null = null

@@ -1,6 +1,9 @@
 -- Create database and user (run this as postgres superuser)
 -- This script should be run manually by a database administrator
 
+-- Create database (run this first if database doesn't exist)
+CREATE DATABASE postgres;
+
 -- Create user if it doesn't exist
 DO $$
 BEGIN

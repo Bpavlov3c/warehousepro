@@ -1,591 +1,659 @@
 "use client"
 
+import type React from "react"
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
-  Search,
-  Filter,
-  Download,
-  AlertTriangle,
-  Package,
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Plus,
-  Edit,
-} from "lucide-react"
-import { dataStore, type InventoryItem } from "@/lib/store"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import { Plus, Edit, Trash2, Package, AlertTriangle, TrendingDown, FileX } from "lucide-react"
+import { toast } from "sonner"
 
-export default function Inventory() {
+interface InventoryItem {
+  id: number
+  sku: string
+  name: string
+  description?: string
+  category: string
+  quantity: number
+  unit_price: number
+  reorder_level: number
+  supplier: string
+  created_at: string
+  updated_at: string
+}
+
+export default function InventoryPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [isAddInventoryOpen, setIsAddInventoryOpen] = useState(false)
-  const [isEditQuantityOpen, setIsEditQuantityOpen] = useState(false)
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
-  const [isReorderReportOpen, setIsReorderReportOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const itemsPerPage = 10
+
   const [formData, setFormData] = useState({
     sku: "",
     name: "",
+    description: "",
+    category: "",
     quantity: "",
-    unitCost: "",
+    unit_price: "",
+    reorder_level: "",
+    supplier: "",
   })
-  const [editQuantity, setEditQuantity] = useState("")
 
-  // Load data on component mount
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+
   useEffect(() => {
-    setInventoryItems(dataStore.getInventory())
-  }, [])
+    fetchInventoryItems(currentPage)
+  }, [currentPage])
 
-  const handleAddInventory = () => {
-    if (!formData.sku || !formData.name || !formData.quantity || !formData.unitCost) {
-      alert("Please fill in all fields")
-      return
-    }
+  const fetchInventoryItems = async (page: number) => {
+    try {
+      setLoading(true)
+      setError(null)
+      console.log(`🔄 Fetching inventory items for page ${page}...`)
 
-    const quantity = Number.parseInt(formData.quantity)
-    const unitCost = Number.parseFloat(formData.unitCost)
+      const response = await fetch(`/api/inventory?page=${page}&limit=${itemsPerPage}`)
 
-    if (quantity <= 0 || unitCost <= 0) {
-      alert("Quantity and unit cost must be positive numbers")
-      return
-    }
+      // Helper to safely extract the body regardless of Content-Type
+      const safeParse = async () => {
+        try {
+          if (response.headers.get("content-type")?.includes("application/json")) {
+            return await response.json()
+          }
+          return await response.text()
+        } catch {
+          return await response.text()
+        }
+      }
 
-    const success = dataStore.addManualInventory(formData.sku, formData.name, quantity, unitCost)
+      if (!response.ok) {
+        const errorPayload = await safeParse()
+        const message =
+          typeof errorPayload === "string"
+            ? errorPayload
+            : errorPayload?.details || errorPayload?.error || `HTTP error! status: ${response.status}`
+        throw new Error(message)
+      }
 
-    if (success) {
-      setInventoryItems(dataStore.getInventory())
-      setFormData({ sku: "", name: "", quantity: "", unitCost: "" })
-      setIsAddInventoryOpen(false)
-      alert(`Successfully added ${quantity} units of ${formData.name}`)
-    } else {
-      alert("Failed to add inventory")
-    }
-  }
+      const result = await safeParse()
+      console.log("✅ Received data:", result)
 
-  const handleEditQuantity = () => {
-    if (!selectedItem || !editQuantity) {
-      alert("Please enter a valid quantity")
-      return
-    }
-
-    const newQuantity = Number.parseInt(editQuantity)
-    if (newQuantity < 0) {
-      alert("Quantity cannot be negative")
-      return
-    }
-
-    const success = dataStore.updateInventoryQuantity(selectedItem.sku, newQuantity)
-
-    if (success) {
-      setInventoryItems(dataStore.getInventory())
-      setIsEditQuantityOpen(false)
-      setSelectedItem(null)
-      setEditQuantity("")
-      alert(`Successfully updated ${selectedItem.name} quantity to ${newQuantity}`)
-    } else {
-      alert("Failed to update quantity")
+      setInventoryItems(result.data || [])
+      setTotalItems(result.total || 0)
+      setTotalPages(Math.ceil((result.total || 0) / itemsPerPage))
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "An error occurred"
+      console.error("❌ Fetch error:", err)
+      setError(errorMessage)
+      toast.error("Failed to fetch inventory items: " + errorMessage)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const handleExport = () => {
-    const csvContent = [
-      ["SKU", "Product Name", "In Stock", "Incoming", "Reserved", "Available", "Status", "Unit Cost"],
-      ...inventoryItems.map((item) => {
-        const available = item.inStock - item.reserved
-        const status = getStockStatus(item.inStock, item.incoming).status
-        const unitCost = dataStore.getInventoryUnitCost(item.sku)
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {}
 
-        return [
-          item.sku,
-          item.name,
-          item.inStock.toString(),
-          item.incoming.toString(),
-          item.reserved.toString(),
-          available.toString(),
-          status,
-          unitCost.toFixed(2),
-        ]
-      }),
-    ]
+    if (!formData.sku.trim()) {
+      errors.sku = "SKU is required"
+    }
+    if (!formData.name.trim()) {
+      errors.name = "Name is required"
+    }
+    if (!formData.category.trim()) {
+      errors.category = "Category is required"
+    }
+    if (!formData.supplier.trim()) {
+      errors.supplier = "Supplier is required"
+    }
+    if (formData.quantity && isNaN(Number.parseInt(formData.quantity))) {
+      errors.quantity = "Quantity must be a valid number"
+    }
+    if (formData.unit_price && isNaN(Number.parseFloat(formData.unit_price))) {
+      errors.unit_price = "Unit Price must be a valid number"
+    }
+    if (formData.reorder_level && isNaN(Number.parseInt(formData.reorder_level))) {
+      errors.reorder_level = "Reorder Level must be a valid number"
+    }
 
-    const csvString = csvContent.map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
-
-    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" })
-    const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    link.setAttribute("href", url)
-    link.setAttribute("download", "inventory_export.csv")
-    link.style.visibility = "hidden"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
   }
 
-  const handleReorderReport = () => {
-    setIsReorderReportOpen(true)
-  }
-
-  const generateReorderReport = () => {
-    const lowStockItems = inventoryItems.filter((item) => {
-      const available = item.inStock - item.reserved
-      return available <= 10 || item.inStock === 0 // Items with 10 or fewer available or out of stock
+  const resetForm = () => {
+    setFormData({
+      sku: "",
+      name: "",
+      description: "",
+      category: "",
+      quantity: "",
+      unit_price: "",
+      reorder_level: "",
+      supplier: "",
     })
-
-    const csvContent = [
-      ["SKU", "Product Name", "Current Stock", "Available", "Status", "Suggested Reorder Qty", "Unit Cost"],
-      ...lowStockItems.map((item) => {
-        const available = item.inStock - item.reserved
-        const status = getStockStatus(item.inStock, item.incoming).status
-        const unitCost = dataStore.getInventoryUnitCost(item.sku)
-        const suggestedReorder = Math.max(50 - available, 20) // Suggest reordering to 50 units or minimum 20
-
-        return [
-          item.sku,
-          item.name,
-          item.inStock.toString(),
-          available.toString(),
-          status,
-          suggestedReorder.toString(),
-          unitCost.toFixed(2),
-        ]
-      }),
-    ]
-
-    const csvString = csvContent.map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
-
-    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" })
-    const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    link.setAttribute("href", url)
-    link.setAttribute("download", "reorder_report.csv")
-    link.style.visibility = "hidden"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-
-    setIsReorderReportOpen(false)
+    setEditingItem(null)
+    setFormErrors({})
   }
 
-  const getStockStatus = (inStock: number, incoming: number) => {
-    const total = inStock + incoming
-    if (inStock === 0 && incoming === 0) return { status: "Out of Stock", color: "bg-red-100 text-red-800" }
-    if (inStock === 0 && incoming > 0) return { status: "Incoming Only", color: "bg-yellow-100 text-yellow-800" }
-    if (inStock > 0 && incoming === 0) return { status: "In Stock", color: "bg-green-100 text-green-800" }
-    return { status: "Good", color: "bg-green-100 text-green-800" }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!validateForm()) {
+      toast.error("Please fix the form errors")
+      return
+    }
+
+    try {
+      const url = editingItem ? `/api/inventory/${editingItem.id}` : "/api/inventory"
+      const method = editingItem ? "PUT" : "POST"
+
+      console.log(`🔄 ${method} request to ${url}:`, formData)
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...formData,
+          quantity: formData.quantity ? Number.parseInt(formData.quantity) : 0,
+          unit_price: formData.unit_price ? Number.parseFloat(formData.unit_price) : 0,
+          reorder_level: formData.reorder_level ? Number.parseInt(formData.reorder_level) : 0,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to save inventory item")
+      }
+
+      const result = await response.json()
+      console.log("✅ Save result:", result)
+
+      toast.success(editingItem ? "Inventory item updated successfully" : "Inventory item created successfully")
+
+      setIsDialogOpen(false)
+      resetForm()
+
+      // Refresh the current page
+      await fetchInventoryItems(currentPage)
+    } catch (err) {
+      console.error("❌ Save error:", err)
+      toast.error(err instanceof Error ? err.message : "An error occurred")
+    }
   }
 
-  const totalItems = inventoryItems.length
-  const totalInStock = inventoryItems.reduce((sum, item) => sum + item.inStock, 0)
-  const totalIncoming = inventoryItems.reduce((sum, item) => sum + item.incoming, 0)
-  const outOfStockItems = inventoryItems.filter((item) => item.inStock === 0).length
+  const handleEdit = (item: InventoryItem) => {
+    setEditingItem(item)
+    setFormData({
+      sku: item.sku,
+      name: item.name,
+      description: item.description || "",
+      category: item.category,
+      quantity: item.quantity.toString(),
+      unit_price: item.unit_price.toString(),
+      reorder_level: item.reorder_level.toString(),
+      supplier: item.supplier,
+    })
+    setFormErrors({})
+    setIsDialogOpen(true)
+  }
 
-  const filteredItems = inventoryItems.filter(
-    (item) =>
-      item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const handleDelete = async (id: number) => {
+    try {
+      console.log(`🗑️ Deleting inventory item ${id}`)
 
-  const lowStockItems = inventoryItems.filter((item) => {
-    const available = item.inStock - item.reserved
-    return available <= 10 || item.inStock === 0
-  })
+      const response = await fetch(`/api/inventory/${id}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to delete inventory item")
+      }
+
+      toast.success("Inventory item deleted successfully")
+
+      // Refresh the current page
+      await fetchInventoryItems(currentPage)
+    } catch (err) {
+      console.error("❌ Delete error:", err)
+      toast.error(err instanceof Error ? err.message : "Failed to delete inventory item")
+    }
+  }
+
+  const formatPrice = (price: number | null | undefined): string => {
+    const safePrice = price || 0
+    return safePrice.toFixed(2)
+  }
+
+  const getLowStockItems = () => {
+    return inventoryItems.filter((item) => item.quantity <= item.reorder_level)
+  }
+
+  if (loading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Loading inventory items...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => fetchInventoryItems(currentPage)}>Try Again</Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const lowStockItems = getLowStockItems()
 
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">Inventory Management</h1>
+    <div className="container mx-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Inventory Management</h1>
+          <p className="text-gray-600">Track and manage your inventory items</p>
         </div>
-      </header>
-
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Items</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalItems}</div>
-              <p className="text-xs text-muted-foreground">Active SKUs</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">In Stock</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalInStock.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">
-                <span className="text-green-600 flex items-center">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  Available now
-                </span>
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Incoming Stock</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{totalIncoming.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">From pending POs</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Out of Stock</CardTitle>
-              <TrendingDown className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">{outOfStockItems}</div>
-              <p className="text-xs text-muted-foreground">Items need reorder</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Actions Bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search inventory..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 w-[300px]"
-              />
-            </div>
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Filter
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button onClick={resetForm}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Item
             </Button>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Dialog open={isAddInventoryOpen} onOpenChange={setIsAddInventoryOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Inventory
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add Manual Inventory</DialogTitle>
-                  <DialogDescription>Add inventory manually without a purchase order</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="sku">SKU *</Label>
-                      <Input
-                        id="sku"
-                        placeholder="Product SKU"
-                        value={formData.sku}
-                        onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Product Name *</Label>
-                      <Input
-                        id="name"
-                        placeholder="Product name"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="quantity">Quantity *</Label>
-                      <Input
-                        id="quantity"
-                        type="number"
-                        placeholder="Quantity to add"
-                        value={formData.quantity}
-                        onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="unitCost">Unit Cost *</Label>
-                      <Input
-                        id="unitCost"
-                        type="number"
-                        step="0.01"
-                        placeholder="Cost per unit"
-                        value={formData.unitCost}
-                        onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex justify-end space-x-2">
-                  <Button variant="outline" onClick={() => setIsAddInventoryOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAddInventory}>Add Inventory</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-            <Button size="sm" onClick={handleReorderReport}>
-              <AlertTriangle className="h-4 w-4 mr-2" />
-              Reorder Report
-            </Button>
-          </div>
-        </div>
-
-        {/* Inventory Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Current Inventory</CardTitle>
-            <CardDescription>Real-time inventory tracking with PO status integration</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead>In Stock</TableHead>
-                  <TableHead>Incoming</TableHead>
-                  <TableHead>Reserved</TableHead>
-                  <TableHead>Available</TableHead>
-                  <TableHead>Unit Cost</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredItems.map((item) => {
-                  const stockInfo = getStockStatus(item.inStock, item.incoming)
-                  const available = item.inStock - item.reserved
-                  const unitCost = dataStore.getInventoryUnitCost(item.sku)
-                  return (
-                    <TableRow key={item.sku}>
-                      <TableCell className="font-medium">{item.sku}</TableCell>
-                      <TableCell>{item.name}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
-                          <span className={item.inStock === 0 ? "text-red-600" : ""}>{item.inStock}</span>
-                          {item.inStock === 0 && <AlertTriangle className="h-4 w-4 text-red-500" />}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className={item.incoming > 0 ? "text-blue-600 font-medium" : "text-muted-foreground"}>
-                          {item.incoming}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-orange-600">{item.reserved}</span>
-                      </TableCell>
-                      <TableCell>
-                        <span className={available <= 0 ? "text-red-600 font-medium" : "text-green-600 font-medium"}>
-                          {available}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-medium">${unitCost.toFixed(2)}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={stockInfo.color}>{stockInfo.status}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedItem(item)
-                            setEditQuantity(item.inStock.toString())
-                            setIsEditQuantityOpen(true)
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        {/* Edit Quantity Dialog */}
-        <Dialog open={isEditQuantityOpen} onOpenChange={setIsEditQuantityOpen}>
-          <DialogContent>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Edit Stock Quantity</DialogTitle>
+              <DialogTitle>{editingItem ? "Edit Inventory Item" : "Create New Inventory Item"}</DialogTitle>
               <DialogDescription>
-                Update the in-stock quantity for {selectedItem?.name} ({selectedItem?.sku})
+                {editingItem
+                  ? "Update the inventory item details below."
+                  : "Fill in the details to create a new inventory item."}
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="editQuantity">New In-Stock Quantity</Label>
-                <Input
-                  id="editQuantity"
-                  type="number"
-                  min="0"
-                  value={editQuantity}
-                  onChange={(e) => setEditQuantity(e.target.value)}
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="sku">SKU *</Label>
+                  <Input
+                    id="sku"
+                    value={formData.sku}
+                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                    placeholder="SKU-001"
+                    className={formErrors.sku ? "border-red-500" : ""}
+                  />
+                  {formErrors.sku && <p className="text-red-500 text-sm mt-1">{formErrors.sku}</p>}
+                </div>
+                <div>
+                  <Label htmlFor="name">Name *</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Item name"
+                    className={formErrors.name ? "border-red-500" : ""}
+                  />
+                  {formErrors.name && <p className="text-red-500 text-sm mt-1">{formErrors.name}</p>}
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="description">Description</Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Item description..."
+                  rows={2}
                 />
               </div>
-              <div className="text-sm text-muted-foreground">
-                <p>Current: {selectedItem?.inStock} units</p>
-                <p>Reserved: {selectedItem?.reserved} units</p>
-                <p>
-                  Available after change: {(Number.parseInt(editQuantity) || 0) - (selectedItem?.reserved || 0)} units
-                </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="category">Category *</Label>
+                  <Input
+                    id="category"
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    placeholder="Electronics, Clothing, etc."
+                    className={formErrors.category ? "border-red-500" : ""}
+                  />
+                  {formErrors.category && <p className="text-red-500 text-sm mt-1">{formErrors.category}</p>}
+                </div>
+                <div>
+                  <Label htmlFor="supplier">Supplier *</Label>
+                  <Input
+                    id="supplier"
+                    value={formData.supplier}
+                    onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                    placeholder="Supplier name"
+                    className={formErrors.supplier ? "border-red-500" : ""}
+                  />
+                  {formErrors.supplier && <p className="text-red-500 text-sm mt-1">{formErrors.supplier}</p>}
+                </div>
               </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsEditQuantityOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleEditQuantity}>Update Quantity</Button>
-            </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="quantity">Quantity</Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    min="0"
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                    placeholder="0"
+                    className={formErrors.quantity ? "border-red-500" : ""}
+                  />
+                  {formErrors.quantity && <p className="text-red-500 text-sm mt-1">{formErrors.quantity}</p>}
+                </div>
+                <div>
+                  <Label htmlFor="unit_price">Unit Price</Label>
+                  <Input
+                    id="unit_price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.unit_price}
+                    onChange={(e) => setFormData({ ...formData, unit_price: e.target.value })}
+                    placeholder="0.00"
+                    className={formErrors.unit_price ? "border-red-500" : ""}
+                  />
+                  {formErrors.unit_price && <p className="text-red-500 text-sm mt-1">{formErrors.unit_price}</p>}
+                </div>
+                <div>
+                  <Label htmlFor="reorder_level">Reorder Level</Label>
+                  <Input
+                    id="reorder_level"
+                    type="number"
+                    min="0"
+                    value={formData.reorder_level}
+                    onChange={(e) => setFormData({ ...formData, reorder_level: e.target.value })}
+                    placeholder="0"
+                    className={formErrors.reorder_level ? "border-red-500" : ""}
+                  />
+                  {formErrors.reorder_level && <p className="text-red-500 text-sm mt-1">{formErrors.reorder_level}</p>}
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">{editingItem ? "Update Item" : "Create Item"}</Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
+      </div>
 
-        {/* Reorder Report Dialog */}
-        <Dialog open={isReorderReportOpen} onOpenChange={setIsReorderReportOpen}>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>Reorder Report</DialogTitle>
-              <DialogDescription>Items that are low in stock or out of stock and need reordering</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="text-sm text-muted-foreground">
-                Found {lowStockItems.length} items that need attention
-              </div>
-              <div className="max-h-60 overflow-y-auto">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Items</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalItems}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
+            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{lowStockItems.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              ${formatPrice(inventoryItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0))}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Categories</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{new Set(inventoryItems.map((item) => item.category)).size}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Low Stock Alert */}
+      {lowStockItems.length > 0 && (
+        <Card className="mb-6 border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-red-800 flex items-center">
+              <AlertTriangle className="h-5 w-5 mr-2" />
+              Low Stock Alert
+            </CardTitle>
+            <CardDescription className="text-red-600">
+              {lowStockItems.length} item(s) are at or below their reorder level
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {lowStockItems.slice(0, 3).map((item) => (
+                <div key={item.id} className="flex justify-between items-center">
+                  <span className="font-medium">
+                    {item.name} ({item.sku})
+                  </span>
+                  <Badge variant="destructive">
+                    {item.quantity} / {item.reorder_level}
+                  </Badge>
+                </div>
+              ))}
+              {lowStockItems.length > 3 && (
+                <p className="text-sm text-red-600">And {lowStockItems.length - 3} more items...</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Inventory Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Inventory Items</CardTitle>
+          <CardDescription>
+            {totalItems > 0
+              ? `A list of all inventory items with their current stock levels and details. Showing ${inventoryItems.length} of ${totalItems} items.`
+              : "No inventory items found in the database."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {totalItems === 0 ? (
+            <div className="text-center py-16">
+              <FileX className="h-16 w-16 text-gray-300 mx-auto mb-6" />
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Records Available</h3>
+              <p className="text-gray-500 mb-6 max-w-md mx-auto">
+                There are currently no inventory items in the database. Get started by adding your first inventory item.
+              </p>
+              <Button onClick={resetForm} className="mx-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                Add First Inventory Item
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>SKU</TableHead>
-                      <TableHead>Product Name</TableHead>
-                      <TableHead>Current Stock</TableHead>
-                      <TableHead>Available</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Suggested Reorder</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>Unit Price</TableHead>
+                      <TableHead>Total Value</TableHead>
+                      <TableHead>Supplier</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {lowStockItems.map((item) => {
-                      const available = item.inStock - item.reserved
-                      const stockInfo = getStockStatus(item.inStock, item.incoming)
-                      const suggestedReorder = Math.max(50 - available, 20)
-
-                      return (
-                        <TableRow key={item.sku}>
-                          <TableCell className="font-medium">{item.sku}</TableCell>
-                          <TableCell>{item.name}</TableCell>
-                          <TableCell>{item.inStock}</TableCell>
-                          <TableCell className={available <= 0 ? "text-red-600 font-medium" : ""}>
-                            {available}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={stockInfo.color}>{stockInfo.status}</Badge>
-                          </TableCell>
-                          <TableCell className="font-medium text-blue-600">{suggestedReorder} units</TableCell>
-                        </TableRow>
-                      )
-                    })}
+                    {inventoryItems.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-medium">{item.sku}</TableCell>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{item.name}</div>
+                            {item.description && <div className="text-sm text-gray-500">{item.description}</div>}
+                          </div>
+                        </TableCell>
+                        <TableCell>{item.category}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center space-x-2">
+                            <span>{item.quantity}</span>
+                            {item.quantity <= item.reorder_level && (
+                              <Badge variant="destructive" className="text-xs">
+                                Low
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>${formatPrice(item.unit_price)}</TableCell>
+                        <TableCell>${formatPrice(item.quantity * item.unit_price)}</TableCell>
+                        <TableCell>{item.supplier}</TableCell>
+                        <TableCell>
+                          <div className="flex space-x-2">
+                            <Button variant="outline" size="sm" onClick={() => handleEdit(item)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="outline" size="sm">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This action cannot be undone. This will permanently delete the inventory item "
+                                    {item.name}" ({item.sku}).
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDelete(item.id)}>Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsReorderReportOpen(false)}>
-                Close
-              </Button>
-              <Button onClick={generateReorderReport}>
-                <Download className="h-4 w-4 mr-2" />
-                Download Report
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
 
-        {/* Inventory Status Explanation */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Inventory Status Guide</CardTitle>
-            <CardDescription>Understanding inventory tracking with PO integration</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-medium mb-2">Stock Categories</h4>
-                  <div className="text-sm space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                      <span>
-                        <strong>In Stock:</strong> Available for immediate sale
-                      </span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                      <span>
-                        <strong>Incoming:</strong> From Pending/In Transit POs
-                      </span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                      <span>
-                        <strong>Reserved:</strong> Allocated to orders
-                      </span>
-                    </div>
-                  </div>
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="mt-6">
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            if (currentPage > 1) setCurrentPage(currentPage - 1)
+                          }}
+                          className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              setCurrentPage(page)
+                            }}
+                            isActive={currentPage === page}
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            if (currentPage < totalPages) setCurrentPage(currentPage + 1)
+                          }}
+                          className={currentPage >= totalPages ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
                 </div>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-medium mb-2">PO Status Impact</h4>
-                  <div className="text-sm space-y-2">
-                    <div>
-                      <strong>Draft:</strong> No inventory impact
-                    </div>
-                    <div>
-                      <strong>Pending/In Transit:</strong> Added to "Incoming"
-                    </div>
-                    <div>
-                      <strong>Delivered:</strong> Moved to "In Stock"
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   )
 }

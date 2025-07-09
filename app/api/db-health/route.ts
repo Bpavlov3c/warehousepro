@@ -1,35 +1,82 @@
 import { NextResponse } from "next/server"
-import { healthCheck } from "@/lib/database"
-
-// Add CORS headers
-function addCorsHeaders(response: NextResponse) {
-  response.headers.set("Access-Control-Allow-Origin", "*")
-  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-  return response
-}
-
-export async function OPTIONS() {
-  return addCorsHeaders(new NextResponse(null, { status: 200 }))
-}
+import { testConnection, executeQuery } from "@/lib/database"
 
 export async function GET() {
   try {
-    console.log("🔍 Running database health check...")
-    const health = await healthCheck()
+    console.log("🏥 Health check: Testing database connection...")
 
-    const statusCode = health.status === "healthy" ? 200 : 503
-    const response = NextResponse.json(health, { status: statusCode })
-    return addCorsHeaders(response)
+    // Test basic connection
+    const isConnected = await testConnection()
+    if (!isConnected) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Database connection failed",
+          timestamp: new Date().toISOString(),
+        },
+        { status: 500 },
+      )
+    }
+
+    // Test tables exist
+    const tablesResult = await executeQuery(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('purchase_orders', 'inventory_items', 'shopify_stores')
+      ORDER BY table_name
+    `)
+
+    const tables = tablesResult.rows.map((row) => row.table_name)
+    const expectedTables = ["inventory_items", "purchase_orders", "shopify_stores"]
+    const missingTables = expectedTables.filter((table) => !tables.includes(table))
+
+    // Get record counts
+    const counts = {}
+    for (const table of tables) {
+      try {
+        const countResult = await executeQuery(`SELECT COUNT(*) as count FROM ${table}`)
+        counts[table] = Number.parseInt(countResult.rows[0].count)
+      } catch (error) {
+        counts[table] = "error"
+      }
+    }
+
+    const healthStatus = {
+      status: missingTables.length === 0 ? "healthy" : "warning",
+      database: {
+        connected: true,
+        tables: {
+          found: tables,
+          missing: missingTables,
+          counts: counts,
+        },
+      },
+      environment: {
+        db_host: process.env.DB_HOST || "not set",
+        db_name: process.env.DB_NAME || "not set",
+        db_user: process.env.DB_USER || "not set",
+        db_port: process.env.DB_PORT || "not set",
+      },
+      timestamp: new Date().toISOString(),
+    }
+
+    console.log("✅ Health check completed:", healthStatus.status)
+
+    return NextResponse.json(healthStatus, {
+      status: healthStatus.status === "healthy" ? 200 : 206,
+    })
   } catch (error) {
-    console.error("❌ Health check error:", error)
-    const response = NextResponse.json(
+    console.error("❌ Health check failed:", error)
+
+    return NextResponse.json(
       {
         status: "error",
+        message: "Health check failed",
         error: error instanceof Error ? error.message : "Unknown error",
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }

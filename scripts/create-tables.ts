@@ -1,30 +1,23 @@
-import { executeQuery, testConnection } from "../lib/database"
+import { executeQuery } from "../lib/database"
 
 async function createTables() {
-  console.log("🚀 Starting database table creation...")
-
-  // Test connection first
-  const connected = await testConnection()
-  if (!connected) {
-    console.error("❌ Database connection failed. Exiting...")
-    process.exit(1)
-  }
+  console.log("🏗️ Creating database tables...")
 
   try {
     // Create purchase_orders table
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS purchase_orders (
         id SERIAL PRIMARY KEY,
-        po_number VARCHAR(100) UNIQUE NOT NULL,
+        po_number VARCHAR(50) NOT NULL UNIQUE,
         supplier_name VARCHAR(255) NOT NULL,
         order_date DATE NOT NULL,
         expected_delivery DATE,
-        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'received', 'cancelled')),
-        total_amount DECIMAL(10,2) DEFAULT 0.00,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        total_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
         notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `)
     console.log("✅ Created purchase_orders table")
 
@@ -32,17 +25,17 @@ async function createTables() {
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS inventory_items (
         id SERIAL PRIMARY KEY,
-        sku VARCHAR(100) UNIQUE NOT NULL,
+        sku VARCHAR(50) NOT NULL UNIQUE,
         name VARCHAR(255) NOT NULL,
         description TEXT,
         category VARCHAR(100) NOT NULL,
-        quantity INTEGER DEFAULT 0,
-        unit_price DECIMAL(10,2) NOT NULL,
-        reorder_level INTEGER DEFAULT 10,
-        supplier VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+        quantity INTEGER NOT NULL DEFAULT 0,
+        unit_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+        reorder_level INTEGER NOT NULL DEFAULT 0,
+        supplier VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `)
     console.log("✅ Created inventory_items table")
 
@@ -51,12 +44,12 @@ async function createTables() {
       CREATE TABLE IF NOT EXISTS shopify_stores (
         id SERIAL PRIMARY KEY,
         store_name VARCHAR(255) NOT NULL,
-        shop_domain VARCHAR(255) UNIQUE NOT NULL,
+        shop_domain VARCHAR(255) NOT NULL UNIQUE,
         access_token TEXT NOT NULL,
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `)
     console.log("✅ Created shopify_stores table")
 
@@ -64,39 +57,30 @@ async function createTables() {
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS shopify_orders (
         id SERIAL PRIMARY KEY,
-        shopify_order_id BIGINT UNIQUE NOT NULL,
-        store_id INTEGER REFERENCES shopify_stores(id) ON DELETE CASCADE,
-        order_number VARCHAR(100) NOT NULL,
+        shopify_order_id BIGINT NOT NULL UNIQUE,
+        store_id INTEGER REFERENCES shopify_stores(id),
+        order_number VARCHAR(50) NOT NULL,
         customer_email VARCHAR(255),
         customer_name VARCHAR(255),
-        total_amount DECIMAL(10,2) NOT NULL,
-        currency VARCHAR(3) DEFAULT 'USD',
+        total_price NUMERIC(10,2) NOT NULL,
+        currency VARCHAR(3) NOT NULL DEFAULT 'USD',
         fulfillment_status VARCHAR(50),
         financial_status VARCHAR(50),
-        order_date TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+        order_date TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `)
     console.log("✅ Created shopify_orders table")
 
-    // Create indexes for better performance
-    await executeQuery(`
-      CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
-      CREATE INDEX IF NOT EXISTS idx_purchase_orders_order_date ON purchase_orders(order_date);
-      CREATE INDEX IF NOT EXISTS idx_inventory_items_sku ON inventory_items(sku);
-      CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(category);
-      CREATE INDEX IF NOT EXISTS idx_shopify_orders_store_id ON shopify_orders(store_id);
-      CREATE INDEX IF NOT EXISTS idx_shopify_orders_order_date ON shopify_orders(order_date);
-    `)
-    console.log("✅ Created database indexes")
-
-    console.log("🎉 Database tables created successfully!")
+    console.log("🎉 All tables created successfully!")
   } catch (error) {
     console.error("❌ Error creating tables:", error)
     process.exit(1)
   }
 }
 
-// Run the script
-createTables()
+createTables().catch((error) => {
+  console.error("❌ Script error:", error)
+  process.exit(1)
+})
