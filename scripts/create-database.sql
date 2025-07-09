@@ -108,6 +108,8 @@ CREATE INDEX idx_inventory_product_id ON inventory(product_id);
 CREATE INDEX idx_shopify_orders_date ON shopify_orders(order_date);
 CREATE INDEX idx_shopify_order_items_sku ON shopify_order_items(sku);
 CREATE INDEX idx_sales_fulfillment_order_item ON sales_fulfillment(order_item_id);
+CREATE INDEX idx_purchase_orders_status ON purchase_orders(status);
+CREATE INDEX idx_shopify_stores_status ON shopify_stores(status);
 
 -- Create views for reporting
 CREATE VIEW product_inventory_summary AS
@@ -118,7 +120,12 @@ SELECT
     COALESCE(AVG(i.unit_cost), 0) as avg_cost,
     COALESCE(SUM(i.quantity_available * i.unit_cost), 0) as total_value,
     p.min_stock,
-    p.max_stock
+    p.max_stock,
+    CASE 
+        WHEN COALESCE(SUM(i.quantity_available), 0) <= p.min_stock THEN 'Low Stock'
+        WHEN COALESCE(SUM(i.quantity_available), 0) >= p.max_stock THEN 'Overstock'
+        ELSE 'Normal'
+    END as stock_status
 FROM products p
 LEFT JOIN inventory i ON p.id = i.product_id
 GROUP BY p.id, p.sku, p.name, p.min_stock, p.max_stock;
@@ -132,7 +139,34 @@ SELECT
     SUM(soi.total_price) as total_revenue,
     COALESCE(AVG(sf.unit_cost), 0) as avg_cost,
     COALESCE(SUM(sf.quantity_used * sf.unit_cost), 0) as total_cost,
-    SUM(soi.total_price) - COALESCE(SUM(sf.quantity_used * sf.unit_cost), 0) as gross_profit
+    SUM(soi.total_price) - COALESCE(SUM(sf.quantity_used * sf.unit_cost), 0) as gross_profit,
+    CASE 
+        WHEN SUM(soi.total_price) > 0 THEN 
+            ((SUM(soi.total_price) - COALESCE(SUM(sf.quantity_used * sf.unit_cost), 0)) / SUM(soi.total_price)) * 100
+        ELSE 0 
+    END as profit_margin_percent
 FROM shopify_order_items soi
 LEFT JOIN sales_fulfillment sf ON soi.id = sf.order_item_id
 GROUP BY soi.sku, soi.product_name;
+
+-- Create function to update timestamps
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create triggers for updated_at columns
+CREATE TRIGGER update_purchase_orders_updated_at 
+    BEFORE UPDATE ON purchase_orders 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_products_updated_at 
+    BEFORE UPDATE ON products 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Show table creation summary
+SELECT 'Database schema created successfully!' as status;
+SELECT schemaname, tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
