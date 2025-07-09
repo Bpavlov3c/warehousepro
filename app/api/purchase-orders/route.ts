@@ -3,55 +3,54 @@ import { createServerClient, handleSupabaseError } from "@/lib/supabase"
 
 export async function GET(_: NextRequest) {
   try {
+    console.log("🔄 Fetching purchase orders from Supabase...")
+
     const supabase = createServerClient()
 
-    // ——————————————————————————
-    // 1️⃣  Fetch purchase_orders only
-    // ——————————————————————————
-    const { data: orders, error: orderErr } = await supabase
+    // First, fetch purchase orders
+    const { data: orders, error: orderError } = await supabase
       .from("purchase_orders")
       .select("*")
-      .order("po_date", { ascending: false })
+      .order("created_at", { ascending: false })
 
-    if (orderErr) {
-      console.error("❌ Supabase order query failed:", orderErr)
+    if (orderError) {
+      console.error("❌ Supabase order query failed:", orderError)
       return NextResponse.json(
-        { error: "Supabase order query failed", details: handleSupabaseError(orderErr) },
+        { error: "Failed to fetch purchase orders", details: handleSupabaseError(orderError) },
         { status: 500 },
       )
     }
 
     if (!orders || orders.length === 0) {
+      console.log("✅ No purchase orders found")
       return NextResponse.json([])
     }
 
-    // ——————————————————————————
-    // 2️⃣  Fetch items for each order in parallel
-    // ——————————————————————————
+    // Then fetch items for each order
     const ordersWithItems = await Promise.all(
-      orders.map(async (o) => {
-        const { data: items, error: itemErr } = await supabase.from("po_items").select("*").eq("po_id", o.id)
+      orders.map(async (order) => {
+        const { data: items, error: itemsError } = await supabase.from("po_items").select("*").eq("po_id", order.id)
 
-        if (itemErr) {
-          console.warn(`⚠️  Could not fetch items for PO ${o.id}:`, itemErr)
+        if (itemsError) {
+          console.warn(`⚠️ Could not fetch items for PO ${order.id}:`, itemsError)
         }
 
         return {
-          ...o,
-          items: items ?? [],
+          ...order,
+          items: items || [],
         }
       }),
     )
 
-    console.log(`✅ Returned ${ordersWithItems.length} purchase orders`)
-
+    console.log(`✅ Found ${ordersWithItems.length} purchase orders`)
     return NextResponse.json(ordersWithItems)
-  } catch (err) {
-    console.error("❌ Unexpected API error:", err)
+  } catch (error) {
+    console.error("❌ Error fetching purchase orders:", error)
+
     return NextResponse.json(
       {
         error: "Failed to fetch purchase orders",
-        details: err instanceof Error ? err.message : "Unknown error",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
@@ -91,7 +90,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Purchase order number already exists" }, { status: 409 })
       }
 
-      throw error
+      return NextResponse.json(
+        { error: "Failed to create purchase order", details: handleSupabaseError(error) },
+        { status: 500 },
+      )
     }
 
     console.log("✅ Purchase order created:", newOrder.id)

@@ -11,18 +11,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // Create a single supabase client for interacting with your database
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// Server-side client.
-// Will use the service-role key when it exists, otherwise it safely falls back to the anon key
-// so read-only endpoints never crash in non-production environments.
+// Server-side client with service role key for admin operations
 export const createServerClient = () => {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-  if (!key) {
-    throw new Error("Missing Supabase key – set SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY")
+  if (!supabaseServiceKey) {
+    throw new Error("Missing Supabase service role key")
   }
 
-  return createClient(supabaseUrl, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
   })
 }
 
