@@ -1,115 +1,145 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { PurchaseOrderStore } from "@/lib/db-store"
-
-// Add CORS headers
-function addCorsHeaders(response: NextResponse) {
-  response.headers.set("Access-Control-Allow-Origin", "*")
-  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-  return response
-}
-
-export async function OPTIONS() {
-  return addCorsHeaders(new NextResponse(null, { status: 200 }))
-}
+import { createServerClient } from "@/lib/supabase"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const id = Number.parseInt(params.id)
+
     if (isNaN(id)) {
-      const response = NextResponse.json({ error: "Invalid ID" }, { status: 400 })
-      return addCorsHeaders(response)
+      return NextResponse.json({ error: "Invalid purchase order ID" }, { status: 400 })
     }
 
-    const purchaseOrder = await PurchaseOrderStore.getById(id)
-    if (!purchaseOrder) {
-      const response = NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
-      return addCorsHeaders(response)
+    console.log(`🔄 Fetching purchase order ${id} from Supabase...`)
+
+    const supabase = createServerClient()
+
+    const { data: purchaseOrder, error } = await supabase
+      .from("purchase_orders")
+      .select(`
+        *,
+        po_items (
+          id,
+          sku,
+          product_name,
+          quantity,
+          unit_cost,
+          total_cost,
+          created_at
+        )
+      `)
+      .eq("id", id)
+      .single()
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
+      }
+
+      console.error("❌ Supabase error:", error)
+      throw error
     }
 
-    const response = NextResponse.json(purchaseOrder)
-    return addCorsHeaders(response)
+    console.log("✅ Purchase order found")
+
+    // Transform the data to match our interface
+    const transformedOrder = {
+      ...purchaseOrder,
+      items: purchaseOrder.po_items || [],
+    }
+
+    return NextResponse.json(transformedOrder)
   } catch (error) {
     console.error("❌ Error fetching purchase order:", error)
-    const response = NextResponse.json(
-      { error: "Failed to fetch purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+
+    return NextResponse.json(
+      {
+        error: "Failed to fetch purchase order",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const id = Number.parseInt(params.id)
-    if (isNaN(id)) {
-      const response = NextResponse.json({ error: "Invalid ID" }, { status: 400 })
-      return addCorsHeaders(response)
-    }
-
     const body = await request.json()
-    console.log(`📝 Updating purchase order ${id}:`, body)
 
-    // Convert total_amount and delivery_cost to number if provided
-    if (body.total_amount !== undefined) {
-      body.total_amount = Number.parseFloat(body.total_amount) || 0
-    }
-    if (body.delivery_cost !== undefined) {
-      body.delivery_cost = Number.parseFloat(body.delivery_cost) || 0
+    if (isNaN(id)) {
+      return NextResponse.json({ error: "Invalid purchase order ID" }, { status: 400 })
     }
 
-    const updatedPurchaseOrder = await PurchaseOrderStore.update(id, body)
+    console.log(`📝 Updating purchase order ${id} in Supabase:`, body)
 
-    if (!updatedPurchaseOrder) {
-      const response = NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
-      return addCorsHeaders(response)
+    const supabase = createServerClient()
+
+    const { data: updatedOrder, error } = await supabase
+      .from("purchase_orders")
+      .update({
+        ...body,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
+      }
+
+      console.error("❌ Supabase error:", error)
+      throw error
     }
 
-    console.log("✅ Purchase order updated:", updatedPurchaseOrder.id)
-    const response = NextResponse.json(updatedPurchaseOrder)
-    return addCorsHeaders(response)
+    console.log("✅ Purchase order updated")
+
+    return NextResponse.json(updatedOrder)
   } catch (error) {
     console.error("❌ Error updating purchase order:", error)
 
-    // Handle unique constraint violation
-    if (error instanceof Error && error.message.includes("duplicate key")) {
-      const response = NextResponse.json({ error: "PO Number already exists" }, { status: 409 })
-      return addCorsHeaders(response)
-    }
-
-    const response = NextResponse.json(
-      { error: "Failed to update purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+    return NextResponse.json(
+      {
+        error: "Failed to update purchase order",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const id = Number.parseInt(params.id)
+
     if (isNaN(id)) {
-      const response = NextResponse.json({ error: "Invalid ID" }, { status: 400 })
-      return addCorsHeaders(response)
+      return NextResponse.json({ error: "Invalid purchase order ID" }, { status: 400 })
     }
 
-    console.log(`🗑️ Deleting purchase order ${id}`)
-    const deleted = await PurchaseOrderStore.delete(id)
+    console.log(`🗑️ Deleting purchase order ${id} from Supabase...`)
 
-    if (!deleted) {
-      const response = NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
-      return addCorsHeaders(response)
+    const supabase = createServerClient()
+
+    const { error } = await supabase.from("purchase_orders").delete().eq("id", id)
+
+    if (error) {
+      console.error("❌ Supabase error:", error)
+      throw error
     }
 
-    console.log("✅ Purchase order deleted:", id)
-    const response = NextResponse.json({ message: "Purchase order deleted successfully" })
-    return addCorsHeaders(response)
+    console.log("✅ Purchase order deleted")
+
+    return NextResponse.json({ message: "Purchase order deleted successfully" })
   } catch (error) {
     console.error("❌ Error deleting purchase order:", error)
-    const response = NextResponse.json(
-      { error: "Failed to delete purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+
+    return NextResponse.json(
+      {
+        error: "Failed to delete purchase order",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }

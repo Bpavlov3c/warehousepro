@@ -1,84 +1,111 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { PurchaseOrderStore } from "@/lib/db-store"
+import { createServerClient, handleSupabaseError } from "@/lib/supabase"
 
-// Add CORS headers
-function addCorsHeaders(response: NextResponse) {
-  response.headers.set("Access-Control-Allow-Origin", "*")
-  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-  return response
-}
-
-export async function OPTIONS() {
-  return addCorsHeaders(new NextResponse(null, { status: 200 }))
-}
-
-export async function GET(request: NextRequest) {
+export async function GET(_: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "10")
+    const supabase = createServerClient()
 
-    console.log(`📦 Fetching purchase orders - Page: ${page}, Limit: ${limit}`)
+    // ——————————————————————————
+    // 1️⃣  Fetch purchase_orders only
+    // ——————————————————————————
+    const { data: orders, error: orderErr } = await supabase
+      .from("purchase_orders")
+      .select("*")
+      .order("po_date", { ascending: false })
 
-    const result = await PurchaseOrderStore.getAll(page, limit)
-    console.log(`✅ Found ${result.data.length} purchase orders (${result.total} total)`)
+    if (orderErr) {
+      console.error("❌ Supabase order query failed:", orderErr)
+      return NextResponse.json(
+        { error: "Supabase order query failed", details: handleSupabaseError(orderErr) },
+        { status: 500 },
+      )
+    }
 
-    const response = NextResponse.json(result)
-    return addCorsHeaders(response)
-  } catch (error) {
-    console.error("❌ Error fetching purchase orders:", error)
-    const response = NextResponse.json(
+    if (!orders || orders.length === 0) {
+      return NextResponse.json([])
+    }
+
+    // ——————————————————————————
+    // 2️⃣  Fetch items for each order in parallel
+    // ——————————————————————————
+    const ordersWithItems = await Promise.all(
+      orders.map(async (o) => {
+        const { data: items, error: itemErr } = await supabase.from("po_items").select("*").eq("po_id", o.id)
+
+        if (itemErr) {
+          console.warn(`⚠️  Could not fetch items for PO ${o.id}:`, itemErr)
+        }
+
+        return {
+          ...o,
+          items: items ?? [],
+        }
+      }),
+    )
+
+    console.log(`✅ Returned ${ordersWithItems.length} purchase orders`)
+
+    return NextResponse.json(ordersWithItems)
+  } catch (err) {
+    console.error("❌ Unexpected API error:", err)
+    return NextResponse.json(
       {
         error: "Failed to fetch purchase orders",
-        details: error instanceof Error ? error.message : "Unknown error",
+        details: err instanceof Error ? err.message : "Unknown error",
       },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log("📝 Creating purchase order:", body)
+    console.log("📝 Creating purchase order in Supabase:", body)
+
+    const supabase = createServerClient()
 
     // Validate required fields
     if (!body.po_number || !body.supplier_name || !body.po_date) {
-      const response = NextResponse.json(
-        { error: "Missing required fields: po_number, supplier_name, po_date" },
-        { status: 400 },
-      )
-      return addCorsHeaders(response)
+      return NextResponse.json({ error: "Missing required fields: po_number, supplier_name, po_date" }, { status: 400 })
     }
 
-    const purchaseOrder = await PurchaseOrderStore.create({
-      po_number: body.po_number,
-      supplier_name: body.supplier_name,
-      po_date: body.po_date,
-      delivery_cost: Number.parseFloat(body.delivery_cost) || 0,
-      status: body.status || "Pending",
-      notes: body.notes,
-      items: body.items || [],
-    })
+    const { data: newOrder, error } = await supabase
+      .from("purchase_orders")
+      .insert({
+        po_number: body.po_number,
+        supplier_name: body.supplier_name,
+        po_date: body.po_date,
+        delivery_cost: body.delivery_cost || 0,
+        status: body.status || "Pending",
+        notes: body.notes || null,
+      })
+      .select()
+      .single()
 
-    console.log("✅ Purchase order created:", purchaseOrder.id)
-    const response = NextResponse.json(purchaseOrder, { status: 201 })
-    return addCorsHeaders(response)
+    if (error) {
+      console.error("❌ Supabase error:", error)
+
+      // Handle unique constraint violation
+      if (error.code === "23505") {
+        return NextResponse.json({ error: "Purchase order number already exists" }, { status: 409 })
+      }
+
+      throw error
+    }
+
+    console.log("✅ Purchase order created:", newOrder.id)
+
+    return NextResponse.json(newOrder, { status: 201 })
   } catch (error) {
     console.error("❌ Error creating purchase order:", error)
 
-    // Handle unique constraint violation
-    if (error instanceof Error && error.message.includes("duplicate key")) {
-      const response = NextResponse.json({ error: "PO Number already exists" }, { status: 409 })
-      return addCorsHeaders(response)
-    }
-
-    const response = NextResponse.json(
-      { error: "Failed to create purchase order", details: error instanceof Error ? error.message : "Unknown error" },
+    return NextResponse.json(
+      {
+        error: "Failed to create purchase order",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }
