@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -37,7 +38,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { Plus, Edit, Trash2, Package, AlertTriangle, TrendingDown, FileX } from "lucide-react"
+import { Plus, Edit, Trash2, Package, AlertTriangle, TrendingDown, DollarSign, FileX } from "lucide-react"
 import { toast } from "sonner"
 
 interface InventoryItem {
@@ -53,6 +54,20 @@ interface InventoryItem {
   created_at: string
   updated_at: string
 }
+
+const categories = [
+  "Electronics",
+  "Clothing",
+  "Food & Beverage",
+  "Home & Garden",
+  "Sports & Outdoors",
+  "Books",
+  "Toys & Games",
+  "Health & Beauty",
+  "Automotive",
+  "Office Supplies",
+  "Other",
+]
 
 export default function InventoryPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
@@ -136,7 +151,7 @@ export default function InventoryPage() {
     if (!formData.name.trim()) {
       errors.name = "Name is required"
     }
-    if (!formData.category.trim()) {
+    if (!formData.category) {
       errors.category = "Category is required"
     }
     if (!formData.supplier.trim()) {
@@ -146,10 +161,10 @@ export default function InventoryPage() {
       errors.quantity = "Quantity must be a valid number"
     }
     if (formData.unit_price && isNaN(Number.parseFloat(formData.unit_price))) {
-      errors.unit_price = "Unit Price must be a valid number"
+      errors.unit_price = "Unit price must be a valid number"
     }
     if (formData.reorder_level && isNaN(Number.parseInt(formData.reorder_level))) {
-      errors.reorder_level = "Reorder Level must be a valid number"
+      errors.reorder_level = "Reorder level must be a valid number"
     }
 
     setFormErrors(errors)
@@ -267,6 +282,10 @@ export default function InventoryPage() {
     return inventoryItems.filter((item) => item.quantity <= item.reorder_level)
   }
 
+  const getTotalValue = () => {
+    return inventoryItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
+  }
+
   if (loading) {
     return (
       <div className="container mx-auto p-6">
@@ -294,20 +313,18 @@ export default function InventoryPage() {
     )
   }
 
-  const lowStockItems = getLowStockItems()
-
   return (
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold">Inventory Management</h1>
-          <p className="text-gray-600">Track and manage your inventory items</p>
+          <p className="text-gray-600">Track and manage your inventory items and stock levels</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button onClick={resetForm}>
               <Plus className="mr-2 h-4 w-4" />
-              New Item
+              New Inventory Item
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
@@ -338,7 +355,7 @@ export default function InventoryPage() {
                     id="name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Item name"
+                    placeholder="Product name"
                     className={formErrors.name ? "border-red-500" : ""}
                   />
                   {formErrors.name && <p className="text-red-500 text-sm mt-1">{formErrors.name}</p>}
@@ -351,21 +368,29 @@ export default function InventoryPage() {
                   id="description"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Item description..."
-                  rows={2}
+                  placeholder="Product description..."
+                  rows={3}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="category">Category *</Label>
-                  <Input
-                    id="category"
+                  <Select
                     value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    placeholder="Electronics, Clothing, etc."
-                    className={formErrors.category ? "border-red-500" : ""}
-                  />
+                    onValueChange={(value) => setFormData({ ...formData, category: value })}
+                  >
+                    <SelectTrigger className={formErrors.category ? "border-red-500" : ""}>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {formErrors.category && <p className="text-red-500 text-sm mt-1">{formErrors.category}</p>}
                 </div>
                 <div>
@@ -452,18 +477,16 @@ export default function InventoryPage() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{lowStockItems.length}</div>
+            <div className="text-2xl font-bold text-red-600">{getLowStockItems().length}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              ${formatPrice(inventoryItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0))}
-            </div>
+            <div className="text-2xl font-bold">${formatPrice(getTotalValue())}</div>
           </CardContent>
         </Card>
         <Card>
@@ -477,45 +500,13 @@ export default function InventoryPage() {
         </Card>
       </div>
 
-      {/* Low Stock Alert */}
-      {lowStockItems.length > 0 && (
-        <Card className="mb-6 border-red-200 bg-red-50">
-          <CardHeader>
-            <CardTitle className="text-red-800 flex items-center">
-              <AlertTriangle className="h-5 w-5 mr-2" />
-              Low Stock Alert
-            </CardTitle>
-            <CardDescription className="text-red-600">
-              {lowStockItems.length} item(s) are at or below their reorder level
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {lowStockItems.slice(0, 3).map((item) => (
-                <div key={item.id} className="flex justify-between items-center">
-                  <span className="font-medium">
-                    {item.name} ({item.sku})
-                  </span>
-                  <Badge variant="destructive">
-                    {item.quantity} / {item.reorder_level}
-                  </Badge>
-                </div>
-              ))}
-              {lowStockItems.length > 3 && (
-                <p className="text-sm text-red-600">And {lowStockItems.length - 3} more items...</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Inventory Table */}
+      {/* Inventory Items Table */}
       <Card>
         <CardHeader>
           <CardTitle>Inventory Items</CardTitle>
           <CardDescription>
             {totalItems > 0
-              ? `A list of all inventory items with their current stock levels and details. Showing ${inventoryItems.length} of ${totalItems} items.`
+              ? `A list of all inventory items with their stock levels and details. Showing ${inventoryItems.length} of ${totalItems} items.`
               : "No inventory items found in the database."}
           </CardDescription>
         </CardHeader>
@@ -525,11 +516,12 @@ export default function InventoryPage() {
               <FileX className="h-16 w-16 text-gray-300 mx-auto mb-6" />
               <h3 className="text-xl font-semibold text-gray-700 mb-2">No Records Available</h3>
               <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                There are currently no inventory items in the database. Get started by adding your first inventory item.
+                There are currently no inventory items in the database. Get started by creating your first inventory
+                item.
               </p>
-              <Button onClick={resetForm} className="mx-auto">
+              <Button onClick={() => setIsDialogOpen(true)} className="mx-auto">
                 <Plus className="mr-2 h-4 w-4" />
-                Add First Inventory Item
+                Create First Inventory Item
               </Button>
             </div>
           ) : (
@@ -544,7 +536,7 @@ export default function InventoryPage() {
                       <TableHead>Quantity</TableHead>
                       <TableHead>Unit Price</TableHead>
                       <TableHead>Total Value</TableHead>
-                      <TableHead>Supplier</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -555,23 +547,22 @@ export default function InventoryPage() {
                         <TableCell>
                           <div>
                             <div className="font-medium">{item.name}</div>
-                            {item.description && <div className="text-sm text-gray-500">{item.description}</div>}
-                          </div>
-                        </TableCell>
-                        <TableCell>{item.category}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center space-x-2">
-                            <span>{item.quantity}</span>
-                            {item.quantity <= item.reorder_level && (
-                              <Badge variant="destructive" className="text-xs">
-                                Low
-                              </Badge>
+                            {item.description && (
+                              <div className="text-sm text-gray-500 truncate max-w-xs">{item.description}</div>
                             )}
                           </div>
                         </TableCell>
+                        <TableCell>{item.category}</TableCell>
+                        <TableCell>{item.quantity}</TableCell>
                         <TableCell>${formatPrice(item.unit_price)}</TableCell>
                         <TableCell>${formatPrice(item.quantity * item.unit_price)}</TableCell>
-                        <TableCell>{item.supplier}</TableCell>
+                        <TableCell>
+                          {item.quantity <= item.reorder_level ? (
+                            <Badge variant="destructive">Low Stock</Badge>
+                          ) : (
+                            <Badge variant="secondary">In Stock</Badge>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <div className="flex space-x-2">
                             <Button variant="outline" size="sm" onClick={() => handleEdit(item)}>
@@ -588,7 +579,7 @@ export default function InventoryPage() {
                                   <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                                   <AlertDialogDescription>
                                     This action cannot be undone. This will permanently delete the inventory item "
-                                    {item.name}" ({item.sku}).
+                                    {item.name}" (SKU: {item.sku}).
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>

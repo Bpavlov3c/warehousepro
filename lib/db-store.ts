@@ -5,7 +5,7 @@ export interface PurchaseOrder {
   id: number
   po_number: string
   supplier_name: string
-  order_date: string
+  po_date: string
   expected_delivery?: string
   status: "pending" | "approved" | "received" | "cancelled"
   total_amount: number
@@ -17,7 +17,7 @@ export interface PurchaseOrder {
 export interface CreatePurchaseOrderData {
   po_number: string
   supplier_name: string
-  order_date: string
+  po_date: string
   expected_delivery?: string
   status?: "pending" | "approved" | "received" | "cancelled"
   total_amount?: number
@@ -32,7 +32,7 @@ export class PurchaseOrderStore {
         id SERIAL PRIMARY KEY,
         po_number VARCHAR(50) NOT NULL UNIQUE,
         supplier_name VARCHAR(255) NOT NULL,
-        order_date DATE NOT NULL,
+        po_date DATE NOT NULL,
         expected_delivery DATE,
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
         total_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -57,7 +57,7 @@ export class PurchaseOrderStore {
         id,
         po_number,
         supplier_name,
-        order_date,
+        po_date,
         expected_delivery,
         status,
         COALESCE(total_amount, 0) as total_amount,
@@ -85,7 +85,7 @@ export class PurchaseOrderStore {
         id,
         po_number,
         supplier_name,
-        order_date,
+        po_date,
         expected_delivery,
         status,
         COALESCE(total_amount, 0) as total_amount,
@@ -105,14 +105,14 @@ export class PurchaseOrderStore {
     const result = await executeQuery(
       `
       INSERT INTO purchase_orders (
-        po_number, supplier_name, order_date, expected_delivery, 
+        po_number, supplier_name, po_date, expected_delivery, 
         status, total_amount, notes
       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING 
         id,
         po_number,
         supplier_name,
-        order_date,
+        po_date,
         expected_delivery,
         status,
         COALESCE(total_amount, 0) as total_amount,
@@ -123,7 +123,7 @@ export class PurchaseOrderStore {
       [
         data.po_number,
         data.supplier_name,
-        data.order_date,
+        data.po_date,
         data.expected_delivery || null,
         data.status || "pending",
         data.total_amount || 0,
@@ -147,9 +147,9 @@ export class PurchaseOrderStore {
       fields.push(`supplier_name = $${paramCount++}`)
       values.push(data.supplier_name)
     }
-    if (data.order_date !== undefined) {
-      fields.push(`order_date = $${paramCount++}`)
-      values.push(data.order_date)
+    if (data.po_date !== undefined) {
+      fields.push(`po_date = $${paramCount++}`)
+      values.push(data.po_date)
     }
     if (data.expected_delivery !== undefined) {
       fields.push(`expected_delivery = $${paramCount++}`)
@@ -184,7 +184,7 @@ export class PurchaseOrderStore {
         id,
         po_number,
         supplier_name,
-        order_date,
+        po_date,
         expected_delivery,
         status,
         COALESCE(total_amount, 0) as total_amount,

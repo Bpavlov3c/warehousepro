@@ -45,7 +45,7 @@ interface PurchaseOrder {
   id: number
   po_number: string
   supplier_name: string
-  order_date: string
+  po_date: string
   expected_delivery?: string
   status: "pending" | "approved" | "received" | "cancelled"
   total_amount: number
@@ -75,7 +75,7 @@ export default function PurchaseOrdersPage() {
   const [formData, setFormData] = useState({
     po_number: "",
     supplier_name: "",
-    order_date: "",
+    po_date: "",
     expected_delivery: "",
     status: "pending" as const,
     total_amount: "",
@@ -142,8 +142,8 @@ export default function PurchaseOrdersPage() {
     if (!formData.supplier_name.trim()) {
       errors.supplier_name = "Supplier Name is required"
     }
-    if (!formData.order_date) {
-      errors.order_date = "Order Date is required"
+    if (!formData.po_date) {
+      errors.po_date = "PO Date is required"
     }
     if (formData.total_amount && isNaN(Number.parseFloat(formData.total_amount))) {
       errors.total_amount = "Total Amount must be a valid number"
@@ -157,7 +157,7 @@ export default function PurchaseOrdersPage() {
     setFormData({
       po_number: "",
       supplier_name: "",
-      order_date: "",
+      po_date: "",
       expected_delivery: "",
       status: "pending",
       total_amount: "",
@@ -218,7 +218,7 @@ export default function PurchaseOrdersPage() {
     setFormData({
       po_number: order.po_number,
       supplier_name: order.supplier_name,
-      order_date: order.order_date,
+      po_date: order.po_date,
       expected_delivery: order.expected_delivery || "",
       status: order.status,
       total_amount: order.total_amount.toString(),
@@ -334,15 +334,15 @@ export default function PurchaseOrdersPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="order_date">Order Date *</Label>
+                  <Label htmlFor="po_date">PO Date *</Label>
                   <Input
-                    id="order_date"
+                    id="po_date"
                     type="date"
-                    value={formData.order_date}
-                    onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
-                    className={formErrors.order_date ? "border-red-500" : ""}
+                    value={formData.po_date}
+                    onChange={(e) => setFormData({ ...formData, po_date: e.target.value })}
+                    className={formErrors.po_date ? "border-red-500" : ""}
                   />
-                  {formErrors.order_date && <p className="text-red-500 text-sm mt-1">{formErrors.order_date}</p>}
+                  {formErrors.po_date && <p className="text-red-500 text-sm mt-1">{formErrors.po_date}</p>}
                 </div>
                 <div>
                   <Label htmlFor="expected_delivery">Expected Delivery</Label>
@@ -472,7 +472,7 @@ export default function PurchaseOrdersPage() {
                 There are currently no purchase orders in the database. Get started by creating your first purchase
                 order.
               </p>
-              <Button onClick={resetForm} className="mx-auto">
+              <Button onClick={() => setIsDialogOpen(true)} className="mx-auto">
                 <Plus className="mr-2 h-4 w-4" />
                 Create First Purchase Order
               </Button>
@@ -485,7 +485,7 @@ export default function PurchaseOrdersPage() {
                     <TableRow>
                       <TableHead>PO Number</TableHead>
                       <TableHead>Supplier</TableHead>
-                      <TableHead>Order Date</TableHead>
+                      <TableHead>PO Date</TableHead>
                       <TableHead>Expected Delivery</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Total Amount</TableHead>
@@ -497,7 +497,7 @@ export default function PurchaseOrdersPage() {
                       <TableRow key={order.id}>
                         <TableCell className="font-medium">{order.po_number}</TableCell>
                         <TableCell>{order.supplier_name}</TableCell>
-                        <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
+                        <TableCell>{new Date(order.po_date).toLocaleDateString()}</TableCell>
                         <TableCell>
                           {order.expected_delivery ? new Date(order.expected_delivery).toLocaleDateString() : "Not set"}
                         </TableCell>

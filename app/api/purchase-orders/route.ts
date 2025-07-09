@@ -31,17 +31,14 @@ export async function POST(request: NextRequest) {
     console.log("📝 Creating purchase order:", body)
 
     // Validate required fields
-    if (!body.po_number || !body.supplier_name || !body.order_date) {
-      return NextResponse.json(
-        { error: "Missing required fields: po_number, supplier_name, order_date" },
-        { status: 400 },
-      )
+    if (!body.po_number || !body.supplier_name || !body.po_date) {
+      return NextResponse.json({ error: "Missing required fields: po_number, supplier_name, po_date" }, { status: 400 })
     }
 
     const purchaseOrder = await PurchaseOrderStore.create({
       po_number: body.po_number,
       supplier_name: body.supplier_name,
-      order_date: body.order_date,
+      po_date: body.po_date,
       expected_delivery: body.expected_delivery,
       status: body.status || "pending",
       total_amount: Number.parseFloat(body.total_amount) || 0,
