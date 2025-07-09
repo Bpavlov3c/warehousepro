@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getPurchaseOrders, createPurchaseOrder } from "@/lib/db-store"
+import { getAllPurchaseOrders, createPurchaseOrder } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const purchaseOrders = await getPurchaseOrders()
+    const purchaseOrders = await getAllPurchaseOrders()
     return NextResponse.json(purchaseOrders)
   } catch (error) {
     console.error("Error fetching purchase orders:", error)
@@ -14,23 +14,34 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { purchaseOrder, items } = body
 
-    if (!purchaseOrder || !items || !Array.isArray(items)) {
-      return NextResponse.json({ error: "Invalid request body. Expected purchaseOrder and items." }, { status: 400 })
+    // Calculate costs for each item
+    const itemsWithCosts = body.items.map((item: any) => {
+      const deliveryCostPerUnit =
+        (body.deliveryCost || 0) / body.items.reduce((sum: number, i: any) => sum + i.quantity, 0)
+      const totalCost = (item.unitCost + deliveryCostPerUnit) * item.quantity
+
+      return {
+        ...item,
+        deliveryCostPerUnit,
+        totalCost,
+      }
+    })
+
+    // Calculate total cost
+    const totalCost = itemsWithCosts.reduce((sum: number, item: any) => sum + item.totalCost, 0)
+
+    const purchaseOrderData = {
+      supplier: body.supplier,
+      orderDate: body.orderDate,
+      expectedDelivery: body.expectedDelivery,
+      status: body.status || "pending",
+      items: itemsWithCosts,
+      totalCost,
+      notes: body.notes,
     }
 
-    // Calculate delivery cost per unit for each item
-    const totalQuantity = items.reduce((sum: number, item: any) => sum + item.quantity, 0)
-    const deliveryCostPerUnit = totalQuantity > 0 ? purchaseOrder.delivery_cost / totalQuantity : 0
-
-    const processedItems = items.map((item: any) => ({
-      ...item,
-      delivery_cost_per_unit: deliveryCostPerUnit,
-      total_cost: item.unit_cost * item.quantity + deliveryCostPerUnit * item.quantity,
-    }))
-
-    const newPurchaseOrder = await createPurchaseOrder(purchaseOrder, processedItems)
+    const newPurchaseOrder = await createPurchaseOrder(purchaseOrderData)
     return NextResponse.json(newPurchaseOrder, { status: 201 })
   } catch (error) {
     console.error("Error creating purchase order:", error)

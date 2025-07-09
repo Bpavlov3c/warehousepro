@@ -1,266 +1,114 @@
--- Seed sample data for Warehouse Management System
+-- Sample data for warehouse management system
+-- Run this after creating the database structure
 
--- Clear existing data (in correct order due to foreign key constraints)
-TRUNCATE TABLE sales_fulfillment, shopify_order_items, shopify_orders, shopify_stores, inventory, po_items, purchase_orders, products, stores, purchase_order_items, inventory_transactions RESTART IDENTITY CASCADE;
+-- Clear existing data
+TRUNCATE TABLE inventory_transactions CASCADE;
+TRUNCATE TABLE purchase_order_items CASCADE;
+TRUNCATE TABLE purchase_orders CASCADE;
+TRUNCATE TABLE inventory_items CASCADE;
+TRUNCATE TABLE shopify_stores CASCADE;
 
--- Insert sample products
-INSERT INTO products (sku, name, description, min_stock, max_stock) VALUES
-('WH-001', 'Wireless Headphones', 'Bluetooth wireless headphones with noise cancellation', 10, 100),
-('SW-002', 'Smart Watch', 'Fitness tracking smartwatch with heart rate monitor', 5, 50),
-('PC-003', 'Phone Case', 'Protective phone case for iPhone 14', 20, 200),
-('KB-004', 'Mechanical Keyboard', 'RGB mechanical gaming keyboard', 8, 80),
-('MS-005', 'Wireless Mouse', 'Ergonomic wireless mouse with precision tracking', 15, 150);
-
--- Insert sample stores
-INSERT INTO stores (name, shopify_domain, access_token) VALUES
-('Main Store', 'main-store.myshopify.com', 'sample_access_token_1'),
-('Secondary Store', 'secondary-store.myshopify.com', 'sample_access_token_2');
-
--- Insert sample purchase orders
-INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, status, notes) VALUES
-('PO-2024-001', 'TechSupply Co', '2024-01-15', 250.00, 'Delivered', 'First quarter electronics order'),
-('PO-2024-002', 'GadgetWorld Inc', '2024-01-20', 150.00, 'Delivered', 'Smart devices bulk order'),
-('PO-2024-003', 'Global Gadgets', '2024-01-20', 200.00, 'In Transit', 'New product line introduction'),
-('PO-2024-004', 'Tech Supplies Co.', '2024-01-22', 180.00, 'Pending', 'Reorder for high-demand items'),
-('PO-2024-005', 'Digital World', '2024-01-25', 300.00, 'Draft', 'Camera and accessories order'),
-('PO-2024-006', 'AccessoryHub', '2024-02-01', 75.00, 'In Transit', 'Phone accessories restock'),
-('PO-2024-007', 'ElectroMart', '2024-02-10', 300.00, 'Pending', 'Gaming peripherals order'),
-('PO-2024-008', 'ComponentSource', '2024-02-15', 125.00, 'Draft', 'Computer accessories draft order'),
-('PO-20241201-001', 'TechCorp', '2024-11-15', 25.00, 'Delivered', 'Rush order for holiday season'),
-('PO-20241201-002', 'ToolMaster', '2024-11-20', 15.00, 'Sent', 'Standard delivery'),
-('PO-20241201-003', 'PartsCo', '2024-12-01', 10.00, 'Draft', 'Restock order');
-
--- Insert sample PO items
-INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost) VALUES
--- PO-2024-001 items (Delivered)
-(1, 'WH-001', 'Wireless Headphones', 50, 75.00),
-(1, 'SW-002', 'Smart Watch', 25, 120.00),
-(1, 'PC-003', 'Phone Case', 100, 15.00),
--- PO-2024-002 items (Delivered)
-(2, 'BS-004', 'Bluetooth Speaker', 30, 85.00),
-(2, 'CB-005', 'USB Cable', 200, 8.50),
-(2, 'MS-008', 'Mouse', 40, 25.00),
--- PO-2024-003 items (In Transit)
-(3, 'TB-006', 'Tablet', 15, 280.00),
-(3, 'KD-007', 'Keyboard', 40, 45.00),
-(3, 'HD-009', 'Hard Drive', 20, 120.00),
--- PO-2024-004 items (Pending)
-(4, 'WH-001', 'Wireless Headphones', 30, 76.00),
-(4, 'SW-002', 'Smart Watch', 20, 118.00),
--- PO-2024-005 items (Draft)
-(5, 'CM-010', 'Camera', 10, 450.00),
-(5, 'TB-006', 'Tablet', 5, 285.00),
--- PO-2024-006 items
-(6, 'PC-003', 'Phone Case', 150, 14.50),
-(6, 'MS-005', 'Wireless Mouse', 40, 35.00),
--- PO-2024-007 items
-(7, 'KB-004', 'Mechanical Keyboard', 25, 85.00),
-(7, 'MS-005', 'Wireless Mouse', 50, 32.00),
--- PO-2024-008 items
-(8, 'WH-001', 'Wireless Headphones', 30, 78.00);
-
--- Insert sample products with additional fields
-INSERT INTO products (sku, name, category, supplier, unit_cost, current_stock, reorder_point) VALUES
-('WIDGET-001', 'Premium Widget', 'Electronics', 'TechCorp', 25.50, 100, 20),
-('GADGET-002', 'Smart Gadget', 'Electronics', 'TechCorp', 45.00, 75, 15),
-('TOOL-003', 'Professional Tool', 'Tools', 'ToolMaster', 89.99, 50, 10),
-('PART-004', 'Replacement Part', 'Parts', 'PartsCo', 12.75, 200, 50),
-('CABLE-005', 'USB Cable', 'Accessories', 'CableCorp', 8.99, 150, 30);
-
--- Insert inventory records (only for delivered POs)
-INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date) VALUES
--- From PO-2024-001 (Delivered) - with delivery cost distributed
-(1, 1, 45, 80.00, '2024-01-15'), -- WH-001: 50 ordered, 5 sold, delivery cost added
-(2, 2, 20, 130.00, '2024-01-15'), -- SW-002: 25 ordered, 5 sold, delivery cost added
-(3, 3, 156, 16.25, '2024-01-15'), -- PC-003: 100 ordered, some manual additions
--- From PO-2024-002 (Delivered) - with delivery cost distributed
-(4, 4, 28, 86.75, '2024-01-18'), -- BS-004: 30 ordered, 2 sold
-(5, 5, 180, 9.25, '2024-01-18'), -- CB-005: 200 ordered, 20 sold
-(8, 6, 38, 26.25, '2024-01-18'), -- MS-008: 40 ordered, 2 sold
--- From PO-2024-006 (In Transit)
-(3, 7, 95, 16.50, '2024-02-01'), -- PC-003: 150 ordered, some manual additions
-(8, 8, 38, 36.25, '2024-02-01'); -- MS-005: 40 ordered, some manual additions
-
--- Insert purchase order items for new POs
-DO $$
-DECLARE
-    po1_id UUID;
-    po2_id UUID;
-    po3_id UUID;
-    widget_id UUID;
-    gadget_id UUID;
-    tool_id UUID;
-    part_id UUID;
-    cable_id UUID;
-BEGIN
-    -- Get purchase order IDs
-    SELECT id INTO po1_id FROM purchase_orders WHERE po_number = 'PO-20241201-001';
-    SELECT id INTO po2_id FROM purchase_orders WHERE po_number = 'PO-20241201-002';
-    SELECT id INTO po3_id FROM purchase_orders WHERE po_number = 'PO-20241201-003';
-    
-    -- Get product IDs
-    SELECT id INTO widget_id FROM products WHERE sku = 'WIDGET-001';
-    SELECT id INTO gadget_id FROM products WHERE sku = 'GADGET-002';
-    SELECT id INTO tool_id FROM products WHERE sku = 'TOOL-003';
-    SELECT id INTO part_id FROM products WHERE sku = 'PART-004';
-    SELECT id INTO cable_id FROM products WHERE sku = 'CABLE-005';
-    
-    -- Insert purchase order items for PO1 (delivered)
-    INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
-    (po1_id, widget_id, 'WIDGET-001', 'Premium Widget', 50, 25.50, 0.50, 1300.00),
-    (po1_id, gadget_id, 'GADGET-002', 'Smart Gadget', 25, 45.00, 0.50, 1137.50);
-    
-    -- Insert purchase order items for PO2 (sent)
-    INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
-    (po2_id, tool_id, 'TOOL-003', 'Professional Tool', 20, 89.99, 0.75, 1814.80);
-    
-    -- Insert purchase order items for PO3 (draft)
-    INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
-    (po3_id, part_id, 'PART-004', 'Replacement Part', 100, 12.75, 0.10, 1285.00),
-    (po3_id, cable_id, 'CABLE-005', 'USB Cable', 50, 8.99, 0.10, 454.50);
-    
-    -- Insert inventory transactions for delivered PO
-    INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) VALUES
-    (widget_id, 'purchase', 50, 26.00, po1_id, 'purchase_order'),
-    (gadget_id, 'purchase', 25, 45.50, po1_id, 'purchase_order');
-    
-    -- Insert sample Shopify orders
-    INSERT INTO shopify_orders (store_id, shopify_order_id, order_number, customer_email, total_amount, status) VALUES
-    ((SELECT id FROM stores WHERE name = 'Main Store'), '12345678901', '#1001', 'customer1@example.com', 156.48, 'fulfilled'),
-    ((SELECT id FROM stores WHERE name = 'Main Store'), '12345678902', '#1002', 'customer2@example.com', 98.99, 'pending'),
-    ((SELECT id FROM stores WHERE name = 'Secondary Store'), '12345678903', '#2001', 'customer3@example.com', 71.49, 'fulfilled');
-    
-    -- Insert Shopify order items
-    INSERT INTO shopify_order_items (order_id, product_id, sku, product_name, quantity, price) VALUES
-    ((SELECT id FROM shopify_orders WHERE order_number = '#1001'), widget_id, 'WIDGET-001', 'Premium Widget', 2, 29.99),
-    ((SELECT id FROM shopify_orders WHERE order_number = '#1001'), gadget_id, 'GADGET-002', 'Smart Gadget', 2, 49.99),
-    ((SELECT id FROM shopify_orders WHERE order_number = '#1002'), tool_id, 'TOOL-003', 'Professional Tool', 1, 99.99),
-    ((SELECT id FROM shopify_orders WHERE order_number = '#2001'), cable_id, 'CABLE-005', 'USB Cable', 3, 12.99),
-    ((SELECT id FROM shopify_orders WHERE order_number = '#2001'), part_id, 'PART-004', 'Replacement Part', 2, 15.99);
-    
-    -- Create inventory transactions for sales
-    INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) VALUES
-    (widget_id, 'sale', -2, 29.99, (SELECT id FROM shopify_orders WHERE order_number = '#1001'), 'shopify_order'),
-    (gadget_id, 'sale', -2, 49.99, (SELECT id FROM shopify_orders WHERE order_number = '#1001'), 'shopify_order'),
-    (tool_id, 'sale', -1, 99.99, (SELECT id FROM shopify_orders WHERE order_number = '#1002'), 'shopify_order'),
-    (cable_id, 'sale', -3, 12.99, (SELECT id FROM shopify_orders WHERE order_number = '#2001'), 'shopify_order'),
-    (part_id, 'sale', -2, 15.99, (SELECT id FROM shopify_orders WHERE order_number = '#2001'), 'shopify_order');
-    
-END $$;
-
--- Update current stock based on transactions
-UPDATE products SET current_stock = current_stock - 2 WHERE sku = 'WIDGET-001'; -- Sales
-UPDATE products SET current_stock = current_stock - 2 WHERE sku = 'GADGET-002'; -- Sales  
-UPDATE products SET current_stock = current_stock - 1 WHERE sku = 'TOOL-003'; -- Sales
-UPDATE products SET current_stock = current_stock - 3 WHERE sku = 'CABLE-005'; -- Sales
-UPDATE products SET current_stock = current_stock - 2 WHERE sku = 'PART-004'; -- Sales
+-- Insert sample inventory items
+INSERT INTO inventory_items (id, sku, product_name, category, current_stock, reserved_stock, reorder_point, reorder_quantity, average_cost, location, supplier) VALUES
+('550e8400-e29b-41d4-a716-446655440001', 'WH-LAPTOP-001', 'Business Laptop Pro', 'Electronics', 25, 5, 10, 50, 899.99, 'A1-B2', 'TechSupply Co'),
+('550e8400-e29b-41d4-a716-446655440002', 'WH-MOUSE-002', 'Wireless Mouse', 'Electronics', 150, 20, 25, 100, 29.99, 'A1-C3', 'TechSupply Co'),
+('550e8400-e29b-41d4-a716-446655440003', 'WH-DESK-003', 'Standing Desk', 'Furniture', 8, 2, 5, 20, 299.99, 'B2-A1', 'Office Furniture Ltd'),
+('550e8400-e29b-41d4-a716-446655440004', 'WH-CHAIR-004', 'Ergonomic Office Chair', 'Furniture', 12, 3, 8, 25, 199.99, 'B2-B2', 'Office Furniture Ltd'),
+('550e8400-e29b-41d4-a716-446655440005', 'WH-MONITOR-005', '27" 4K Monitor', 'Electronics', 18, 4, 12, 30, 349.99, 'A1-D4', 'Display Solutions Inc'),
+('550e8400-e29b-41d4-a716-446655440006', 'WH-KEYBOARD-006', 'Mechanical Keyboard', 'Electronics', 45, 8, 15, 60, 89.99, 'A1-C2', 'TechSupply Co'),
+('550e8400-e29b-41d4-a716-446655440007', 'WH-TABLET-007', 'Business Tablet', 'Electronics', 30, 6, 20, 40, 449.99, 'A1-B3', 'Mobile Devices Corp'),
+('550e8400-e29b-41d4-a716-446655440008', 'WH-PRINTER-008', 'Laser Printer', 'Electronics', 6, 1, 3, 15, 249.99, 'A2-A1', 'Print Solutions Ltd'),
+('550e8400-e29b-41d4-a716-446655440009', 'WH-CABLE-009', 'USB-C Cable 6ft', 'Electronics', 200, 25, 50, 200, 12.99, 'A1-E5', 'Cable Co'),
+('550e8400-e29b-41d4-a716-446655440010', 'WH-LAMP-010', 'LED Desk Lamp', 'Furniture', 35, 7, 15, 50, 39.99, 'B2-C3', 'Lighting Solutions');
 
 -- Insert sample Shopify stores
-INSERT INTO shopify_stores (name, shopify_domain, access_token, webhook_url, status, last_sync) VALUES
-('Main Store', 'mystore.myshopify.com', 'shpat_example_token_123', 'https://yourapp.com/webhook/store1', 'Active', NOW() - INTERVAL '2 hours'),
-('EU Store', 'mystore-eu.myshopify.com', 'shpat_example_token_456', 'https://yourapp.com/webhook/store2', 'Active', NOW() - INTERVAL '1 day'),
-('US Store', 'us-store.myshopify.com', 'shpat_example_token_789', 'https://yourapp.com/webhook/store3', 'Active', NOW() - INTERVAL '30 minutes'),
-('Test Store', 'test-store.myshopify.com', 'shpat_example_token_789', NULL, 'Inactive', NOW() - INTERVAL '1 week'),
-('Mobile Store', 'mobile-store.myshopify.com', 'shpat_example_token_789', 'https://yourapp.com/webhook/store5', 'Inactive', NOW() - INTERVAL '1 week');
+INSERT INTO shopify_stores (id, name, domain, access_token, is_active, last_sync) VALUES
+('660e8400-e29b-41d4-a716-446655440001', 'Main Store', 'mystore.myshopify.com', 'shpat_1234567890abcdef', true, NOW() - INTERVAL '2 hours'),
+('660e8400-e29b-41d4-a716-446655440002', 'EU Store', 'eu-store.myshopify.com', 'shpat_abcdef1234567890', true, NOW() - INTERVAL '1 day'),
+('660e8400-e29b-41d4-a716-446655440003', 'B2B Store', 'b2b.myshopify.com', 'shpat_fedcba0987654321', false, NOW() - INTERVAL '1 week');
 
--- Insert sample Shopify orders
-INSERT INTO shopify_orders (store_id, shopify_order_id, order_number, customer_name, customer_email, order_date, status, total_amount, shipping_cost, tax_amount, discount_amount, shipping_address) VALUES
-(1, '5234567890123', '#1001', 'John Smith', 'john@example.com', '2024-02-01 10:30:00', 'fulfilled', 299.99, 15.00, 24.00, 0, '123 Main St, New York, NY 10001'),
-(1, '5234567890124', '#1002', 'Sarah Johnson', 'sarah@example.com', '2024-02-02 14:15:00', 'fulfilled', 149.99, 10.00, 12.00, 0, '456 Oak Ave, Los Angeles, CA 90210'),
-(1, '5234567890125', '#1003', 'Bob Johnson', 'bob@example.com', '2024-01-19 16:20:00', 'Shipped', 45.99, 7.99, 3.68, 0, '789 Pine St, Chicago, IL 60601'),
-(1, '5234567890126', '#1004', 'Alice Brown', 'alice@example.com', '2024-01-21 10:15:00', 'Fulfilled', 425.98, 15.99, 34.08, 25.00, '321 Elm St, Miami, FL 33101'),
-(2, '5234567890127', '#1005', 'Charlie Wilson', 'charlie@example.com', '2024-01-21 11:30:00', 'Processing', 85.00, 8.99, 6.80, 0, '654 Maple Ave, Seattle, WA 98101'),
-(3, '5234567890128', '#1006', 'Diana Prince', 'diana@example.com', '2024-01-22 09:20:00', 'Fulfilled', 150.00, 10.00, 12.00, 0, '987 Broadway, Boston, MA 02101'),
-(1, '5234567890129', '#1007', 'Edward Norton', 'edward@example.com', '2024-01-22 16:45:00', 'Cancelled', 75.50, 5.99, 6.04, 0, '147 Cedar St, Portland, OR 97201'),
-(2, '5234567890130', '#1008', 'Fiona Green', 'fiona@example.com', '2024-01-23 12:30:00', 'Shipped', 320.00, 14.99, 25.60, 15.00, '258 Willow Dr, Austin, TX 78701'),
-(1, '5001234567890', '#2001', 'Mike Wilson', 'mike@example.com', '2024-02-03 09:45:00', 'pending', 89.99, 8.00, 7.20, '789 Pine St, London, UK'),
-(1, '5001234567891', '#2002', 'Emily Davis', 'emily@example.com', '2024-02-04 16:20:00', 'fulfilled', 199.99, 12.00, 16.00, '321 Elm St, Chicago, IL 60601');
+-- Insert sample purchase orders
+INSERT INTO purchase_orders (id, supplier, order_date, expected_delivery, status, total_cost, notes) VALUES
+('770e8400-e29b-41d4-a716-446655440001', 'TechSupply Co', '2024-01-15', '2024-01-25', 'delivered', 15749.75, 'Bulk order for Q1 inventory'),
+('770e8400-e29b-41d4-a716-446655440002', 'Office Furniture Ltd', '2024-01-20', '2024-02-05', 'shipped', 8999.75, 'Office expansion furniture'),
+('770e8400-e29b-41d4-a716-446655440003', 'Display Solutions Inc', '2024-01-25', '2024-02-10', 'confirmed', 10849.70, 'Monitor upgrade project'),
+('770e8400-e29b-41d4-a716-446655440004', 'Mobile Devices Corp', '2024-02-01', '2024-02-15', 'pending', 13949.75, 'Tablet deployment for sales team'),
+('770e8400-e29b-41d4-a716-446655440005', 'Print Solutions Ltd', '2024-02-05', '2024-02-20', 'pending', 3999.85, 'Printer replacement program');
 
--- Insert sample order items
-INSERT INTO shopify_order_items (order_id, sku, product_name, quantity, unit_price) VALUES
--- Order #1001
-(1, 'WH-001', 'Wireless Headphones', 2, 149.99),
--- Order #1002
-(2, 'SW-002', 'Smart Watch', 1, 189.99),
--- Order #1003
-(3, 'PC-003', 'Phone Case', 3, 15.33),
--- Order #1004
-(4, 'WH-001', 'Wireless Headphones', 1, 149.99),
-(4, 'SW-002', 'Smart Watch', 2, 189.99),
--- Order #1005
-(5, 'BS-004', 'Bluetooth Speaker', 1, 85.00),
--- Order #1006
-(6, 'CB-005', 'USB Cable', 10, 15.00),
--- Order #1007 (Cancelled)
-(7, 'PC-003', 'Phone Case', 5, 15.10),
--- Order #1008
-(8, 'MS-008', 'Mouse', 2, 35.00),
-(8, 'WH-001', 'Wireless Headphones', 1, 149.99),
-(8, 'CB-005', 'USB Cable', 5, 17.00),
--- Order #2001
-(9, 'PC-003', 'Phone Case', 3, 29.99),
--- Order #2002
-(10, 'KB-004', 'Mechanical Keyboard', 1, 129.99),
-(10, 'MS-005', 'Wireless Mouse', 2, 34.99);
+-- Insert sample purchase order items
+-- PO 1: TechSupply Co
+INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+('770e8400-e29b-41d4-a716-446655440001', 'Business Laptop Pro', 'WH-LAPTOP-001', 15, 850.00, 8.33, 12874.95),
+('770e8400-e29b-41d4-a716-446655440001', 'Wireless Mouse', 'WH-MOUSE-002', 50, 25.00, 0.83, 1291.50),
+('770e8400-e29b-41d4-a716-446655440001', 'Mechanical Keyboard', 'WH-KEYBOARD-006', 20, 80.00, 1.67, 1633.40);
 
--- Insert sample sales fulfillment (FIFO cost tracking for fulfilled orders only)
-INSERT INTO sales_fulfillment (order_item_id, inventory_id, quantity_used, unit_cost) VALUES
--- Order #1001 - WH-001 (2 units) - Fulfilled
-(1, 1, 2, 80.00),
--- Order #1002 - SW-002 (1 unit) - Processing (no fulfillment yet)
--- Order #1003 - PC-003 (3 units) - Shipped
-(3, 3, 3, 16.25),
--- Order #1004 - WH-001 (1 unit), SW-002 (2 units) - Fulfilled
-(4, 1, 1, 80.00),
-(5, 2, 2, 130.00),
--- Order #1005 - BS-004 (1 unit) - Processing (no fulfillment yet)
--- Order #1006 - CB-005 (10 units) - Fulfilled
-(6, 5, 10, 9.25),
--- Order #1007 - Cancelled (no fulfillment)
--- Order #1008 - MS-008 (2 units), WH-001 (1 unit), CB-005 (5 units) - Shipped
-(9, 6, 2, 26.25),
-(10, 1, 1, 80.00),
-(11, 5, 5, 9.25),
--- Order #2001 fulfillment
-(12, 7, 3, 16.50), -- 3 phone cases from inventory lot 3
--- Order #2002 fulfillment
-(13, 1, 1, 80.00), -- 1 keyboard (using headphone cost as placeholder)
-(14, 1, 2, 80.00); -- 2 mice (using headphone cost as placeholder)
+-- PO 2: Office Furniture Ltd  
+INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+('770e8400-e29b-41d4-a716-446655440002', 'Standing Desk', 'WH-DESK-003', 15, 280.00, 13.33, 4399.95),
+('770e8400-e29b-41d4-a716-446655440002', 'Ergonomic Office Chair', 'WH-CHAIR-004', 25, 180.00, 3.20, 4579.80);
 
--- Update inventory quantities after sales (subtract fulfilled quantities)
-UPDATE inventory SET quantity_available = 43 WHERE id = 1; -- WH-001: 45 - 2 sold
-UPDATE inventory SET quantity_available = 19 WHERE id = 2; -- SW-002 lot 1: 20 - 1 sold
-UPDATE inventory SET quantity_available = 24 WHERE id = 3; -- SW-002 lot 2: 25 - 1 sold
-UPDATE inventory SET quantity_available = 153 WHERE id = 4; -- PC-003: 156 - 3 sold
-UPDATE inventory SET quantity_available = 165 WHERE id = 5; -- CB-005: 180 - 15 sold
-UPDATE inventory SET quantity_available = 36 WHERE id = 6; -- MS-008: 38 - 2 sold
+-- PO 3: Display Solutions Inc
+INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+('770e8400-e29b-41d4-a716-446655440003', '27" 4K Monitor', 'WH-MONITOR-005', 30, 320.00, 8.33, 9849.90);
 
--- Add some additional manual inventory entries (simulating manual stock additions)
-INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date) VALUES
-(3, NULL, 50, 14.50, '2024-01-10'), -- PC-003: Manual entry (older stock)
-(5, NULL, 100, 8.00, '2024-01-12'); -- CB-005: Manual entry (older stock)
+-- PO 4: Mobile Devices Corp
+INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+('770e8400-e29b-41d4-a716-446655440004', 'Business Tablet', 'WH-TABLET-007', 30, 420.00, 11.67, 12949.80);
 
--- Show data insertion summary
-SELECT 'Sample data inserted successfully!' as status;
-SELECT 
-    'Products' as table_name, COUNT(*) as record_count FROM products
-UNION ALL
-SELECT 'Purchase Orders', COUNT(*) FROM purchase_orders
-UNION ALL
-SELECT 'PO Items', COUNT(*) FROM po_items
-UNION ALL
-SELECT 'Inventory Records', COUNT(*) FROM inventory
-UNION ALL
-SELECT 'Shopify Stores', COUNT(*) FROM shopify_stores
-UNION ALL
-SELECT 'Shopify Orders', COUNT(*) FROM shopify_orders
-UNION ALL
-SELECT 'Order Items', COUNT(*) FROM shopify_order_items
-UNION ALL
-SELECT 'Sales Fulfillment', COUNT(*) FROM sales_fulfillment
-UNION ALL
-SELECT 'Stores', COUNT(*) FROM stores
-UNION ALL
-SELECT 'Purchase Order Items', COUNT(*) FROM purchase_order_items
-UNION ALL
-SELECT 'Inventory Transactions', COUNT(*) FROM inventory_transactions;
+-- PO 5: Print Solutions Ltd
+INSERT INTO purchase_order_items (purchase_order_id, product_name, sku, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+('770e8400-e29b-41d4-a716-446655440005', 'Laser Printer', 'WH-PRINTER-008', 15, 230.00, 13.33, 3649.95);
+
+-- Insert sample inventory transactions
+INSERT INTO inventory_transactions (inventory_item_id, type, quantity, unit_cost, reference, notes) VALUES
+-- Laptop transactions
+('550e8400-e29b-41d4-a716-446655440001', 'purchase', 15, 858.33, '770e8400-e29b-41d4-a716-446655440001', 'Initial stock from PO-001'),
+('550e8400-e29b-41d4-a716-446655440001', 'sale', -5, 899.99, 'SO-2024-001', 'Sold to corporate client'),
+
+-- Mouse transactions  
+('550e8400-e29b-41d4-a716-446655440002', 'purchase', 100, 25.83, '770e8400-e29b-41d4-a716-446655440001', 'Bulk purchase from TechSupply'),
+('550e8400-e29b-41d4-a716-446655440002', 'sale', -30, 29.99, 'SO-2024-002', 'Office setup order'),
+
+-- Desk transactions
+('550e8400-e29b-41d4-a716-446655440003', 'purchase', 10, 293.33, '770e8400-e29b-41d4-a716-446655440002', 'Office furniture delivery'),
+('550e8400-e29b-41d4-a716-446655440003', 'sale', -2, 299.99, 'SO-2024-003', 'Executive office setup'),
+
+-- Chair transactions
+('550e8400-e29b-41d4-a716-446655440004', 'purchase', 20, 183.20, '770e8400-e29b-41d4-a716-446655440002', 'Ergonomic chair order'),
+('550e8400-e29b-41d4-a716-446655440004', 'sale', -8, 199.99, 'SO-2024-004', 'Department chair upgrade'),
+
+-- Monitor transactions
+('550e8400-e29b-41d4-a716-446655440005', 'purchase', 25, 328.33, '770e8400-e29b-41d4-a716-446655440003', 'Monitor upgrade project'),
+('550e8400-e29b-41d4-a716-446655440005', 'sale', -7, 349.99, 'SO-2024-005', 'Development team monitors'),
+
+-- Keyboard transactions
+('550e8400-e29b-41d4-a716-446655440006', 'purchase', 50, 81.67, '770e8400-e29b-41d4-a716-446655440001', 'Mechanical keyboard order'),
+('550e8400-e29b-41d4-a716-446655440006', 'sale', -5, 89.99, 'SO-2024-006', 'Premium setup order'),
+
+-- Tablet transactions
+('550e8400-e29b-41d4-a716-446655440007', 'purchase', 35, 431.67, '770e8400-e29b-41d4-a716-446655440004', 'Sales team tablet deployment'),
+('550e8400-e29b-41d4-a716-446655440007', 'sale', -5, 449.99, 'SO-2024-007', 'Management tablets'),
+
+-- Printer transactions
+('550e8400-e29b-41d4-a716-446655440008', 'purchase', 8, 243.33, '770e8400-e29b-41d4-a716-446655440005', 'Printer replacement program'),
+('550e8400-e29b-41d4-a716-446655440008', 'sale', -2, 249.99, 'SO-2024-008', 'Department printer setup'),
+
+-- Cable transactions
+('550e8400-e29b-41d4-a716-446655440009', 'purchase', 250, 12.99, 'PO-MISC-001', 'Cable inventory restock'),
+('550e8400-e29b-41d4-a716-446655440009', 'sale', -50, 12.99, 'SO-2024-009', 'Bulk cable order'),
+
+-- Lamp transactions
+('550e8400-e29b-41d4-a716-446655440010', 'purchase', 40, 39.99, 'PO-MISC-002', 'Lighting upgrade project'),
+('550e8400-e29b-41d4-a716-446655440010', 'sale', -5, 39.99, 'SO-2024-010', 'Executive office lighting');
+
+-- Update purchase order totals to match items
+UPDATE purchase_orders SET total_cost = (
+    SELECT SUM(total_cost) FROM purchase_order_items WHERE purchase_order_id = purchase_orders.id
+);
+
+\echo 'Sample data inserted successfully!'
+\echo 'Purchase Orders: 5'
+\echo 'Purchase Order Items: 8' 
+\echo 'Inventory Items: 10'
+\echo 'Inventory Transactions: 20'
+\echo 'Shopify Stores: 3'

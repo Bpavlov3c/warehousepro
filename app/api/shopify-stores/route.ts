@@ -1,57 +1,32 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getStores, createStore, updateStore, deleteStore } from "@/lib/db-store"
+import { getAllShopifyStores, createShopifyStore } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const stores = await getStores()
+    const stores = await getAllShopifyStores()
     return NextResponse.json(stores)
   } catch (error) {
-    console.error("Error fetching stores:", error)
-    return NextResponse.json({ error: "Failed to fetch stores" }, { status: 500 })
+    console.error("Error fetching Shopify stores:", error)
+    return NextResponse.json({ error: "Failed to fetch Shopify stores" }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const newStore = await createStore(body)
+
+    const storeData = {
+      name: body.name,
+      domain: body.domain,
+      accessToken: body.accessToken,
+      isActive: body.isActive ?? true,
+      lastSync: body.lastSync,
+    }
+
+    const newStore = await createShopifyStore(storeData)
     return NextResponse.json(newStore, { status: 201 })
   } catch (error) {
-    console.error("Error creating store:", error)
-    return NextResponse.json({ error: "Failed to create store" }, { status: 500 })
-  }
-}
-
-export async function PUT(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { id, ...updates } = body
-
-    if (!id) {
-      return NextResponse.json({ error: "Store ID is required" }, { status: 400 })
-    }
-
-    const updatedStore = await updateStore(id, updates)
-    return NextResponse.json(updatedStore)
-  } catch (error) {
-    console.error("Error updating store:", error)
-    return NextResponse.json({ error: "Failed to update store" }, { status: 500 })
-  }
-}
-
-export async function DELETE(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const id = searchParams.get("id")
-
-    if (!id) {
-      return NextResponse.json({ error: "Store ID is required" }, { status: 400 })
-    }
-
-    await deleteStore(id)
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error("Error deleting store:", error)
-    return NextResponse.json({ error: "Failed to delete store" }, { status: 500 })
+    console.error("Error creating Shopify store:", error)
+    return NextResponse.json({ error: "Failed to create Shopify store" }, { status: 500 })
   }
 }

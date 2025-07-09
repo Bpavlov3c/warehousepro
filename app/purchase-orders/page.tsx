@@ -17,7 +17,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,313 +31,213 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Plus, Edit, Trash2, Eye, Package, Calendar, Truck } from "lucide-react"
+import { Plus, Edit, Trash2, Package, Calendar, DollarSign, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
-
-interface Product {
-  id: string
-  sku: string
-  name: string
-  category: string
-  supplier: string
-  unit_cost: number
-  current_stock: number
-  reorder_point: number
-}
 
 interface PurchaseOrderItem {
   id?: string
-  product_id: string
+  productName: string
   sku: string
-  product_name: string
   quantity: number
-  unit_cost: number
-  delivery_cost_per_unit?: number
-  total_cost?: number
+  unitCost: number
+  deliveryCostPerUnit?: number
+  totalCost?: number
 }
 
 interface PurchaseOrder {
-  id?: string
-  po_number: string
+  id: string
   supplier: string
-  status: "draft" | "sent" | "delivered"
-  order_date: string
-  expected_delivery: string | null
-  delivery_cost: number
-  notes: string | null
+  orderDate: string
+  expectedDelivery: string
+  status: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled"
   items: PurchaseOrderItem[]
-  created_at?: string
-  updated_at?: string
+  totalCost: number
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+const statusColors = {
+  pending: "bg-yellow-100 text-yellow-800",
+  confirmed: "bg-blue-100 text-blue-800",
+  shipped: "bg-purple-100 text-purple-800",
+  delivered: "bg-green-100 text-green-800",
+  cancelled: "bg-red-100 text-red-800",
 }
 
 export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
-  const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
-  const [formData, setFormData] = useState<PurchaseOrder>({
-    po_number: "",
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null)
+  const [formData, setFormData] = useState({
     supplier: "",
-    status: "draft",
-    order_date: new Date().toISOString().split("T")[0],
-    expected_delivery: null,
-    delivery_cost: 0,
-    notes: null,
-    items: [],
+    orderDate: "",
+    expectedDelivery: "",
+    status: "pending" as const,
+    deliveryCost: 0,
+    notes: "",
   })
+  const [items, setItems] = useState<PurchaseOrderItem[]>([{ productName: "", sku: "", quantity: 1, unitCost: 0 }])
 
-  // Load data
   useEffect(() => {
-    loadData()
+    fetchPurchaseOrders()
   }, [])
 
-  const loadData = async () => {
+  const fetchPurchaseOrders = async () => {
     try {
-      setIsLoading(true)
+      setLoading(true)
       setError(null)
-
-      const [poResponse, productsResponse] = await Promise.all([fetch("/api/purchase-orders"), fetch("/api/inventory")])
-
-      if (!poResponse.ok) {
-        throw new Error(`Failed to fetch purchase orders: ${poResponse.statusText}`)
+      const response = await fetch("/api/purchase-orders")
+      if (!response.ok) {
+        throw new Error("Failed to fetch purchase orders")
       }
-      if (!productsResponse.ok) {
-        throw new Error(`Failed to fetch products: ${productsResponse.statusText}`)
-      }
-
-      const poData = await poResponse.json()
-      const productsData = await productsResponse.json()
-
-      setPurchaseOrders(poData)
-      setProducts(productsData)
-    } catch (error) {
-      console.error("Error loading data:", error)
-      setError(error instanceof Error ? error.message : "Failed to load data")
-      toast.error("Failed to load data")
+      const data = await response.json()
+      setPurchaseOrders(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred")
+      toast.error("Failed to fetch purchase orders")
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
-  }
-
-  const generatePONumber = () => {
-    const date = new Date()
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, "0")
-    const day = String(date.getDate()).padStart(2, "0")
-    const random = Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, "0")
-    return `PO-${year}${month}${day}-${random}`
   }
 
   const resetForm = () => {
     setFormData({
-      po_number: generatePONumber(),
       supplier: "",
-      status: "draft",
-      order_date: new Date().toISOString().split("T")[0],
-      expected_delivery: null,
-      delivery_cost: 0,
-      notes: null,
-      items: [],
+      orderDate: "",
+      expectedDelivery: "",
+      status: "pending",
+      deliveryCost: 0,
+      notes: "",
     })
-  }
-
-  const handleCreate = () => {
-    resetForm()
-    setIsCreateDialogOpen(true)
-  }
-
-  const handleEdit = (po: PurchaseOrder) => {
-    setSelectedPO(po)
-    setFormData({
-      ...po,
-      order_date: po.order_date
-        ? new Date(po.order_date).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0],
-      expected_delivery: po.expected_delivery ? new Date(po.expected_delivery).toISOString().split("T")[0] : null,
-    })
-    setIsEditDialogOpen(true)
-  }
-
-  const handleView = (po: PurchaseOrder) => {
-    setSelectedPO(po)
-    setIsViewDialogOpen(true)
+    setItems([{ productName: "", sku: "", quantity: 1, unitCost: 0 }])
+    setEditingOrder(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (formData.items.length === 0) {
-      toast.error("Please add at least one item to the purchase order")
+    if (!formData.supplier || !formData.orderDate || !formData.expectedDelivery) {
+      toast.error("Please fill in all required fields")
+      return
+    }
+
+    if (items.some((item) => !item.productName || !item.sku || item.quantity <= 0 || item.unitCost < 0)) {
+      toast.error("Please fill in all item details correctly")
       return
     }
 
     try {
-      const url = selectedPO ? `/api/purchase-orders/${selectedPO.id}` : "/api/purchase-orders"
-      const method = selectedPO ? "PUT" : "POST"
+      const orderData = {
+        ...formData,
+        items,
+        deliveryCost: formData.deliveryCost,
+      }
+
+      const url = editingOrder ? `/api/purchase-orders/${editingOrder.id}` : "/api/purchase-orders"
+      const method = editingOrder ? "PUT" : "POST"
 
       const response = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          purchaseOrder: {
-            po_number: formData.po_number,
-            supplier: formData.supplier,
-            status: formData.status,
-            order_date: formData.order_date,
-            expected_delivery: formData.expected_delivery,
-            delivery_cost: formData.delivery_cost,
-            notes: formData.notes,
-          },
-          items: formData.items,
-        }),
+        body: JSON.stringify(orderData),
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to save purchase order")
+        throw new Error(`Failed to ${editingOrder ? "update" : "create"} purchase order`)
       }
 
-      toast.success(selectedPO ? "Purchase order updated successfully" : "Purchase order created successfully")
-      setIsCreateDialogOpen(false)
-      setIsEditDialogOpen(false)
-      setSelectedPO(null)
-      await loadData()
-    } catch (error) {
-      console.error("Error saving purchase order:", error)
-      toast.error(error instanceof Error ? error.message : "Failed to save purchase order")
+      const result = await response.json()
+
+      if (editingOrder) {
+        setPurchaseOrders((prev) => prev.map((po) => (po.id === result.id ? result : po)))
+        toast.success("Purchase order updated successfully")
+      } else {
+        setPurchaseOrders((prev) => [result, ...prev])
+        toast.success("Purchase order created successfully")
+      }
+
+      setIsDialogOpen(false)
+      resetForm()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "An error occurred")
     }
   }
 
-  const handleDelete = async (po: PurchaseOrder) => {
+  const handleEdit = (order: PurchaseOrder) => {
+    setEditingOrder(order)
+    setFormData({
+      supplier: order.supplier,
+      orderDate: order.orderDate,
+      expectedDelivery: order.expectedDelivery,
+      status: order.status,
+      deliveryCost: 0, // We don't store delivery cost separately, so default to 0
+      notes: order.notes || "",
+    })
+    setItems(
+      order.items.map((item) => ({
+        productName: item.productName,
+        sku: item.sku,
+        quantity: item.quantity,
+        unitCost: item.unitCost,
+      })),
+    )
+    setIsDialogOpen(true)
+  }
+
+  const handleDelete = async (id: string) => {
     try {
-      const response = await fetch(`/api/purchase-orders/${po.id}`, {
+      const response = await fetch(`/api/purchase-orders/${id}`, {
         method: "DELETE",
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to delete purchase order")
+        throw new Error("Failed to delete purchase order")
       }
 
+      setPurchaseOrders((prev) => prev.filter((po) => po.id !== id))
       toast.success("Purchase order deleted successfully")
-      await loadData()
-    } catch (error) {
-      console.error("Error deleting purchase order:", error)
-      toast.error(error instanceof Error ? error.message : "Failed to delete purchase order")
-    }
-  }
-
-  const handleMarkDelivered = async (po: PurchaseOrder) => {
-    try {
-      const response = await fetch(`/api/purchase-orders/${po.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          markAsDelivered: true,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to mark as delivered")
-      }
-
-      toast.success("Purchase order marked as delivered and inventory updated")
-      await loadData()
-    } catch (error) {
-      console.error("Error marking as delivered:", error)
-      toast.error(error instanceof Error ? error.message : "Failed to mark as delivered")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete purchase order")
     }
   }
 
   const addItem = () => {
-    setFormData((prev) => ({
-      ...prev,
-      items: [
-        ...prev.items,
-        {
-          product_id: "",
-          sku: "",
-          product_name: "",
-          quantity: 1,
-          unit_cost: 0,
-        },
-      ],
-    }))
-  }
-
-  const updateItem = (index: number, field: keyof PurchaseOrderItem, value: any) => {
-    setFormData((prev) => ({
-      ...prev,
-      items: prev.items.map((item, i) => {
-        if (i === index) {
-          const updatedItem = { ...item, [field]: value }
-
-          // Auto-fill product details when product is selected
-          if (field === "product_id" && value) {
-            const product = products.find((p) => p.id === value)
-            if (product) {
-              updatedItem.sku = product.sku
-              updatedItem.product_name = product.name
-              updatedItem.unit_cost = product.unit_cost
-            }
-          }
-
-          return updatedItem
-        }
-        return item
-      }),
-    }))
+    setItems([...items, { productName: "", sku: "", quantity: 1, unitCost: 0 }])
   }
 
   const removeItem = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== index),
-    }))
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "draft":
-        return <Badge variant="secondary">Draft</Badge>
-      case "sent":
-        return <Badge variant="default">Sent</Badge>
-      case "delivered":
-        return (
-          <Badge variant="outline" className="border-green-500 text-green-700">
-            Delivered
-          </Badge>
-        )
-      default:
-        return <Badge variant="secondary">{status}</Badge>
+    if (items.length > 1) {
+      setItems(items.filter((_, i) => i !== index))
     }
   }
 
-  const calculateTotal = (items: PurchaseOrderItem[], deliveryCost = 0) => {
-    const itemsTotal = items.reduce((sum, item) => sum + item.quantity * item.unit_cost, 0)
-    return itemsTotal + deliveryCost
+  const updateItem = (index: number, field: keyof PurchaseOrderItem, value: string | number) => {
+    const updatedItems = [...items]
+    updatedItems[index] = { ...updatedItems[index], [field]: value }
+    setItems(updatedItems)
   }
 
-  if (isLoading) {
+  const calculateTotal = () => {
+    const itemsTotal = items.reduce((sum, item) => {
+      return sum + item.quantity * item.unitCost
+    }, 0)
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0)
+    const deliveryCostPerUnit = totalQuantity > 0 ? formData.deliveryCost / totalQuantity : 0
+    return itemsTotal + formData.deliveryCost
+  }
+
+  if (loading) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
-            <p>Loading purchase orders...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Loading purchase orders...</p>
           </div>
         </div>
       </div>
@@ -347,8 +249,11 @@ export default function PurchaseOrdersPage() {
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <p className="text-red-600 mb-4">Error: {error}</p>
-            <Button onClick={loadData}>Retry</Button>
+            <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+            <p className="text-red-600">{error}</p>
+            <Button onClick={fetchPurchaseOrders} className="mt-4">
+              Try Again
+            </Button>
           </div>
         </div>
       </div>
@@ -360,19 +265,191 @@ export default function PurchaseOrdersPage() {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold">Purchase Orders</h1>
-          <p className="text-muted-foreground">Manage your purchase orders and track deliveries</p>
+          <p className="text-gray-600">Manage your purchase orders and track deliveries</p>
         </div>
-        <Button onClick={handleCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Purchase Order
-        </Button>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button onClick={resetForm}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Purchase Order
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{editingOrder ? "Edit Purchase Order" : "Create New Purchase Order"}</DialogTitle>
+              <DialogDescription>
+                {editingOrder
+                  ? "Update the purchase order details below."
+                  : "Fill in the details to create a new purchase order."}
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="supplier">Supplier *</Label>
+                  <Input
+                    id="supplier"
+                    value={formData.supplier}
+                    onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                    placeholder="Enter supplier name"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="status">Status</Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value: any) => setFormData({ ...formData, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="shipped">Shipped</SelectItem>
+                      <SelectItem value="delivered">Delivered</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="orderDate">Order Date *</Label>
+                  <Input
+                    id="orderDate"
+                    type="date"
+                    value={formData.orderDate}
+                    onChange={(e) => setFormData({ ...formData, orderDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="expectedDelivery">Expected Delivery *</Label>
+                  <Input
+                    id="expectedDelivery"
+                    type="date"
+                    value={formData.expectedDelivery}
+                    onChange={(e) => setFormData({ ...formData, expectedDelivery: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="deliveryCost">Delivery Cost</Label>
+                  <Input
+                    id="deliveryCost"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.deliveryCost}
+                    onChange={(e) => setFormData({ ...formData, deliveryCost: Number.parseFloat(e.target.value) || 0 })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Additional notes..."
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <Label>Items *</Label>
+                  <Button type="button" onClick={addItem} size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Item
+                  </Button>
+                </div>
+                <div className="space-y-4">
+                  {items.map((item, index) => (
+                    <div key={index} className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-4">
+                        <Label>Product Name</Label>
+                        <Input
+                          value={item.productName}
+                          onChange={(e) => updateItem(index, "productName", e.target.value)}
+                          placeholder="Product name"
+                          required
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label>SKU</Label>
+                        <Input
+                          value={item.sku}
+                          onChange={(e) => updateItem(index, "sku", e.target.value)}
+                          placeholder="SKU"
+                          required
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label>Quantity</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 1)}
+                          required
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label>Unit Cost</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.unitCost}
+                          onChange={(e) => updateItem(index, "unitCost", Number.parseFloat(e.target.value) || 0)}
+                          required
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Label>Total</Label>
+                        <div className="text-sm font-medium py-2">${(item.quantity * item.unitCost).toFixed(2)}</div>
+                      </div>
+                      <div className="col-span-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => removeItem(index)}
+                          disabled={items.length === 1}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">Total Cost:</span>
+                    <span className="text-lg font-bold">${calculateTotal().toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">{editingOrder ? "Update Order" : "Create Order"}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total POs</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -381,26 +458,28 @@ export default function PurchaseOrdersPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Draft</CardTitle>
-            <Edit className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "draft").length}</div>
+            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "pending").length}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Sent</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "sent").length}</div>
+            <div className="text-2xl font-bold">
+              ${purchaseOrders.reduce((sum, po) => sum + po.totalCost, 0).toFixed(2)}
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Delivered</CardTitle>
-            <Truck className="h-4 w-4 text-muted-foreground" />
+            <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "delivered").length}</div>
@@ -412,98 +491,65 @@ export default function PurchaseOrdersPage() {
       <Card>
         <CardHeader>
           <CardTitle>Purchase Orders</CardTitle>
-          <CardDescription>A list of all purchase orders with their current status</CardDescription>
+          <CardDescription>A list of all purchase orders with their current status and details.</CardDescription>
         </CardHeader>
         <CardContent>
           {purchaseOrders.length === 0 ? (
             <div className="text-center py-8">
-              <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No purchase orders</h3>
-              <p className="text-gray-500 mb-4">Get started by creating your first purchase order.</p>
-              <Button onClick={handleCreate}>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Purchase Order
-              </Button>
+              <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No purchase orders found</p>
+              <p className="text-sm text-gray-400">Create your first purchase order to get started</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>PO Number</TableHead>
                   <TableHead>Supplier</TableHead>
-                  <TableHead>Status</TableHead>
                   <TableHead>Order Date</TableHead>
                   <TableHead>Expected Delivery</TableHead>
-                  <TableHead>Total</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Total Cost</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {purchaseOrders.map((po) => (
-                  <TableRow key={po.id}>
-                    <TableCell className="font-medium">{po.po_number}</TableCell>
-                    <TableCell>{po.supplier}</TableCell>
-                    <TableCell>{getStatusBadge(po.status)}</TableCell>
-                    <TableCell>{new Date(po.order_date).toLocaleDateString()}</TableCell>
+                {purchaseOrders.map((order) => (
+                  <TableRow key={order.id}>
+                    <TableCell className="font-medium">{order.supplier}</TableCell>
+                    <TableCell>{new Date(order.orderDate).toLocaleDateString()}</TableCell>
+                    <TableCell>{new Date(order.expectedDelivery).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      {po.expected_delivery ? new Date(po.expected_delivery).toLocaleDateString() : "Not set"}
+                      <Badge className={statusColors[order.status]}>
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </Badge>
                     </TableCell>
-                    <TableCell>${calculateTotal(po.items, po.delivery_cost).toFixed(2)}</TableCell>
+                    <TableCell>{order.items.length} items</TableCell>
+                    <TableCell>${order.totalCost.toFixed(2)}</TableCell>
                     <TableCell>
                       <div className="flex space-x-2">
-                        <Button variant="outline" size="sm" onClick={() => handleView(po)}>
-                          <Eye className="h-4 w-4" />
+                        <Button variant="outline" size="sm" onClick={() => handleEdit(order)}>
+                          <Edit className="h-4 w-4" />
                         </Button>
-                        {po.status !== "delivered" && (
-                          <Button variant="outline" size="sm" onClick={() => handleEdit(po)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {po.status === "sent" && (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="outline" size="sm">
-                                <Truck className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Mark as Delivered</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will mark the purchase order as delivered and update inventory levels. This
-                                  action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleMarkDelivered(po)}>
-                                  Mark as Delivered
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        )}
-                        {po.status === "draft" && (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="outline" size="sm">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Purchase Order</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This action cannot be undone. This will permanently delete the purchase order.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(po)}>Delete</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        )}
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This action cannot be undone. This will permanently delete the purchase order.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDelete(order.id)}>Delete</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -513,307 +559,6 @@ export default function PurchaseOrdersPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* Create/Edit Dialog */}
-      <Dialog
-        open={isCreateDialogOpen || isEditDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            setIsCreateDialogOpen(false)
-            setIsEditDialogOpen(false)
-            setSelectedPO(null)
-          }
-        }}
-      >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{selectedPO ? "Edit Purchase Order" : "Create Purchase Order"}</DialogTitle>
-            <DialogDescription>
-              {selectedPO ? "Update the purchase order details" : "Create a new purchase order for your supplier"}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="po_number">PO Number</Label>
-                <Input
-                  id="po_number"
-                  value={formData.po_number}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, po_number: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="supplier">Supplier</Label>
-                <Input
-                  id="supplier"
-                  value={formData.supplier}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, supplier: e.target.value }))}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="status">Status</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value: "draft" | "sent" | "delivered") =>
-                    setFormData((prev) => ({ ...prev, status: value }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="draft">Draft</SelectItem>
-                    <SelectItem value="sent">Sent</SelectItem>
-                    {selectedPO && <SelectItem value="delivered">Delivered</SelectItem>}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="order_date">Order Date</Label>
-                <Input
-                  id="order_date"
-                  type="date"
-                  value={formData.order_date}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, order_date: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="expected_delivery">Expected Delivery</Label>
-                <Input
-                  id="expected_delivery"
-                  type="date"
-                  value={formData.expected_delivery || ""}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      expected_delivery: e.target.value || null,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="delivery_cost">Delivery Cost</Label>
-              <Input
-                id="delivery_cost"
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.delivery_cost}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    delivery_cost: Number.parseFloat(e.target.value) || 0,
-                  }))
-                }
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={formData.notes || ""}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    notes: e.target.value || null,
-                  }))
-                }
-                rows={3}
-              />
-            </div>
-
-            {/* Items Section */}
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <Label className="text-base font-semibold">Items</Label>
-                <Button type="button" onClick={addItem} size="sm">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Item
-                </Button>
-              </div>
-
-              <ScrollArea className="h-64 border rounded-md p-4">
-                {formData.items.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No items added yet. Click "Add Item" to get started.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {formData.items.map((item, index) => (
-                      <div key={index} className="border rounded-lg p-4 space-y-3">
-                        <div className="flex justify-between items-center">
-                          <h4 className="font-medium">Item {index + 1}</h4>
-                          <Button type="button" variant="outline" size="sm" onClick={() => removeItem(index)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <Label>Product</Label>
-                            <Select
-                              value={item.product_id}
-                              onValueChange={(value) => updateItem(index, "product_id", value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select product" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {products.map((product) => (
-                                  <SelectItem key={product.id} value={product.id}>
-                                    {product.name} ({product.sku})
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label>Quantity</Label>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 1)}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <Label>Unit Cost</Label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={item.unit_cost}
-                              onChange={(e) => updateItem(index, "unit_cost", Number.parseFloat(e.target.value) || 0)}
-                            />
-                          </div>
-                          <div>
-                            <Label>Total</Label>
-                            <Input value={`$${(item.quantity * item.unit_cost).toFixed(2)}`} disabled />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
-            </div>
-
-            {/* Total */}
-            <div className="border-t pt-4">
-              <div className="flex justify-between items-center text-lg font-semibold">
-                <span>Total (including delivery):</span>
-                <span>${calculateTotal(formData.items, formData.delivery_cost).toFixed(2)}</span>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="submit">{selectedPO ? "Update Purchase Order" : "Create Purchase Order"}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* View Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Purchase Order Details</DialogTitle>
-            <DialogDescription>View purchase order information and items</DialogDescription>
-          </DialogHeader>
-          {selectedPO && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">PO Number</Label>
-                  <p className="text-sm">{selectedPO.po_number}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Supplier</Label>
-                  <p className="text-sm">{selectedPO.supplier}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Status</Label>
-                  <div className="mt-1">{getStatusBadge(selectedPO.status)}</div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Order Date</Label>
-                  <p className="text-sm">{new Date(selectedPO.order_date).toLocaleDateString()}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Expected Delivery</Label>
-                  <p className="text-sm">
-                    {selectedPO.expected_delivery
-                      ? new Date(selectedPO.expected_delivery).toLocaleDateString()
-                      : "Not set"}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Delivery Cost</Label>
-                  <p className="text-sm">${selectedPO.delivery_cost?.toFixed(2) || "0.00"}</p>
-                </div>
-              </div>
-
-              {selectedPO.notes && (
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Notes</Label>
-                  <p className="text-sm mt-1">{selectedPO.notes}</p>
-                </div>
-              )}
-
-              <div>
-                <Label className="text-base font-semibold">Items</Label>
-                <ScrollArea className="h-64 mt-2">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>SKU</TableHead>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Unit Cost</TableHead>
-                        <TableHead>Delivery Cost/Unit</TableHead>
-                        <TableHead>Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedPO.items.map((item, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{item.sku}</TableCell>
-                          <TableCell>{item.product_name}</TableCell>
-                          <TableCell>{item.quantity}</TableCell>
-                          <TableCell>${item.unit_cost?.toFixed(2) || "0.00"}</TableCell>
-                          <TableCell>${item.delivery_cost_per_unit?.toFixed(2) || "0.00"}</TableCell>
-                          <TableCell>
-                            ${item.total_cost?.toFixed(2) || (item.quantity * item.unit_cost).toFixed(2)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="flex justify-between items-center text-lg font-semibold">
-                  <span>Total:</span>
-                  <span>${calculateTotal(selectedPO.items, selectedPO.delivery_cost).toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
