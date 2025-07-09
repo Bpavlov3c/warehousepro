@@ -1,268 +1,300 @@
--- Complete database reset script for Warehouse Management System
--- This script will drop and recreate the entire database
+-- Complete Database Reset Script for Warehouse Management System
+-- This script will drop all existing tables and recreate them with sample data
 
--- Connect to postgres database to drop/create the warehouse_management database
-\c postgres;
+-- Drop existing tables in correct order (reverse dependency order)
+DROP TABLE IF EXISTS sales_fulfillment CASCADE;
+DROP TABLE IF EXISTS shopify_order_items CASCADE;
+DROP TABLE IF EXISTS shopify_orders CASCADE;
+DROP TABLE IF EXISTS shopify_stores CASCADE;
+DROP TABLE IF EXISTS inventory CASCADE;
+DROP TABLE IF EXISTS po_items CASCADE;
+DROP TABLE IF EXISTS purchase_orders CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
 
--- Terminate all connections to the warehouse_management database
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE datname = 'warehouse_management' AND pid <> pg_backend_pid();
+-- Drop views if they exist
+DROP VIEW IF EXISTS product_inventory_summary CASCADE;
+DROP VIEW IF EXISTS profit_analysis CASCADE;
 
--- Drop the database if it exists
-DROP DATABASE IF EXISTS warehouse_management;
+-- Create Products table
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    sku VARCHAR(100) UNIQUE NOT NULL,
+    product_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    category VARCHAR(100),
+    unit_of_measure VARCHAR(50) DEFAULT 'pcs',
+    reorder_level INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Drop the user if it exists
-DROP USER IF EXISTS warehouse_user;
-
--- Create the user
-CREATE USER warehouse_user WITH PASSWORD '1';
-
--- Create the database
-CREATE DATABASE warehouse_management OWNER warehouse_user;
-
--- Grant privileges
-GRANT ALL PRIVILEGES ON DATABASE warehouse_management TO warehouse_user;
-
--- Connect to the new database
-\c warehouse_management;
-
--- Grant schema privileges
-GRANT ALL ON SCHEMA public TO warehouse_user;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO warehouse_user;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO warehouse_user;
-
--- Set default privileges for future objects
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO warehouse_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO warehouse_user;
-
--- Purchase Orders table
+-- Create Purchase Orders table
 CREATE TABLE purchase_orders (
     id SERIAL PRIMARY KEY,
-    po_number VARCHAR(50) UNIQUE NOT NULL,
+    po_number VARCHAR(100) UNIQUE NOT NULL,
     supplier_name VARCHAR(255) NOT NULL,
     po_date DATE NOT NULL,
-    delivery_cost DECIMAL(10,2) DEFAULT 0,
-    status VARCHAR(50) DEFAULT 'Pending',
+    delivery_cost DECIMAL(10,2) DEFAULT 0.00,
+    status VARCHAR(50) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Delivered', 'Cancelled')),
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Purchase Order Items table
+-- Create Purchase Order Items table
 CREATE TABLE po_items (
     id SERIAL PRIMARY KEY,
     po_id INTEGER REFERENCES purchase_orders(id) ON DELETE CASCADE,
     sku VARCHAR(100) NOT NULL,
     product_name VARCHAR(255) NOT NULL,
-    quantity INTEGER NOT NULL,
-    unit_cost DECIMAL(10,2) NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    unit_cost DECIMAL(10,2) NOT NULL CHECK (unit_cost >= 0),
     total_cost DECIMAL(10,2) GENERATED ALWAYS AS (quantity * unit_cost) STORED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Products table
-CREATE TABLE products (
+-- Create Inventory table (FIFO tracking)
+CREATE TABLE inventory (
     id SERIAL PRIMARY KEY,
-    sku VARCHAR(100) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    min_stock INTEGER DEFAULT 0,
-    max_stock INTEGER DEFAULT 100,
+    sku VARCHAR(100) NOT NULL,
+    product_name VARCHAR(255) NOT NULL,
+    po_id INTEGER REFERENCES purchase_orders(id),
+    batch_date DATE NOT NULL,
+    quantity_received INTEGER NOT NULL CHECK (quantity_received > 0),
+    quantity_remaining INTEGER NOT NULL CHECK (quantity_remaining >= 0),
+    unit_cost DECIMAL(10,2) NOT NULL CHECK (unit_cost >= 0),
+    location VARCHAR(100),
+    expiry_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_remaining_not_greater_than_received 
+        CHECK (quantity_remaining <= quantity_received)
+);
+
+-- Create Shopify Stores table
+CREATE TABLE shopify_stores (
+    id SERIAL PRIMARY KEY,
+    store_name VARCHAR(255) NOT NULL,
+    shop_domain VARCHAR(255) UNIQUE NOT NULL,
+    access_token TEXT,
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Inventory table (FIFO tracking)
-CREATE TABLE inventory (
-    id SERIAL PRIMARY KEY,
-    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-    po_item_id INTEGER REFERENCES po_items(id) ON DELETE CASCADE,
-    quantity_available INTEGER NOT NULL,
-    unit_cost DECIMAL(10,2) NOT NULL,
-    purchase_date DATE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Shopify Stores table
-CREATE TABLE shopify_stores (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    shopify_domain VARCHAR(255) NOT NULL,
-    access_token VARCHAR(255) NOT NULL,
-    webhook_url VARCHAR(500),
-    status VARCHAR(50) DEFAULT 'Active',
-    last_sync TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Shopify Orders table
+-- Create Shopify Orders table
 CREATE TABLE shopify_orders (
     id SERIAL PRIMARY KEY,
-    store_id INTEGER REFERENCES shopify_stores(id) ON DELETE CASCADE,
-    shopify_order_id VARCHAR(100) NOT NULL,
+    shopify_order_id BIGINT UNIQUE NOT NULL,
+    store_id INTEGER REFERENCES shopify_stores(id),
     order_number VARCHAR(100) NOT NULL,
-    customer_name VARCHAR(255),
     customer_email VARCHAR(255),
+    customer_name VARCHAR(255),
     order_date TIMESTAMP NOT NULL,
-    status VARCHAR(50) NOT NULL,
     total_amount DECIMAL(10,2) NOT NULL,
-    shipping_cost DECIMAL(10,2) DEFAULT 0,
-    tax_amount DECIMAL(10,2) DEFAULT 0,
-    discount_amount DECIMAL(10,2) DEFAULT 0,
-    shipping_address TEXT,
+    currency VARCHAR(10) DEFAULT 'USD',
+    fulfillment_status VARCHAR(50) DEFAULT 'unfulfilled',
+    financial_status VARCHAR(50) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(store_id, shopify_order_id)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Shopify Order Items table
+-- Create Shopify Order Items table
 CREATE TABLE shopify_order_items (
     id SERIAL PRIMARY KEY,
     order_id INTEGER REFERENCES shopify_orders(id) ON DELETE CASCADE,
-    sku VARCHAR(100) NOT NULL,
+    shopify_variant_id BIGINT,
+    sku VARCHAR(100),
     product_name VARCHAR(255) NOT NULL,
-    quantity INTEGER NOT NULL,
-    unit_price DECIMAL(10,2) NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    unit_price DECIMAL(10,2) NOT NULL CHECK (unit_price >= 0),
     total_price DECIMAL(10,2) GENERATED ALWAYS AS (quantity * unit_price) STORED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Sales Fulfillment table (FIFO cost tracking)
+-- Create Sales Fulfillment table (tracks inventory deductions)
 CREATE TABLE sales_fulfillment (
     id SERIAL PRIMARY KEY,
-    order_item_id INTEGER REFERENCES shopify_order_items(id) ON DELETE CASCADE,
-    inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
-    quantity_used INTEGER NOT NULL,
+    order_item_id INTEGER REFERENCES shopify_order_items(id),
+    inventory_id INTEGER REFERENCES inventory(id),
+    sku VARCHAR(100) NOT NULL,
+    quantity_fulfilled INTEGER NOT NULL CHECK (quantity_fulfilled > 0),
     unit_cost DECIMAL(10,2) NOT NULL,
+    fulfillment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes for better performance
-CREATE INDEX idx_po_items_sku ON po_items(sku);
 CREATE INDEX idx_products_sku ON products(sku);
-CREATE INDEX idx_inventory_product_id ON inventory(product_id);
+CREATE INDEX idx_po_items_po_id ON po_items(po_id);
+CREATE INDEX idx_po_items_sku ON po_items(sku);
+CREATE INDEX idx_inventory_sku ON inventory(sku);
+CREATE INDEX idx_inventory_po_id ON inventory(po_id);
+CREATE INDEX idx_inventory_batch_date ON inventory(batch_date);
+CREATE INDEX idx_shopify_orders_store_id ON shopify_orders(store_id);
 CREATE INDEX idx_shopify_orders_date ON shopify_orders(order_date);
+CREATE INDEX idx_shopify_order_items_order_id ON shopify_order_items(order_id);
 CREATE INDEX idx_shopify_order_items_sku ON shopify_order_items(sku);
-CREATE INDEX idx_sales_fulfillment_order_item ON sales_fulfillment(order_item_id);
+CREATE INDEX idx_sales_fulfillment_sku ON sales_fulfillment(sku);
 
--- Create views for reporting
+-- Insert sample data first, then create views
+
+-- Sample Products
+INSERT INTO products (sku, product_name, description, category, reorder_level) VALUES
+('WIDGET-001', 'Premium Widget A', 'High-quality widget for industrial use', 'Widgets', 50),
+('WIDGET-002', 'Standard Widget B', 'Standard widget for general use', 'Widgets', 30),
+('GADGET-001', 'Smart Gadget Pro', 'Advanced smart gadget with AI features', 'Electronics', 20),
+('GADGET-002', 'Basic Gadget', 'Simple gadget for everyday use', 'Electronics', 40),
+('TOOL-001', 'Professional Tool Set', 'Complete professional tool set', 'Tools', 10),
+('ACCESSORY-001', 'Universal Accessory', 'Compatible with all widget models', 'Accessories', 100);
+
+-- Sample Purchase Orders
+INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, status, notes) VALUES
+('PO-2024-001', 'Widget Suppliers Inc', '2024-01-15', 25.50, 'Delivered', 'First order of the year'),
+('PO-2024-002', 'Electronics Wholesale', '2024-01-20', 45.00, 'Delivered', 'Bulk electronics order'),
+('PO-2024-003', 'Tool Masters Ltd', '2024-02-01', 15.75, 'Approved', 'Professional tools restock'),
+('PO-2024-004', 'Accessory World', '2024-02-10', 30.00, 'Pending', 'Monthly accessory order'),
+('PO-2024-005', 'Widget Suppliers Inc', '2024-02-15', 28.25, 'Delivered', 'Reorder of popular items');
+
+-- Sample PO Items
+INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost) VALUES
+-- PO-2024-001 items
+(1, 'WIDGET-001', 'Premium Widget A', 100, 12.50),
+(1, 'WIDGET-002', 'Standard Widget B', 150, 8.75),
+-- PO-2024-002 items
+(2, 'GADGET-001', 'Smart Gadget Pro', 50, 45.00),
+(2, 'GADGET-002', 'Basic Gadget', 75, 15.50),
+-- PO-2024-003 items
+(3, 'TOOL-001', 'Professional Tool Set', 25, 125.00),
+-- PO-2024-004 items
+(4, 'ACCESSORY-001', 'Universal Accessory', 200, 3.25),
+-- PO-2024-005 items
+(5, 'WIDGET-001', 'Premium Widget A', 80, 12.75),
+(5, 'WIDGET-002', 'Standard Widget B', 120, 9.00);
+
+-- Sample Inventory (only for delivered POs)
+INSERT INTO inventory (sku, product_name, po_id, batch_date, quantity_received, quantity_remaining, unit_cost, location) VALUES
+-- From PO-2024-001 (Delivered)
+('WIDGET-001', 'Premium Widget A', 1, '2024-01-18', 100, 85, 12.50, 'A-1-01'),
+('WIDGET-002', 'Standard Widget B', 1, '2024-01-18', 150, 120, 8.75, 'A-1-02'),
+-- From PO-2024-002 (Delivered)
+('GADGET-001', 'Smart Gadget Pro', 2, '2024-01-25', 50, 35, 45.00, 'B-2-01'),
+('GADGET-002', 'Basic Gadget', 2, '2024-01-25', 75, 60, 15.50, 'B-2-02'),
+-- From PO-2024-005 (Delivered)
+('WIDGET-001', 'Premium Widget A', 5, '2024-02-18', 80, 75, 12.75, 'A-1-03'),
+('WIDGET-002', 'Standard Widget B', 5, '2024-02-18', 120, 110, 9.00, 'A-1-04');
+
+-- Sample Shopify Stores
+INSERT INTO shopify_stores (store_name, shop_domain, is_active) VALUES
+('Main Store', 'mystore.myshopify.com', true),
+('Wholesale Store', 'wholesale.myshopify.com', true),
+('Test Store', 'test-store.myshopify.com', false);
+
+-- Sample Shopify Orders
+INSERT INTO shopify_orders (shopify_order_id, store_id, order_number, customer_email, customer_name, order_date, total_amount, fulfillment_status, financial_status) VALUES
+(1001, 1, '#1001', 'customer1@example.com', 'John Smith', '2024-01-20 10:30:00', 156.25, 'fulfilled', 'paid'),
+(1002, 1, '#1002', 'customer2@example.com', 'Jane Doe', '2024-01-22 14:15:00', 93.00, 'fulfilled', 'paid'),
+(1003, 2, '#2001', 'wholesale@company.com', 'ABC Company', '2024-01-25 09:00:00', 450.00, 'fulfilled', 'paid'),
+(1004, 1, '#1003', 'customer3@example.com', 'Bob Johnson', '2024-02-01 16:45:00', 78.50, 'partial', 'paid'),
+(1005, 1, '#1004', 'customer4@example.com', 'Alice Brown', '2024-02-05 11:20:00', 225.75, 'unfulfilled', 'pending');
+
+-- Sample Shopify Order Items
+INSERT INTO shopify_order_items (order_id, shopify_variant_id, sku, product_name, quantity, unit_price) VALUES
+-- Order #1001
+(1, 101, 'WIDGET-001', 'Premium Widget A', 5, 18.75),
+(1, 102, 'WIDGET-002', 'Standard Widget B', 8, 13.12),
+-- Order #1002
+(2, 103, 'GADGET-002', 'Basic Gadget', 3, 31.00),
+-- Order #2001 (Wholesale)
+(3, 101, 'WIDGET-001', 'Premium Widget A', 10, 15.00),
+(3, 104, 'GADGET-001', 'Smart Gadget Pro', 5, 60.00),
+-- Order #1003
+(4, 102, 'WIDGET-002', 'Standard Widget B', 6, 13.08),
+-- Order #1004
+(5, 101, 'WIDGET-001', 'Premium Widget A', 12, 18.81);
+
+-- Sample Sales Fulfillment (for fulfilled orders)
+INSERT INTO sales_fulfillment (order_item_id, inventory_id, sku, quantity_fulfilled, unit_cost) VALUES
+-- Fulfillment for Order #1001
+(1, 1, 'WIDGET-001', 5, 12.50), -- 5 units from first batch
+(2, 2, 'WIDGET-002', 8, 8.75),  -- 8 units from first batch
+-- Fulfillment for Order #1002
+(3, 4, 'GADGET-002', 3, 15.50), -- 3 units from gadget batch
+-- Fulfillment for Order #2001
+(4, 1, 'WIDGET-001', 10, 12.50), -- 10 more units from first batch
+(5, 3, 'GADGET-001', 5, 45.00), -- 5 units from gadget pro batch
+-- Fulfillment for Order #1003
+(6, 2, 'WIDGET-002', 6, 8.75);  -- 6 units from first batch
+
+-- Now create views AFTER data is inserted
 CREATE VIEW product_inventory_summary AS
 SELECT 
     p.sku,
-    p.name,
-    COALESCE(SUM(i.quantity_available), 0) as current_stock,
+    p.product_name,
+    p.category,
+    COALESCE(SUM(i.quantity_remaining), 0) as current_stock,
     COALESCE(AVG(i.unit_cost), 0) as avg_cost,
-    COALESCE(SUM(i.quantity_available * i.unit_cost), 0) as total_value,
-    p.min_stock,
-    p.max_stock
+    COALESCE(SUM(i.quantity_remaining * i.unit_cost), 0) as total_value,
+    p.reorder_level,
+    CASE 
+        WHEN COALESCE(SUM(i.quantity_remaining), 0) <= p.reorder_level THEN 'Low Stock'
+        WHEN COALESCE(SUM(i.quantity_remaining), 0) = 0 THEN 'Out of Stock'
+        ELSE 'In Stock'
+    END as stock_status,
+    COUNT(DISTINCT i.po_id) as supplier_count,
+    MAX(i.batch_date) as last_received_date
 FROM products p
-LEFT JOIN inventory i ON p.id = i.product_id
-GROUP BY p.id, p.sku, p.name, p.min_stock, p.max_stock;
+LEFT JOIN inventory i ON p.sku = i.sku AND i.quantity_remaining > 0
+GROUP BY p.id, p.sku, p.product_name, p.category, p.reorder_level;
 
 CREATE VIEW profit_analysis AS
 SELECT 
     soi.sku,
     soi.product_name,
     SUM(soi.quantity) as total_sold,
-    AVG(soi.unit_price) as avg_sale_price,
     SUM(soi.total_price) as total_revenue,
-    COALESCE(AVG(sf.unit_cost), 0) as avg_cost,
-    COALESCE(SUM(sf.quantity_used * sf.unit_cost), 0) as total_cost,
-    SUM(soi.total_price) - COALESCE(SUM(sf.quantity_used * sf.unit_cost), 0) as gross_profit
+    SUM(sf.quantity_fulfilled * sf.unit_cost) as total_cost,
+    SUM(soi.total_price) - SUM(sf.quantity_fulfilled * sf.unit_cost) as total_profit,
+    CASE 
+        WHEN SUM(sf.quantity_fulfilled * sf.unit_cost) > 0 
+        THEN ((SUM(soi.total_price) - SUM(sf.quantity_fulfilled * sf.unit_cost)) / SUM(sf.quantity_fulfilled * sf.unit_cost)) * 100
+        ELSE 0 
+    END as profit_margin_percent
 FROM shopify_order_items soi
-LEFT JOIN sales_fulfillment sf ON soi.id = sf.order_item_id
-GROUP BY soi.sku, soi.product_name;
+JOIN sales_fulfillment sf ON soi.id = sf.order_item_id
+GROUP BY soi.sku, soi.product_name
+HAVING SUM(soi.quantity) > 0;
 
--- Insert sample data
+-- Update trigger for updated_at columns
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
 
--- Sample products
-INSERT INTO products (sku, name, description, min_stock, max_stock) VALUES
-('WH-001', 'Wireless Headphones', 'High-quality wireless headphones with noise cancellation', 10, 100),
-('SW-002', 'Smart Watch', 'Fitness tracking smartwatch with heart rate monitor', 5, 50),
-('PC-003', 'Phone Case', 'Protective case for smartphones - universal fit', 25, 200),
-('BS-004', 'Bluetooth Speaker', 'Portable wireless speaker with premium sound', 8, 80),
-('CB-005', 'USB Cable', 'High-speed USB-C charging cable - 6ft', 50, 500),
-('TB-006', 'Tablet Stand', 'Adjustable tablet stand for desk use', 15, 100),
-('KD-007', 'Wireless Keyboard', 'Bluetooth keyboard with backlight', 10, 60);
+-- Apply triggers to tables with updated_at columns
+CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_purchase_orders_updated_at BEFORE UPDATE ON purchase_orders FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_inventory_updated_at BEFORE UPDATE ON inventory FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_shopify_stores_updated_at BEFORE UPDATE ON shopify_stores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_shopify_orders_updated_at BEFORE UPDATE ON shopify_orders FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Sample purchase orders
-INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, status, notes) VALUES
-('PO-2024-001', 'Tech Supplies Co.', '2024-01-15', 150.00, 'Delivered', 'Initial stock order for Q1'),
-('PO-2024-002', 'Electronics Hub', '2024-01-18', 75.00, 'Delivered', 'Restocking popular items'),
-('PO-2024-003', 'Global Gadgets', '2024-01-22', 200.00, 'Pending', 'Large order for new product line'),
-('PO-2024-004', 'Premium Tech', '2024-01-25', 125.00, 'Approved', 'Rush order for high-demand items');
-
--- Sample PO items
-INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost) VALUES
--- PO-2024-001 items
-(1, 'WH-001', 'Wireless Headphones', 50, 75.00),
-(1, 'SW-002', 'Smart Watch', 25, 120.00),
-(1, 'PC-003', 'Phone Case', 100, 15.00),
--- PO-2024-002 items
-(2, 'BS-004', 'Bluetooth Speaker', 30, 85.00),
-(2, 'CB-005', 'USB Cable', 200, 8.50),
-(2, 'WH-001', 'Wireless Headphones', 25, 72.00),
--- PO-2024-003 items (pending)
-(3, 'TB-006', 'Tablet Stand', 40, 28.00),
-(3, 'KD-007', 'Wireless Keyboard', 35, 45.00),
-(3, 'SW-002', 'Smart Watch', 20, 118.00),
--- PO-2024-004 items (approved)
-(4, 'PC-003', 'Phone Case', 150, 14.50),
-(4, 'CB-005', 'USB Cable', 100, 8.75),
-(4, 'BS-004', 'Bluetooth Speaker', 20, 82.00);
-
--- Sample inventory for delivered orders
-INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date) VALUES
--- From PO-2024-001 (delivered)
-(1, 1, 45, 75.00, '2024-01-15'), -- WH-001: 45 remaining (5 sold)
-(2, 2, 22, 120.00, '2024-01-15'), -- SW-002: 22 remaining (3 sold)
-(3, 3, 95, 15.00, '2024-01-15'), -- PC-003: 95 remaining (5 sold)
--- From PO-2024-002 (delivered)
-(4, 4, 28, 85.00, '2024-01-18'), -- BS-004: 28 remaining (2 sold)
-(5, 5, 180, 8.50, '2024-01-18'), -- CB-005: 180 remaining (20 sold)
-(1, 6, 23, 72.00, '2024-01-18'); -- WH-001: 23 remaining (2 sold from newer batch)
-
--- Sample Shopify stores
-INSERT INTO shopify_stores (name, shopify_domain, access_token, webhook_url, status, last_sync) VALUES
-('Main Electronics Store', 'main-electronics.myshopify.com', 'shpat_***************', 'https://yourapp.com/webhook/store1', 'Active', '2024-01-26 10:30:00'),
-('EU Electronics Hub', 'eu-electronics.myshopify.com', 'shpat_***************', 'https://yourapp.com/webhook/store2', 'Active', '2024-01-26 09:15:00'),
-('Mobile Accessories Store', 'mobile-accessories.myshopify.com', 'shpat_***************', 'https://yourapp.com/webhook/store3', 'Inactive', '2024-01-25 16:45:00');
-
--- Sample Shopify orders
-INSERT INTO shopify_orders (store_id, shopify_order_id, order_number, customer_name, customer_email, order_date, status, total_amount, shipping_cost, tax_amount, discount_amount, shipping_address) VALUES
-(1, '5234567890123', '#1001', 'John Doe', 'john@example.com', '2024-01-20 14:30:00', 'fulfilled', 299.99, 9.99, 24.00, 0.00, '123 Main St, New York, NY 10001'),
-(1, '5234567890124', '#1002', 'Jane Smith', 'jane@example.com', '2024-01-21 10:15:00', 'pending', 189.99, 12.99, 15.20, 5.00, '456 Oak Ave, Los Angeles, CA 90210'),
-(2, '5234567890125', '#2001', 'Bob Johnson', 'bob@example.com', '2024-01-22 16:20:00', 'shipped', 159.99, 7.99, 12.80, 0.00, '789 Pine St, Chicago, IL 60601'),
-(1, '5234567890126', '#1003', 'Alice Brown', 'alice@example.com', '2024-01-23 11:45:00', 'fulfilled', 89.99, 8.99, 7.20, 10.00, '321 Elm Rd, Houston, TX 77001'),
-(3, '5234567890127', '#3001', 'Charlie Wilson', 'charlie@example.com', '2024-01-24 13:30:00', 'cancelled', 45.99, 5.99, 3.68, 0.00, '654 Maple Dr, Phoenix, AZ 85001');
-
--- Sample Shopify order items
-INSERT INTO shopify_order_items (order_id, sku, product_name, quantity, unit_price) VALUES
--- Order #1001
-(1, 'WH-001', 'Wireless Headphones', 2, 149.99),
--- Order #1002  
-(2, 'SW-002', 'Smart Watch', 1, 189.99),
--- Order #2001
-(3, 'BS-004', 'Bluetooth Speaker', 1, 129.99),
-(3, 'PC-003', 'Phone Case', 2, 15.00),
--- Order #1003
-(4, 'CB-005', 'USB Cable', 3, 12.99),
-(4, 'PC-003', 'Phone Case', 2, 16.99),
--- Order #3001 (cancelled)
-(5, 'PC-003', 'Phone Case', 3, 15.33);
-
--- Sample sales fulfillment records (FIFO cost tracking)
-INSERT INTO sales_fulfillment (order_item_id, inventory_id, quantity_used, unit_cost) VALUES
--- Order #1001: 2x WH-001
-(1, 1, 2, 75.00),
--- Order #1002: 1x SW-002
-(2, 2, 1, 120.00),
--- Order #2001: 1x BS-004, 2x PC-003
-(3, 4, 1, 85.00),
-(4, 3, 2, 15.00),
--- Order #1003: 3x CB-005, 2x PC-003
-(5, 5, 3, 8.50),
-(6, 3, 2, 15.00);
-
--- Final message
-SELECT 'Database reset and sample data inserted successfully!' as message;
+-- Display summary
+SELECT 'Database reset completed successfully!' as status;
+SELECT 'Products: ' || COUNT(*) as count FROM products
+UNION ALL
+SELECT 'Purchase Orders: ' || COUNT(*) FROM purchase_orders
+UNION ALL
+SELECT 'PO Items: ' || COUNT(*) FROM po_items
+UNION ALL
+SELECT 'Inventory Records: ' || COUNT(*) FROM inventory
+UNION ALL
+SELECT 'Shopify Stores: ' || COUNT(*) FROM shopify_stores
+UNION ALL
+SELECT 'Shopify Orders: ' || COUNT(*) FROM shopify_orders
+UNION ALL
+SELECT 'Order Items: ' || COUNT(*) FROM shopify_order_items
+UNION ALL
+SELECT 'Fulfillment Records: ' || COUNT(*) FROM sales_fulfillment;

@@ -1,35 +1,9 @@
 "use client"
 
-import type React from "react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import {
   Pagination,
   PaginationContent,
@@ -38,21 +12,9 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { Plus, Edit, Trash2, Package, Calendar, AlertTriangle, FileX, Truck } from "lucide-react"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { ShoppingCart, Package, DollarSign, Calendar, FileX, RefreshCw, Plus, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
-
-interface PurchaseOrder {
-  id: number
-  po_number: string
-  supplier_name: string
-  po_date: string
-  delivery_cost: number
-  status: "Pending" | "Approved" | "Delivered" | "Cancelled"
-  notes?: string
-  items?: POItem[]
-  created_at: string
-  updated_at: string
-}
 
 interface POItem {
   id: number
@@ -65,34 +27,27 @@ interface POItem {
   created_at: string
 }
 
-const statusColors = {
-  Pending: "bg-yellow-100 text-yellow-800",
-  Approved: "bg-blue-100 text-blue-800",
-  Delivered: "bg-green-100 text-green-800",
-  Cancelled: "bg-red-100 text-red-800",
+interface PurchaseOrder {
+  id: number
+  po_number: string
+  supplier_name: string
+  po_date: string
+  delivery_cost: number
+  status: "Pending" | "Approved" | "Delivered" | "Cancelled"
+  notes?: string
+  created_at: string
+  updated_at: string
+  items?: POItem[]
 }
 
 export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
   const itemsPerPage = 10
-
-  const [formData, setFormData] = useState({
-    po_number: "",
-    supplier_name: "",
-    po_date: "",
-    delivery_cost: "",
-    status: "Pending" as const,
-    notes: "",
-  })
-
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetchPurchaseOrders(currentPage)
@@ -143,129 +98,68 @@ export default function PurchaseOrdersPage() {
     }
   }
 
-  const validateForm = (): boolean => {
-    const errors: Record<string, string> = {}
+  const formatAmount = (amount: number | string | null | undefined): string => {
+    // Convert to number first, handling all possible input types
+    let numericAmount: number
 
-    if (!formData.po_number.trim()) {
-      errors.po_number = "PO Number is required"
-    }
-    if (!formData.supplier_name.trim()) {
-      errors.supplier_name = "Supplier Name is required"
-    }
-    if (!formData.po_date) {
-      errors.po_date = "PO Date is required"
-    }
-    if (formData.delivery_cost && isNaN(Number.parseFloat(formData.delivery_cost))) {
-      errors.delivery_cost = "Delivery Cost must be a valid number"
+    if (amount === null || amount === undefined) {
+      numericAmount = 0
+    } else if (typeof amount === "string") {
+      numericAmount = Number.parseFloat(amount) || 0
+    } else if (typeof amount === "number") {
+      numericAmount = amount
+    } else {
+      numericAmount = 0
     }
 
-    setFormErrors(errors)
-    return Object.keys(errors).length === 0
+    return numericAmount.toFixed(2)
   }
 
-  const resetForm = () => {
-    setFormData({
-      po_number: "",
-      supplier_name: "",
-      po_date: "",
-      delivery_cost: "",
-      status: "Pending",
-      notes: "",
-    })
-    setEditingOrder(null)
-    setFormErrors({})
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!validateForm()) {
-      toast.error("Please fix the form errors")
-      return
-    }
-
+  const formatDate = (dateString: string): string => {
     try {
-      const url = editingOrder ? `/api/purchase-orders/${editingOrder.id}` : "/api/purchase-orders"
-      const method = editingOrder ? "PUT" : "POST"
-
-      console.log(`🔄 ${method} request to ${url}:`, formData)
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...formData,
-          delivery_cost: formData.delivery_cost ? Number.parseFloat(formData.delivery_cost) : 0,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to save purchase order")
-      }
-
-      const result = await response.json()
-      console.log("✅ Save result:", result)
-
-      toast.success(editingOrder ? "Purchase order updated successfully" : "Purchase order created successfully")
-
-      setIsDialogOpen(false)
-      resetForm()
-
-      // Refresh the current page
-      await fetchPurchaseOrders(currentPage)
-    } catch (err) {
-      console.error("❌ Save error:", err)
-      toast.error(err instanceof Error ? err.message : "An error occurred")
+      return new Date(dateString).toLocaleDateString()
+    } catch {
+      return dateString
     }
   }
 
-  const handleEdit = (order: PurchaseOrder) => {
-    setEditingOrder(order)
-    setFormData({
-      po_number: order.po_number,
-      supplier_name: order.supplier_name,
-      po_date: order.po_date,
-      delivery_cost: order.delivery_cost.toString(),
-      status: order.status,
-      notes: order.notes || "",
-    })
-    setFormErrors({})
-    setIsDialogOpen(true)
-  }
-
-  const handleDelete = async (id: number) => {
-    try {
-      console.log(`🗑️ Deleting purchase order ${id}`)
-
-      const response = await fetch(`/api/purchase-orders/${id}`, {
-        method: "DELETE",
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to delete purchase order")
-      }
-
-      toast.success("Purchase order deleted successfully")
-
-      // Refresh the current page
-      await fetchPurchaseOrders(currentPage)
-    } catch (err) {
-      console.error("❌ Delete error:", err)
-      toast.error(err instanceof Error ? err.message : "Failed to delete purchase order")
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "Delivered":
+        return "bg-green-100 text-green-800"
+      case "Approved":
+        return "bg-blue-100 text-blue-800"
+      case "Pending":
+        return "bg-yellow-100 text-yellow-800"
+      case "Cancelled":
+        return "bg-red-100 text-red-800"
+      default:
+        return "bg-gray-100 text-gray-800"
     }
-  }
-
-  const formatAmount = (amount: number | null | undefined): string => {
-    const safeAmount = amount || 0
-    return safeAmount.toFixed(2)
   }
 
   const calculateTotalValue = () => {
-    return purchaseOrders.reduce((sum, po) => sum + (po.delivery_cost || 0), 0)
+    return purchaseOrders.reduce((sum, po) => {
+      const itemsTotal =
+        po.items?.reduce((itemSum, item) => {
+          const itemCost = Number.parseFloat(String(item.total_cost)) || 0
+          return itemSum + itemCost
+        }, 0) || 0
+      const deliveryCost = Number.parseFloat(String(po.delivery_cost)) || 0
+      return sum + itemsTotal + deliveryCost
+    }, 0)
+  }
+
+  const getTotalOrders = () => {
+    return totalItems
+  }
+
+  const getPendingOrders = () => {
+    return purchaseOrders.filter((po) => po.status === "Pending").length
+  }
+
+  const getDeliveredOrders = () => {
+    return purchaseOrders.filter((po) => po.status === "Delivered").length
   }
 
   if (loading) {
@@ -300,116 +194,18 @@ export default function PurchaseOrdersPage() {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold">Purchase Orders</h1>
-          <p className="text-gray-600">Manage your purchase orders and track deliveries</p>
+          <p className="text-gray-600">Manage and track purchase orders from suppliers</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={resetForm}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Purchase Order
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{editingOrder ? "Edit Purchase Order" : "Create New Purchase Order"}</DialogTitle>
-              <DialogDescription>
-                {editingOrder
-                  ? "Update the purchase order details below."
-                  : "Fill in the details to create a new purchase order."}
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="po_number">PO Number *</Label>
-                  <Input
-                    id="po_number"
-                    value={formData.po_number}
-                    onChange={(e) => setFormData({ ...formData, po_number: e.target.value })}
-                    placeholder="PO-2024-001"
-                    className={formErrors.po_number ? "border-red-500" : ""}
-                  />
-                  {formErrors.po_number && <p className="text-red-500 text-sm mt-1">{formErrors.po_number}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="supplier_name">Supplier Name *</Label>
-                  <Input
-                    id="supplier_name"
-                    value={formData.supplier_name}
-                    onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
-                    placeholder="Enter supplier name"
-                    className={formErrors.supplier_name ? "border-red-500" : ""}
-                  />
-                  {formErrors.supplier_name && <p className="text-red-500 text-sm mt-1">{formErrors.supplier_name}</p>}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="po_date">PO Date *</Label>
-                  <Input
-                    id="po_date"
-                    type="date"
-                    value={formData.po_date}
-                    onChange={(e) => setFormData({ ...formData, po_date: e.target.value })}
-                    className={formErrors.po_date ? "border-red-500" : ""}
-                  />
-                  {formErrors.po_date && <p className="text-red-500 text-sm mt-1">{formErrors.po_date}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="delivery_cost">Delivery Cost</Label>
-                  <Input
-                    id="delivery_cost"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.delivery_cost}
-                    onChange={(e) => setFormData({ ...formData, delivery_cost: e.target.value })}
-                    placeholder="0.00"
-                    className={formErrors.delivery_cost ? "border-red-500" : ""}
-                  />
-                  {formErrors.delivery_cost && <p className="text-red-500 text-sm mt-1">{formErrors.delivery_cost}</p>}
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="status">Status</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value: any) => setFormData({ ...formData, status: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Approved">Approved</SelectItem>
-                    <SelectItem value="Delivered">Delivered</SelectItem>
-                    <SelectItem value="Cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Additional notes..."
-                  rows={3}
-                />
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit">{editingOrder ? "Update Order" : "Create Order"}</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex gap-2">
+          <Button onClick={() => fetchPurchaseOrders(currentPage)}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            New PO
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -417,10 +213,10 @@ export default function PurchaseOrdersPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalItems}</div>
+            <div className="text-2xl font-bold">{getTotalOrders()}</div>
           </CardContent>
         </Card>
         <Card>
@@ -429,25 +225,25 @@ export default function PurchaseOrdersPage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "Pending").length}</div>
+            <div className="text-2xl font-bold text-yellow-600">{getPendingOrders()}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Delivery Cost</CardTitle>
-            <Truck className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${formatAmount(calculateTotalValue())}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Delivered</CardTitle>
+            <CardTitle className="text-sm font-medium">Delivered Orders</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "Delivered").length}</div>
+            <div className="text-2xl font-bold text-green-600">{getDeliveredOrders()}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">${formatAmount(calculateTotalValue())}</div>
           </CardContent>
         </Card>
       </div>
@@ -458,7 +254,7 @@ export default function PurchaseOrdersPage() {
           <CardTitle>Purchase Orders</CardTitle>
           <CardDescription>
             {totalItems > 0
-              ? `A list of all purchase orders with their current status and details. Showing ${purchaseOrders.length} of ${totalItems} items.`
+              ? `Overview of all purchase orders. Showing ${purchaseOrders.length} of ${totalItems} orders.`
               : "No purchase orders found in the database."}
           </CardDescription>
         </CardHeader>
@@ -466,12 +262,12 @@ export default function PurchaseOrdersPage() {
           {totalItems === 0 ? (
             <div className="text-center py-16">
               <FileX className="h-16 w-16 text-gray-300 mx-auto mb-6" />
-              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Records Available</h3>
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Purchase Orders Available</h3>
               <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                There are currently no purchase orders in the database. Get started by creating your first purchase
-                order.
+                There are currently no purchase orders in the database. Create your first purchase order to get started
+                with inventory management.
               </p>
-              <Button onClick={() => setIsDialogOpen(true)} className="mx-auto">
+              <Button>
                 <Plus className="mr-2 h-4 w-4" />
                 Create First Purchase Order
               </Button>
@@ -484,53 +280,39 @@ export default function PurchaseOrdersPage() {
                     <TableRow>
                       <TableHead>PO Number</TableHead>
                       <TableHead>Supplier</TableHead>
-                      <TableHead>PO Date</TableHead>
-                      <TableHead>Delivery Cost</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Date</TableHead>
                       <TableHead>Items</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead>Items Total</TableHead>
+                      <TableHead>Delivery Cost</TableHead>
+                      <TableHead>Total</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {purchaseOrders.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="font-medium">{order.po_number}</TableCell>
-                        <TableCell>{order.supplier_name}</TableCell>
-                        <TableCell>{new Date(order.po_date).toLocaleDateString()}</TableCell>
-                        <TableCell>${formatAmount(order.delivery_cost)}</TableCell>
-                        <TableCell>
-                          <Badge className={statusColors[order.status]}>{order.status}</Badge>
-                        </TableCell>
-                        <TableCell>{order.items ? order.items.length : 0} items</TableCell>
-                        <TableCell>
-                          <div className="flex space-x-2">
-                            <Button variant="outline" size="sm" onClick={() => handleEdit(order)}>
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="outline" size="sm">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    This action cannot be undone. This will permanently delete the purchase order "
-                                    {order.po_number}".
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDelete(order.id)}>Delete</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {purchaseOrders.map((po) => {
+                      const itemsTotal =
+                        po.items?.reduce((sum, item) => {
+                          const itemCost = Number.parseFloat(String(item.total_cost)) || 0
+                          return sum + itemCost
+                        }, 0) || 0
+                      const deliveryCost = Number.parseFloat(String(po.delivery_cost)) || 0
+                      const totalCost = itemsTotal + deliveryCost
+
+                      return (
+                        <TableRow key={po.id}>
+                          <TableCell className="font-medium">{po.po_number}</TableCell>
+                          <TableCell>{po.supplier_name}</TableCell>
+                          <TableCell>{formatDate(po.po_date)}</TableCell>
+                          <TableCell>{po.items?.length || 0}</TableCell>
+                          <TableCell>${formatAmount(itemsTotal)}</TableCell>
+                          <TableCell>${formatAmount(deliveryCost)}</TableCell>
+                          <TableCell className="font-medium">${formatAmount(totalCost)}</TableCell>
+                          <TableCell>
+                            <Badge className={getStatusColor(po.status)}>{po.status}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>

@@ -1,77 +1,109 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { InventoryStore } from "@/lib/db-store"
-
-// Add CORS headers
-function addCorsHeaders(response: NextResponse) {
-  response.headers.set("Access-Control-Allow-Origin", "*")
-  response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-  return response
-}
-
-export async function OPTIONS() {
-  return addCorsHeaders(new NextResponse(null, { status: 200 }))
-}
+import { query } from "@/lib/database"
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const page = Number.parseInt(searchParams.get("page") || "1")
     const limit = Number.parseInt(searchParams.get("limit") || "10")
+    const offset = (page - 1) * limit
 
     console.log(`📦 Fetching inventory summary - Page: ${page}, Limit: ${limit}`)
 
-    const result = await InventoryStore.getInventorySummary(page, limit)
-    console.log(`✅ Found ${result.data.length} inventory items (${result.total} total)`)
+    // Get total count from products table instead of view
+    const countResult = await query("SELECT COUNT(*) FROM products")
+    const total = Number.parseInt(countResult.rows[0].count)
 
-    const response = NextResponse.json(result)
-    return addCorsHeaders(response)
+    // Use a direct query instead of the view to avoid permission issues
+    const result = await query(
+      `
+      SELECT 
+        p.sku,
+        p.product_name as name,
+        p.category,
+        COALESCE(SUM(i.quantity_remaining), 0) as current_stock,
+        COALESCE(AVG(i.unit_cost), 0) as avg_cost,
+        COALESCE(SUM(i.quantity_remaining * i.unit_cost), 0) as total_value,
+        p.reorder_level as min_stock,
+        100 as max_stock,
+        CASE 
+          WHEN COALESCE(SUM(i.quantity_remaining), 0) <= p.reorder_level THEN 'Low Stock'
+          WHEN COALESCE(SUM(i.quantity_remaining), 0) = 0 THEN 'Out of Stock'
+          ELSE 'In Stock'
+        END as stock_status
+      FROM products p
+      LEFT JOIN inventory i ON p.sku = i.sku AND i.quantity_remaining > 0
+      GROUP BY p.id, p.sku, p.product_name, p.category, p.reorder_level
+      ORDER BY p.product_name ASC
+      LIMIT $1 OFFSET $2
+    `,
+      [limit, offset],
+    )
+
+    console.log(`✅ Found ${result.rows.length} inventory items`)
+
+    // Convert numeric fields to proper numbers
+    const inventoryData = result.rows.map((row) => ({
+      ...row,
+      current_stock: Number.parseInt(row.current_stock) || 0,
+      avg_cost: Number.parseFloat(row.avg_cost) || 0,
+      total_value: Number.parseFloat(row.total_value) || 0,
+      min_stock: Number.parseInt(row.min_stock) || 0,
+      max_stock: Number.parseInt(row.max_stock) || 100,
+    }))
+
+    return NextResponse.json({
+      data: inventoryData,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    })
   } catch (error) {
-    console.error("❌ Error fetching inventory:", error)
-    const response = NextResponse.json(
+    console.error("❌ Inventory API Error:", error)
+
+    return NextResponse.json(
       {
-        error: "Failed to fetch inventory",
+        error: "Failed to fetch inventory data",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
-    return addCorsHeaders(response)
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log("📝 Creating inventory item:", body)
 
-    // Validate required fields
-    if (!body.sku || !body.name || !body.category || !body.supplier) {
-      return NextResponse.json({ error: "Missing required fields: sku, name, category, supplier" }, { status: 400 })
-    }
+    const result = await query(
+      `
+      INSERT INTO inventory (sku, product_name, po_id, batch_date, quantity_received, quantity_remaining, unit_cost, location, expiry_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `,
+      [
+        body.sku,
+        body.product_name,
+        body.po_id,
+        body.batch_date,
+        body.quantity_received,
+        body.quantity_remaining,
+        body.unit_cost,
+        body.location,
+        body.expiry_date,
+      ],
+    )
 
-    const inventoryItem = await InventoryStore.create({
-      sku: body.sku,
-      name: body.name,
-      description: body.description,
-      category: body.category,
-      quantity: Number.parseInt(body.quantity) || 0,
-      unit_price: Number.parseFloat(body.unit_price) || 0,
-      reorder_level: Number.parseInt(body.reorder_level) || 0,
-      supplier: body.supplier,
-    })
-
-    console.log("✅ Inventory item created:", inventoryItem.id)
-    return NextResponse.json(inventoryItem, { status: 201 })
+    return NextResponse.json(result.rows[0])
   } catch (error) {
-    console.error("❌ Error creating inventory item:", error)
-
-    // Handle unique constraint violation
-    if (error instanceof Error && error.message.includes("duplicate key")) {
-      return NextResponse.json({ error: "SKU already exists" }, { status: 409 })
-    }
+    console.error("❌ Create Inventory Error:", error)
 
     return NextResponse.json(
-      { error: "Failed to create inventory item", details: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: "Failed to create inventory record",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }

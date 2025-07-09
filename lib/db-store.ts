@@ -1,6 +1,18 @@
-import { executeQuery } from "./database"
+import { query } from "./database"
 
-// Purchase Order interfaces
+// Type definitions
+export interface Product {
+  id: number
+  sku: string
+  product_name: string
+  description?: string
+  category?: string
+  unit_of_measure: string
+  reorder_level: number
+  created_at: string
+  updated_at: string
+}
+
 export interface PurchaseOrder {
   id: number
   po_number: string
@@ -9,9 +21,9 @@ export interface PurchaseOrder {
   delivery_cost: number
   status: "Pending" | "Approved" | "Delivered" | "Cancelled"
   notes?: string
-  items?: POItem[]
   created_at: string
   updated_at: string
+  items?: POItem[]
 }
 
 export interface POItem {
@@ -25,107 +37,53 @@ export interface POItem {
   created_at: string
 }
 
-export interface CreatePurchaseOrderData {
-  po_number: string
-  supplier_name: string
-  po_date: string
-  delivery_cost?: number
-  status?: "Pending" | "Approved" | "Delivered" | "Cancelled"
-  notes?: string
-  items?: CreatePOItemData[]
-}
-
-export interface CreatePOItemData {
-  sku: string
-  product_name: string
-  quantity: number
-  unit_cost: number
-}
-
-// Product interfaces
-export interface Product {
+export interface InventoryItem {
   id: number
   sku: string
-  name: string
-  description?: string
-  min_stock: number
-  max_stock: number
+  product_name: string
+  po_id?: number
+  batch_date: string
+  quantity_received: number
+  quantity_remaining: number
+  unit_cost: number
+  location?: string
+  expiry_date?: string
   created_at: string
   updated_at: string
 }
 
-export interface CreateProductData {
-  sku: string
-  name: string
-  description?: string
-  min_stock?: number
-  max_stock?: number
-}
-
-// Inventory interfaces
-export interface Inventory {
-  id: number
-  product_id: number
-  po_item_id: number
-  quantity_available: number
-  unit_cost: number
-  purchase_date: string
-  created_at: string
-}
-
-export interface ProductInventorySummary {
-  sku: string
-  name: string
-  current_stock: number
-  avg_cost: number
-  total_value: number
-  min_stock: number
-  max_stock: number
-}
-
-// Shopify Store interfaces
 export interface ShopifyStore {
   id: number
-  name: string
-  shopify_domain: string
-  access_token: string
-  webhook_url?: string
-  status: "Active" | "Inactive" | "Error"
-  last_sync?: string
+  store_name: string
+  shop_domain: string
+  access_token?: string
+  is_active: boolean
   created_at: string
+  updated_at: string
 }
 
-export interface CreateShopifyStoreData {
-  name: string
-  shopify_domain: string
-  access_token: string
-  webhook_url?: string
-  status?: "Active" | "Inactive" | "Error"
-}
-
-// Shopify Order interfaces
 export interface ShopifyOrder {
   id: number
+  shopify_order_id: number
   store_id: number
-  shopify_order_id: string
   order_number: string
-  customer_name?: string
   customer_email?: string
+  customer_name?: string
   order_date: string
-  status: string
   total_amount: number
-  shipping_cost: number
-  tax_amount: number
-  discount_amount: number
-  shipping_address?: string
-  items?: ShopifyOrderItem[]
+  currency: string
+  fulfillment_status: string
+  financial_status: string
   created_at: string
+  updated_at: string
+  items?: ShopifyOrderItem[]
 }
 
 export interface ShopifyOrderItem {
   id: number
   order_id: number
-  sku: string
+  shopify_variant_id?: number
+  sku?: string
   product_name: string
   quantity: number
   unit_price: number
@@ -133,288 +91,170 @@ export interface ShopifyOrderItem {
   created_at: string
 }
 
-// Purchase Order Store
+export interface PaginatedResult<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
+// Purchase Orders
 export class PurchaseOrderStore {
-  private static async ensureTable() {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS purchase_orders (
-        id SERIAL PRIMARY KEY,
-        po_number VARCHAR(50) UNIQUE NOT NULL,
-        supplier_name VARCHAR(255) NOT NULL,
-        po_date DATE NOT NULL,
-        delivery_cost DECIMAL(10,2) DEFAULT 0,
-        status VARCHAR(50) DEFAULT 'Pending',
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS po_items (
-        id SERIAL PRIMARY KEY,
-        po_id INTEGER REFERENCES purchase_orders(id) ON DELETE CASCADE,
-        sku VARCHAR(100) NOT NULL,
-        product_name VARCHAR(255) NOT NULL,
-        quantity INTEGER NOT NULL,
-        unit_cost DECIMAL(10,2) NOT NULL,
-        total_cost DECIMAL(10,2) GENERATED ALWAYS AS (quantity * unit_cost) STORED,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-  }
-
-  static async getAll(page = 1, limit = 10): Promise<{ data: PurchaseOrder[]; total: number }> {
-    await this.ensureTable()
-
+  static async getAll(page = 1, limit = 10): Promise<PaginatedResult<PurchaseOrder>> {
     const offset = (page - 1) * limit
 
-    const countResult = await executeQuery("SELECT COUNT(*) FROM purchase_orders")
+    const countResult = await query("SELECT COUNT(*) FROM purchase_orders")
     const total = Number.parseInt(countResult.rows[0].count)
 
-    const result = await executeQuery(
+    const result = await query(
       `
-      SELECT 
-        id,
-        po_number,
-        supplier_name,
-        po_date,
-        COALESCE(delivery_cost, 0) as delivery_cost,
-        status,
-        notes,
-        created_at,
-        updated_at
-      FROM purchase_orders 
-      ORDER BY created_at DESC
+      SELECT po.*, 
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', poi.id,
+                   'po_id', poi.po_id,
+                   'sku', poi.sku,
+                   'product_name', poi.product_name,
+                   'quantity', poi.quantity,
+                   'unit_cost', poi.unit_cost,
+                   'total_cost', poi.total_cost,
+                   'created_at', poi.created_at
+                 ) ORDER BY poi.id
+               ) FILTER (WHERE poi.id IS NOT NULL), 
+               '[]'
+             ) as items
+      FROM purchase_orders po
+      LEFT JOIN po_items poi ON po.id = poi.po_id
+      GROUP BY po.id
+      ORDER BY po.created_at DESC
       LIMIT $1 OFFSET $2
     `,
       [limit, offset],
     )
 
-    // Get items for each PO
-    const orders = await Promise.all(
-      result.rows.map(async (order) => {
-        const itemsResult = await executeQuery(
-          `
-          SELECT 
-            id, po_id, sku, product_name, quantity, 
-            unit_cost, total_cost, created_at
-          FROM po_items 
-          WHERE po_id = $1
-          ORDER BY created_at
-        `,
-          [order.id],
-        )
-        return {
-          ...order,
-          items: itemsResult.rows,
-        }
-      }),
-    )
-
     return {
-      data: orders,
+      data: result.rows.map((row) => ({
+        ...row,
+        delivery_cost: Number.parseFloat(row.delivery_cost) || 0,
+      })),
       total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     }
   }
 
   static async getById(id: number): Promise<PurchaseOrder | null> {
-    await this.ensureTable()
-    const result = await executeQuery(
+    const result = await query(
       `
-      SELECT 
-        id,
-        po_number,
-        supplier_name,
-        po_date,
-        COALESCE(delivery_cost, 0) as delivery_cost,
-        status,
-        notes,
-        created_at,
-        updated_at
-      FROM purchase_orders 
-      WHERE id = $1
+      SELECT po.*, 
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', poi.id,
+                   'po_id', poi.po_id,
+                   'sku', poi.sku,
+                   'product_name', poi.product_name,
+                   'quantity', poi.quantity,
+                   'unit_cost', poi.unit_cost,
+                   'total_cost', poi.total_cost,
+                   'created_at', poi.created_at
+                 ) ORDER BY poi.id
+               ) FILTER (WHERE poi.id IS NOT NULL), 
+               '[]'
+             ) as items
+      FROM purchase_orders po
+      LEFT JOIN po_items poi ON po.id = poi.po_id
+      WHERE po.id = $1
+      GROUP BY po.id
     `,
       [id],
     )
 
     if (result.rows.length === 0) return null
 
-    const order = result.rows[0]
+    return {
+      ...result.rows[0],
+      delivery_cost: Number.parseFloat(result.rows[0].delivery_cost) || 0,
+    }
+  }
 
-    // Get items for this PO
-    const itemsResult = await executeQuery(
+  static async create(data: Omit<PurchaseOrder, "id" | "created_at" | "updated_at" | "items">): Promise<PurchaseOrder> {
+    const result = await query(
       `
-      SELECT 
-        id, po_id, sku, product_name, quantity, 
-        unit_cost, total_cost, created_at
-      FROM po_items 
-      WHERE po_id = $1
-      ORDER BY created_at
+      INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, status, notes)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
     `,
-      [id],
+      [data.po_number, data.supplier_name, data.po_date, data.delivery_cost, data.status, data.notes],
     )
 
     return {
-      ...order,
-      items: itemsResult.rows,
+      ...result.rows[0],
+      delivery_cost: Number.parseFloat(result.rows[0].delivery_cost) || 0,
     }
   }
 
-  static async create(data: CreatePurchaseOrderData): Promise<PurchaseOrder> {
-    await this.ensureTable()
-
-    // Create the purchase order
-    const result = await executeQuery(
-      `
-      INSERT INTO purchase_orders (
-        po_number, supplier_name, po_date, delivery_cost, 
-        status, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING 
-        id,
-        po_number,
-        supplier_name,
-        po_date,
-        COALESCE(delivery_cost, 0) as delivery_cost,
-        status,
-        notes,
-        created_at,
-        updated_at
-    `,
-      [
-        data.po_number,
-        data.supplier_name,
-        data.po_date,
-        data.delivery_cost || 0,
-        data.status || "Pending",
-        data.notes || null,
-      ],
-    )
-
-    const order = result.rows[0]
-
-    // Create PO items if provided
-    if (data.items && data.items.length > 0) {
-      const items = await Promise.all(
-        data.items.map(async (item) => {
-          const itemResult = await executeQuery(
-            `
-            INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, po_id, sku, product_name, quantity, unit_cost, total_cost, created_at
-          `,
-            [order.id, item.sku, item.product_name, item.quantity, item.unit_cost],
-          )
-          return itemResult.rows[0]
-        }),
-      )
-      order.items = items
-    }
-
-    return order
-  }
-
-  static async update(id: number, data: Partial<CreatePurchaseOrderData>): Promise<PurchaseOrder | null> {
-    await this.ensureTable()
+  static async update(
+    id: number,
+    data: Partial<Omit<PurchaseOrder, "id" | "created_at" | "updated_at" | "items">>,
+  ): Promise<PurchaseOrder | null> {
     const fields = []
     const values = []
     let paramCount = 1
 
-    if (data.po_number !== undefined) {
-      fields.push(`po_number = $${paramCount++}`)
-      values.push(data.po_number)
-    }
-    if (data.supplier_name !== undefined) {
-      fields.push(`supplier_name = $${paramCount++}`)
-      values.push(data.supplier_name)
-    }
-    if (data.po_date !== undefined) {
-      fields.push(`po_date = $${paramCount++}`)
-      values.push(data.po_date)
-    }
-    if (data.delivery_cost !== undefined) {
-      fields.push(`delivery_cost = $${paramCount++}`)
-      values.push(data.delivery_cost)
-    }
-    if (data.status !== undefined) {
-      fields.push(`status = $${paramCount++}`)
-      values.push(data.status)
-    }
-    if (data.notes !== undefined) {
-      fields.push(`notes = $${paramCount++}`)
-      values.push(data.notes)
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount}`)
+        values.push(value)
+        paramCount++
+      }
     }
 
     if (fields.length === 0) {
       return this.getById(id)
     }
 
-    fields.push(`updated_at = CURRENT_TIMESTAMP`)
     values.push(id)
 
-    const result = await executeQuery(
+    const result = await query(
       `
       UPDATE purchase_orders 
-      SET ${fields.join(", ")}
+      SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
       WHERE id = $${paramCount}
-      RETURNING 
-        id,
-        po_number,
-        supplier_name,
-        po_date,
-        COALESCE(delivery_cost, 0) as delivery_cost,
-        status,
-        notes,
-        created_at,
-        updated_at
+      RETURNING *
     `,
       values,
     )
 
     if (result.rows.length === 0) return null
 
-    return this.getById(id)
+    return {
+      ...result.rows[0],
+      delivery_cost: Number.parseFloat(result.rows[0].delivery_cost) || 0,
+    }
   }
 
   static async delete(id: number): Promise<boolean> {
-    await this.ensureTable()
-    const result = await executeQuery("DELETE FROM purchase_orders WHERE id = $1", [id])
+    const result = await query("DELETE FROM purchase_orders WHERE id = $1", [id])
     return result.rowCount > 0
   }
 }
 
-// Product Store
+// Products
 export class ProductStore {
-  private static async ensureTable() {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        sku VARCHAR(100) UNIQUE NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        min_stock INTEGER DEFAULT 0,
-        max_stock INTEGER DEFAULT 100,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-  }
-
-  static async getAll(page = 1, limit = 10): Promise<{ data: Product[]; total: number }> {
-    await this.ensureTable()
-
+  static async getAll(page = 1, limit = 10): Promise<PaginatedResult<Product>> {
     const offset = (page - 1) * limit
 
-    const countResult = await executeQuery("SELECT COUNT(*) FROM products")
+    const countResult = await query("SELECT COUNT(*) FROM products")
     const total = Number.parseInt(countResult.rows[0].count)
 
-    const result = await executeQuery(
+    const result = await query(
       `
-      SELECT 
-        id, sku, name, description, min_stock, max_stock, created_at, updated_at
-      FROM products 
-      ORDER BY name ASC
+      SELECT * FROM products
+      ORDER BY created_at DESC
       LIMIT $1 OFFSET $2
     `,
       [limit, offset],
@@ -423,76 +263,63 @@ export class ProductStore {
     return {
       data: result.rows,
       total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     }
   }
 
   static async getById(id: number): Promise<Product | null> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      SELECT 
-        id, sku, name, description, min_stock, max_stock, created_at, updated_at
-      FROM products 
-      WHERE id = $1
-    `,
-      [id],
-    )
+    const result = await query("SELECT * FROM products WHERE id = $1", [id])
     return result.rows[0] || null
   }
 
   static async getBySku(sku: string): Promise<Product | null> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      SELECT 
-        id, sku, name, description, min_stock, max_stock, created_at, updated_at
-      FROM products 
-      WHERE sku = $1
-    `,
-      [sku],
-    )
+    const result = await query("SELECT * FROM products WHERE sku = $1", [sku])
     return result.rows[0] || null
   }
 
-  static async create(data: CreateProductData): Promise<Product> {
-    await this.ensureTable()
-    const result = await executeQuery(
+  static async create(data: Omit<Product, "id" | "created_at" | "updated_at">): Promise<Product> {
+    const result = await query(
       `
-      INSERT INTO products (sku, name, description, min_stock, max_stock)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, sku, name, description, min_stock, max_stock, created_at, updated_at
+      INSERT INTO products (sku, product_name, description, category, unit_of_measure, reorder_level)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
     `,
-      [data.sku, data.name, data.description || null, data.min_stock || 0, data.max_stock || 100],
+      [data.sku, data.product_name, data.description, data.category, data.unit_of_measure, data.reorder_level],
     )
+
     return result.rows[0]
   }
 
-  static async update(id: number, data: Partial<CreateProductData>): Promise<Product | null> {
-    await this.ensureTable()
+  static async update(
+    id: number,
+    data: Partial<Omit<Product, "id" | "created_at" | "updated_at">>,
+  ): Promise<Product | null> {
     const fields = []
     const values = []
     let paramCount = 1
 
-    Object.entries(data).forEach(([key, value]) => {
+    for (const [key, value] of Object.entries(data)) {
       if (value !== undefined) {
-        fields.push(`${key} = $${paramCount++}`)
+        fields.push(`${key} = $${paramCount}`)
         values.push(value)
+        paramCount++
       }
-    })
+    }
 
     if (fields.length === 0) {
       return this.getById(id)
     }
 
-    fields.push(`updated_at = CURRENT_TIMESTAMP`)
     values.push(id)
 
-    const result = await executeQuery(
+    const result = await query(
       `
       UPDATE products 
-      SET ${fields.join(", ")}
+      SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
       WHERE id = $${paramCount}
-      RETURNING id, sku, name, description, min_stock, max_stock, created_at, updated_at
+      RETURNING *
     `,
       values,
     )
@@ -501,203 +328,173 @@ export class ProductStore {
   }
 
   static async delete(id: number): Promise<boolean> {
-    await this.ensureTable()
-    const result = await executeQuery("DELETE FROM products WHERE id = $1", [id])
+    const result = await query("DELETE FROM products WHERE id = $1", [id])
     return result.rowCount > 0
   }
 }
 
-// Inventory Store
+// Inventory
 export class InventoryStore {
-  private static async ensureTable() {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS inventory (
-        id SERIAL PRIMARY KEY,
-        product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-        po_item_id INTEGER REFERENCES po_items(id) ON DELETE CASCADE,
-        quantity_available INTEGER NOT NULL,
-        unit_cost DECIMAL(10,2) NOT NULL,
-        purchase_date DATE NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-
-    // Create the view if it doesn't exist
-    await executeQuery(`
-      CREATE OR REPLACE VIEW product_inventory_summary AS
-      SELECT 
-        p.sku,
-        p.name,
-        COALESCE(SUM(i.quantity_available), 0) as current_stock,
-        COALESCE(AVG(i.unit_cost), 0) as avg_cost,
-        COALESCE(SUM(i.quantity_available * i.unit_cost), 0) as total_value,
-        p.min_stock,
-        p.max_stock
-      FROM products p
-      LEFT JOIN inventory i ON p.id = i.product_id
-      GROUP BY p.id, p.sku, p.name, p.min_stock, p.max_stock;
-    `)
-  }
-
-  static async getInventorySummary(page = 1, limit = 10): Promise<{ data: ProductInventorySummary[]; total: number }> {
-    await this.ensureTable()
-
+  static async getAll(page = 1, limit = 10): Promise<PaginatedResult<InventoryItem>> {
     const offset = (page - 1) * limit
 
-    const countResult = await executeQuery("SELECT COUNT(*) FROM products")
+    const countResult = await query("SELECT COUNT(*) FROM inventory")
     const total = Number.parseInt(countResult.rows[0].count)
 
-    const result = await executeQuery(
+    const result = await query(
       `
-      SELECT * FROM product_inventory_summary 
-      ORDER BY name ASC
+      SELECT i.*, po.po_number, po.supplier_name
+      FROM inventory i
+      LEFT JOIN purchase_orders po ON i.po_id = po.id
+      ORDER BY i.created_at DESC
       LIMIT $1 OFFSET $2
     `,
       [limit, offset],
     )
 
     return {
-      data: result.rows,
+      data: result.rows.map((row) => ({
+        ...row,
+        unit_cost: Number.parseFloat(row.unit_cost) || 0,
+      })),
       total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     }
   }
 
-  static async getByProduct(productId: number): Promise<Inventory[]> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      SELECT 
-        id, product_id, po_item_id, quantity_available, 
-        unit_cost, purchase_date, created_at
-      FROM inventory 
-      WHERE product_id = $1
-      ORDER BY purchase_date ASC
-    `,
-      [productId],
-    )
-    return result.rows
+  static async getInventorySummary(): Promise<any[]> {
+    const result = await query("SELECT * FROM product_inventory_summary ORDER BY product_name")
+    return result.rows.map((row) => ({
+      ...row,
+      avg_unit_cost: Number.parseFloat(row.avg_unit_cost) || 0,
+      total_value: Number.parseFloat(row.total_value) || 0,
+    }))
   }
 
-  static async addStock(
-    productId: number,
-    poItemId: number,
-    quantity: number,
-    unitCost: number,
-    purchaseDate: string,
-  ): Promise<Inventory> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, product_id, po_item_id, quantity_available, unit_cost, purchase_date, created_at
-    `,
-      [productId, poItemId, quantity, unitCost, purchaseDate],
-    )
-    return result.rows[0]
+  static async getById(id: number): Promise<InventoryItem | null> {
+    const result = await query("SELECT * FROM inventory WHERE id = $1", [id])
+    if (result.rows.length === 0) return null
+
+    return {
+      ...result.rows[0],
+      unit_cost: Number.parseFloat(result.rows[0].unit_cost) || 0,
+    }
   }
 
-  static async reduceStock(productId: number, quantityToReduce: number): Promise<boolean> {
-    await this.ensureTable()
-
-    // Get available inventory for this product (FIFO order)
-    const inventoryResult = await executeQuery(
+  static async create(data: Omit<InventoryItem, "id" | "created_at" | "updated_at">): Promise<InventoryItem> {
+    const result = await query(
       `
-      SELECT id, quantity_available FROM inventory 
-      WHERE product_id = $1 AND quantity_available > 0
-      ORDER BY purchase_date ASC
+      INSERT INTO inventory (sku, product_name, po_id, batch_date, quantity_received, quantity_remaining, unit_cost, location, expiry_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
     `,
-      [productId],
+      [
+        data.sku,
+        data.product_name,
+        data.po_id,
+        data.batch_date,
+        data.quantity_received,
+        data.quantity_remaining,
+        data.unit_cost,
+        data.location,
+        data.expiry_date,
+      ],
     )
 
-    let remainingToReduce = quantityToReduce
+    return {
+      ...result.rows[0],
+      unit_cost: Number.parseFloat(result.rows[0].unit_cost) || 0,
+    }
+  }
 
-    for (const inv of inventoryResult.rows) {
-      if (remainingToReduce <= 0) break
+  static async update(
+    id: number,
+    data: Partial<Omit<InventoryItem, "id" | "created_at" | "updated_at">>,
+  ): Promise<InventoryItem | null> {
+    const fields = []
+    const values = []
+    let paramCount = 1
 
-      const reduceFromThis = Math.min(remainingToReduce, inv.quantity_available)
-      const newQuantity = inv.quantity_available - reduceFromThis
-
-      await executeQuery(`UPDATE inventory SET quantity_available = $1 WHERE id = $2`, [newQuantity, inv.id])
-
-      remainingToReduce -= reduceFromThis
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount}`)
+        values.push(value)
+        paramCount++
+      }
     }
 
-    return remainingToReduce === 0
+    if (fields.length === 0) {
+      return this.getById(id)
+    }
+
+    values.push(id)
+
+    const result = await query(
+      `
+      UPDATE inventory 
+      SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $${paramCount}
+      RETURNING *
+    `,
+      values,
+    )
+
+    if (result.rows.length === 0) return null
+
+    return {
+      ...result.rows[0],
+      unit_cost: Number.parseFloat(result.rows[0].unit_cost) || 0,
+    }
+  }
+
+  static async delete(id: number): Promise<boolean> {
+    const result = await query("DELETE FROM inventory WHERE id = $1", [id])
+    return result.rowCount > 0
   }
 }
 
-// Shopify Store Management
+// Shopify Stores
 export class ShopifyStoreStore {
-  private static async ensureTable() {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS shopify_stores (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        shopify_domain VARCHAR(255) NOT NULL,
-        access_token VARCHAR(255) NOT NULL,
-        webhook_url VARCHAR(500),
-        status VARCHAR(50) DEFAULT 'Active',
-        last_sync TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-  }
-
   static async getAll(): Promise<ShopifyStore[]> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      SELECT 
-        id, name, shopify_domain, access_token, webhook_url, 
-        status, last_sync, created_at
-      FROM shopify_stores 
-      ORDER BY created_at DESC
-    `,
-    )
+    const result = await query("SELECT * FROM shopify_stores ORDER BY created_at DESC")
     return result.rows
   }
 
   static async getById(id: number): Promise<ShopifyStore | null> {
-    await this.ensureTable()
-    const result = await executeQuery(
-      `
-      SELECT 
-        id, name, shopify_domain, access_token, webhook_url, 
-        status, last_sync, created_at
-      FROM shopify_stores 
-      WHERE id = $1
-    `,
-      [id],
-    )
+    const result = await query("SELECT * FROM shopify_stores WHERE id = $1", [id])
     return result.rows[0] || null
   }
 
-  static async create(data: CreateShopifyStoreData): Promise<ShopifyStore> {
-    await this.ensureTable()
-    const result = await executeQuery(
+  static async create(data: Omit<ShopifyStore, "id" | "created_at" | "updated_at">): Promise<ShopifyStore> {
+    const result = await query(
       `
-      INSERT INTO shopify_stores (name, shopify_domain, access_token, webhook_url, status)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, name, shopify_domain, access_token, webhook_url, status, last_sync, created_at
+      INSERT INTO shopify_stores (store_name, shop_domain, access_token, is_active)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
     `,
-      [data.name, data.shopify_domain, data.access_token, data.webhook_url || null, data.status || "Active"],
+      [data.store_name, data.shop_domain, data.access_token, data.is_active],
     )
+
     return result.rows[0]
   }
 
-  static async update(id: number, data: Partial<CreateShopifyStoreData>): Promise<ShopifyStore | null> {
-    await this.ensureTable()
+  static async update(
+    id: number,
+    data: Partial<Omit<ShopifyStore, "id" | "created_at" | "updated_at">>,
+  ): Promise<ShopifyStore | null> {
     const fields = []
     const values = []
     let paramCount = 1
 
-    Object.entries(data).forEach(([key, value]) => {
+    for (const [key, value] of Object.entries(data)) {
       if (value !== undefined) {
-        fields.push(`${key} = $${paramCount++}`)
+        fields.push(`${key} = $${paramCount}`)
         values.push(value)
+        paramCount++
       }
-    })
+    }
 
     if (fields.length === 0) {
       return this.getById(id)
@@ -705,12 +502,12 @@ export class ShopifyStoreStore {
 
     values.push(id)
 
-    const result = await executeQuery(
+    const result = await query(
       `
       UPDATE shopify_stores 
-      SET ${fields.join(", ")}
+      SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
       WHERE id = $${paramCount}
-      RETURNING id, name, shopify_domain, access_token, webhook_url, status, last_sync, created_at
+      RETURNING *
     `,
       values,
     )
@@ -718,209 +515,169 @@ export class ShopifyStoreStore {
     return result.rows[0] || null
   }
 
-  static async updateLastSync(id: number): Promise<boolean> {
-    await this.ensureTable()
-    const result = await executeQuery(`UPDATE shopify_stores SET last_sync = CURRENT_TIMESTAMP WHERE id = $1`, [id])
-    return result.rowCount > 0
-  }
-
   static async delete(id: number): Promise<boolean> {
-    await this.ensureTable()
-    const result = await executeQuery("DELETE FROM shopify_stores WHERE id = $1", [id])
+    const result = await query("DELETE FROM shopify_stores WHERE id = $1", [id])
     return result.rowCount > 0
   }
 }
 
-// Shopify Orders Store
+// Shopify Orders
 export class ShopifyOrderStore {
-  private static async ensureTable() {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS shopify_orders (
-        id SERIAL PRIMARY KEY,
-        store_id INTEGER REFERENCES shopify_stores(id) ON DELETE CASCADE,
-        shopify_order_id VARCHAR(100) NOT NULL,
-        order_number VARCHAR(100) NOT NULL,
-        customer_name VARCHAR(255),
-        customer_email VARCHAR(255),
-        order_date TIMESTAMP NOT NULL,
-        status VARCHAR(50) NOT NULL,
-        total_amount DECIMAL(10,2) NOT NULL,
-        shipping_cost DECIMAL(10,2) DEFAULT 0,
-        tax_amount DECIMAL(10,2) DEFAULT 0,
-        discount_amount DECIMAL(10,2) DEFAULT 0,
-        shipping_address TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(store_id, shopify_order_id)
-      );
-    `)
-
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS shopify_order_items (
-        id SERIAL PRIMARY KEY,
-        order_id INTEGER REFERENCES shopify_orders(id) ON DELETE CASCADE,
-        sku VARCHAR(100) NOT NULL,
-        product_name VARCHAR(255) NOT NULL,
-        quantity INTEGER NOT NULL,
-        unit_price DECIMAL(10,2) NOT NULL,
-        total_price DECIMAL(10,2) GENERATED ALWAYS AS (quantity * unit_price) STORED,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-  }
-
-  static async getAll(page = 1, limit = 10): Promise<{ data: ShopifyOrder[]; total: number }> {
-    await this.ensureTable()
-
+  static async getAll(page = 1, limit = 10): Promise<PaginatedResult<ShopifyOrder>> {
     const offset = (page - 1) * limit
 
-    const countResult = await executeQuery("SELECT COUNT(*) FROM shopify_orders")
+    const countResult = await query("SELECT COUNT(*) FROM shopify_orders")
     const total = Number.parseInt(countResult.rows[0].count)
 
-    const result = await executeQuery(
+    const result = await query(
       `
-      SELECT 
-        id, store_id, shopify_order_id, order_number, customer_name, customer_email,
-        order_date, status, total_amount, shipping_cost, tax_amount, discount_amount,
-        shipping_address, created_at
-      FROM shopify_orders 
-      ORDER BY order_date DESC
+      SELECT so.*, ss.store_name,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', soi.id,
+                   'order_id', soi.order_id,
+                   'shopify_variant_id', soi.shopify_variant_id,
+                   'sku', soi.sku,
+                   'product_name', soi.product_name,
+                   'quantity', soi.quantity,
+                   'unit_price', soi.unit_price,
+                   'total_price', soi.total_price,
+                   'created_at', soi.created_at
+                 ) ORDER BY soi.id
+               ) FILTER (WHERE soi.id IS NOT NULL), 
+               '[]'
+             ) as items
+      FROM shopify_orders so
+      LEFT JOIN shopify_stores ss ON so.store_id = ss.id
+      LEFT JOIN shopify_order_items soi ON so.id = soi.order_id
+      GROUP BY so.id, ss.store_name
+      ORDER BY so.order_date DESC
       LIMIT $1 OFFSET $2
     `,
       [limit, offset],
     )
 
-    // Get items for each order
-    const orders = await Promise.all(
-      result.rows.map(async (order) => {
-        const itemsResult = await executeQuery(
-          `
-          SELECT 
-            id, order_id, sku, product_name, quantity, 
-            unit_price, total_price, created_at
-          FROM shopify_order_items 
-          WHERE order_id = $1
-          ORDER BY created_at
-        `,
-          [order.id],
-        )
-        return {
-          ...order,
-          items: itemsResult.rows,
-        }
-      }),
-    )
-
     return {
-      data: orders,
+      data: result.rows.map((row) => ({
+        ...row,
+        total_amount: Number.parseFloat(row.total_amount) || 0,
+      })),
       total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     }
   }
 
-  static async create(
-    storeId: number,
-    orderData: Omit<ShopifyOrder, "id" | "store_id" | "created_at">,
-    items: Omit<ShopifyOrderItem, "id" | "order_id" | "total_price" | "created_at">[],
-  ): Promise<ShopifyOrder> {
-    await this.ensureTable()
-
-    // Create the order
-    const orderResult = await executeQuery(
+  static async getById(id: number): Promise<ShopifyOrder | null> {
+    const result = await query(
       `
-      INSERT INTO shopify_orders (
-        store_id, shopify_order_id, order_number, customer_name, customer_email,
-        order_date, status, total_amount, shipping_cost, tax_amount, discount_amount,
-        shipping_address
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      RETURNING 
-        id, store_id, shopify_order_id, order_number, customer_name, customer_email,
-        order_date, status, total_amount, shipping_cost, tax_amount, discount_amount,
-        shipping_address, created_at
+      SELECT so.*, ss.store_name,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', soi.id,
+                   'order_id', soi.order_id,
+                   'shopify_variant_id', soi.shopify_variant_id,
+                   'sku', soi.sku,
+                   'product_name', soi.product_name,
+                   'quantity', soi.quantity,
+                   'unit_price', soi.unit_price,
+                   'total_price', soi.total_price,
+                   'created_at', soi.created_at
+                 ) ORDER BY soi.id
+               ) FILTER (WHERE soi.id IS NOT NULL), 
+               '[]'
+             ) as items
+      FROM shopify_orders so
+      LEFT JOIN shopify_stores ss ON so.store_id = ss.id
+      LEFT JOIN shopify_order_items soi ON so.id = soi.order_id
+      WHERE so.id = $1
+      GROUP BY so.id, ss.store_name
+    `,
+      [id],
+    )
+
+    if (result.rows.length === 0) return null
+
+    return {
+      ...result.rows[0],
+      total_amount: Number.parseFloat(result.rows[0].total_amount) || 0,
+    }
+  }
+
+  static async create(data: Omit<ShopifyOrder, "id" | "created_at" | "updated_at" | "items">): Promise<ShopifyOrder> {
+    const result = await query(
+      `
+      INSERT INTO shopify_orders (shopify_order_id, store_id, order_number, customer_email, customer_name, order_date, total_amount, currency, fulfillment_status, financial_status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
     `,
       [
-        storeId,
-        orderData.shopify_order_id,
-        orderData.order_number,
-        orderData.customer_name || null,
-        orderData.customer_email || null,
-        orderData.order_date,
-        orderData.status,
-        orderData.total_amount,
-        orderData.shipping_cost || 0,
-        orderData.tax_amount || 0,
-        orderData.discount_amount || 0,
-        orderData.shipping_address || null,
+        data.shopify_order_id,
+        data.store_id,
+        data.order_number,
+        data.customer_email,
+        data.customer_name,
+        data.order_date,
+        data.total_amount,
+        data.currency,
+        data.fulfillment_status,
+        data.financial_status,
       ],
     )
 
-    const order = orderResult.rows[0]
-
-    // Create order items
-    if (items && items.length > 0) {
-      const orderItems = await Promise.all(
-        items.map(async (item) => {
-          const itemResult = await executeQuery(
-            `
-            INSERT INTO shopify_order_items (order_id, sku, product_name, quantity, unit_price)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, order_id, sku, product_name, quantity, unit_price, total_price, created_at
-          `,
-            [order.id, item.sku, item.product_name, item.quantity, item.unit_price],
-          )
-          return itemResult.rows[0]
-        }),
-      )
-      order.items = orderItems
+    return {
+      ...result.rows[0],
+      total_amount: Number.parseFloat(result.rows[0].total_amount) || 0,
     }
-
-    return order
   }
 
-  static async getByStore(storeId: number, page = 1, limit = 10): Promise<{ data: ShopifyOrder[]; total: number }> {
-    await this.ensureTable()
+  static async update(
+    id: number,
+    data: Partial<Omit<ShopifyOrder, "id" | "created_at" | "updated_at" | "items">>,
+  ): Promise<ShopifyOrder | null> {
+    const fields = []
+    const values = []
+    let paramCount = 1
 
-    const offset = (page - 1) * limit
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount}`)
+        values.push(value)
+        paramCount++
+      }
+    }
 
-    const countResult = await executeQuery("SELECT COUNT(*) FROM shopify_orders WHERE store_id = $1", [storeId])
-    const total = Number.parseInt(countResult.rows[0].count)
+    if (fields.length === 0) {
+      return this.getById(id)
+    }
 
-    const result = await executeQuery(
+    values.push(id)
+
+    const result = await query(
       `
-      SELECT 
-        id, store_id, shopify_order_id, order_number, customer_name, customer_email,
-        order_date, status, total_amount, shipping_cost, tax_amount, discount_amount,
-        shipping_address, created_at
-      FROM shopify_orders 
-      WHERE store_id = $1
-      ORDER BY order_date DESC
-      LIMIT $2 OFFSET $3
+      UPDATE shopify_orders 
+      SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $${paramCount}
+      RETURNING *
     `,
-      [storeId, limit, offset],
+      values,
     )
 
-    // Get items for each order
-    const orders = await Promise.all(
-      result.rows.map(async (order) => {
-        const itemsResult = await executeQuery(
-          `
-          SELECT 
-            id, order_id, sku, product_name, quantity, 
-            unit_price, total_price, created_at
-          FROM shopify_order_items 
-          WHERE order_id = $1
-          ORDER BY created_at
-        `,
-          [order.id],
-        )
-        return {
-          ...order,
-          items: itemsResult.rows,
-        }
-      }),
-    )
+    if (result.rows.length === 0) return null
 
     return {
-      data: orders,
-      total,
+      ...result.rows[0],
+      total_amount: Number.parseFloat(result.rows[0].total_amount) || 0,
     }
   }
+
+  static async delete(id: number): Promise<boolean> {
+    const result = await query("DELETE FROM shopify_orders WHERE id = $1", [id])
+    return result.rowCount > 0
+  }
 }
+
+// Export all stores
