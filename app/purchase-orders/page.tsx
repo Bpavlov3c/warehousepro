@@ -13,7 +13,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ShoppingCart, Package, DollarSign, Calendar, FileX, RefreshCw, Plus, AlertTriangle } from "lucide-react"
+import { Package, DollarSign, TrendingUp, Clock, FileX, RefreshCw, Plus, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
 interface POItem {
@@ -61,29 +61,13 @@ export default function PurchaseOrdersPage() {
 
       const response = await fetch(`/api/purchase-orders?page=${page}&limit=${itemsPerPage}`)
 
-      // Helper to safely extract the body regardless of Content-Type
-      const safeParse = async () => {
-        try {
-          if (response.headers.get("content-type")?.includes("application/json")) {
-            return await response.json()
-          }
-          return await response.text()
-        } catch {
-          return await response.text()
-        }
-      }
-
       if (!response.ok) {
-        const errorPayload = await safeParse()
-        const message =
-          typeof errorPayload === "string"
-            ? errorPayload
-            : errorPayload?.details || errorPayload?.error || `HTTP error! status: ${response.status}`
-        throw new Error(message)
+        const errorText = await response.text()
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`)
       }
 
-      const result = await safeParse()
-      console.log("✅ Received data:", result)
+      const result = await response.json()
+      console.log("✅ Received purchase orders:", result)
 
       setPurchaseOrders(result.data || [])
       setTotalItems(result.total || 0)
@@ -116,11 +100,7 @@ export default function PurchaseOrdersPage() {
   }
 
   const formatDate = (dateString: string): string => {
-    try {
-      return new Date(dateString).toLocaleDateString()
-    } catch {
-      return dateString
-    }
+    return new Date(dateString).toLocaleDateString()
   }
 
   const getStatusColor = (status: string) => {
@@ -140,18 +120,9 @@ export default function PurchaseOrdersPage() {
 
   const calculateTotalValue = () => {
     return purchaseOrders.reduce((sum, po) => {
-      const itemsTotal =
-        po.items?.reduce((itemSum, item) => {
-          const itemCost = Number.parseFloat(String(item.total_cost)) || 0
-          return itemSum + itemCost
-        }, 0) || 0
-      const deliveryCost = Number.parseFloat(String(po.delivery_cost)) || 0
-      return sum + itemsTotal + deliveryCost
+      const itemsTotal = po.items?.reduce((itemSum, item) => itemSum + (item.total_cost || 0), 0) || 0
+      return sum + itemsTotal + (po.delivery_cost || 0)
     }, 0)
-  }
-
-  const getTotalOrders = () => {
-    return totalItems
   }
 
   const getPendingOrders = () => {
@@ -160,6 +131,12 @@ export default function PurchaseOrdersPage() {
 
   const getDeliveredOrders = () => {
     return purchaseOrders.filter((po) => po.status === "Delivered").length
+  }
+
+  const getTotalItems = () => {
+    return purchaseOrders.reduce((sum, po) => {
+      return sum + (po.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) || 0)
+    }, 0)
   }
 
   if (loading) {
@@ -213,16 +190,16 @@ export default function PurchaseOrdersPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{getTotalOrders()}</div>
+            <div className="text-2xl font-bold">{totalItems}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">{getPendingOrders()}</div>
@@ -231,7 +208,7 @@ export default function PurchaseOrdersPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Delivered Orders</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{getDeliveredOrders()}</div>
@@ -262,10 +239,9 @@ export default function PurchaseOrdersPage() {
           {totalItems === 0 ? (
             <div className="text-center py-16">
               <FileX className="h-16 w-16 text-gray-300 mx-auto mb-6" />
-              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Purchase Orders Available</h3>
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Purchase Orders</h3>
               <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                There are currently no purchase orders in the database. Create your first purchase order to get started
-                with inventory management.
+                There are currently no purchase orders in the database. Create your first purchase order to get started.
               </p>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -282,31 +258,28 @@ export default function PurchaseOrdersPage() {
                       <TableHead>Supplier</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Items</TableHead>
-                      <TableHead>Items Total</TableHead>
-                      <TableHead>Delivery Cost</TableHead>
+                      <TableHead>Subtotal</TableHead>
+                      <TableHead>Delivery</TableHead>
                       <TableHead>Total</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {purchaseOrders.map((po) => {
-                      const itemsTotal =
-                        po.items?.reduce((sum, item) => {
-                          const itemCost = Number.parseFloat(String(item.total_cost)) || 0
-                          return sum + itemCost
-                        }, 0) || 0
-                      const deliveryCost = Number.parseFloat(String(po.delivery_cost)) || 0
-                      const totalCost = itemsTotal + deliveryCost
+                      const itemsTotal = po.items?.reduce((sum, item) => sum + (item.total_cost || 0), 0) || 0
+                      const totalWithDelivery = itemsTotal + (po.delivery_cost || 0)
 
                       return (
                         <TableRow key={po.id}>
                           <TableCell className="font-medium">{po.po_number}</TableCell>
                           <TableCell>{po.supplier_name}</TableCell>
                           <TableCell>{formatDate(po.po_date)}</TableCell>
-                          <TableCell>{po.items?.length || 0}</TableCell>
+                          <TableCell>
+                            {po.items?.length || 0} item{(po.items?.length || 0) !== 1 ? "s" : ""}
+                          </TableCell>
                           <TableCell>${formatAmount(itemsTotal)}</TableCell>
-                          <TableCell>${formatAmount(deliveryCost)}</TableCell>
-                          <TableCell className="font-medium">${formatAmount(totalCost)}</TableCell>
+                          <TableCell>${formatAmount(po.delivery_cost)}</TableCell>
+                          <TableCell className="font-medium">${formatAmount(totalWithDelivery)}</TableCell>
                           <TableCell>
                             <Badge className={getStatusColor(po.status)}>{po.status}</Badge>
                           </TableCell>

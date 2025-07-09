@@ -10,29 +10,29 @@ export async function GET(request: NextRequest) {
 
     console.log(`📦 Fetching inventory summary - Page: ${page}, Limit: ${limit}`)
 
-    // Get total count from products table instead of view
+    // Get total count from products table
     const countResult = await query("SELECT COUNT(*) FROM products")
     const total = Number.parseInt(countResult.rows[0].count)
 
-    // Use a direct query instead of the view to avoid permission issues
+    // Fixed query - inventory table has sku column directly, not through join
     const result = await query(
       `
       SELECT 
         p.sku,
         p.product_name as name,
         p.category,
-        COALESCE(SUM(i.quantity_remaining), 0) as current_stock,
-        COALESCE(AVG(i.unit_cost), 0) as avg_cost,
-        COALESCE(SUM(i.quantity_remaining * i.unit_cost), 0) as total_value,
+        COALESCE(SUM(inv.quantity_remaining), 0) as current_stock,
+        COALESCE(AVG(inv.unit_cost), 0) as avg_cost,
+        COALESCE(SUM(inv.quantity_remaining * inv.unit_cost), 0) as total_value,
         p.reorder_level as min_stock,
         100 as max_stock,
         CASE 
-          WHEN COALESCE(SUM(i.quantity_remaining), 0) <= p.reorder_level THEN 'Low Stock'
-          WHEN COALESCE(SUM(i.quantity_remaining), 0) = 0 THEN 'Out of Stock'
+          WHEN COALESCE(SUM(inv.quantity_remaining), 0) <= p.reorder_level THEN 'Low Stock'
+          WHEN COALESCE(SUM(inv.quantity_remaining), 0) = 0 THEN 'Out of Stock'
           ELSE 'In Stock'
         END as stock_status
       FROM products p
-      LEFT JOIN inventory i ON p.sku = i.sku AND i.quantity_remaining > 0
+      LEFT JOIN inventory inv ON p.sku = inv.sku AND inv.quantity_remaining > 0
       GROUP BY p.id, p.sku, p.product_name, p.category, p.reorder_level
       ORDER BY p.product_name ASC
       LIMIT $1 OFFSET $2

@@ -2,11 +2,12 @@ import { Pool, type PoolClient } from "pg"
 
 // Database configuration from environment variables
 const dbConfig = {
-  user: process.env.DB_USER || "postgres",
-  host: process.env.DB_HOST || "localhost",
-  database: process.env.DB_NAME || "warehouse_management",
-  password: process.env.DB_PASSWORD || "password",
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
   port: Number.parseInt(process.env.DB_PORT || "5432"),
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
   // Connection pool settings
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
@@ -14,53 +15,38 @@ const dbConfig = {
 }
 
 // Create a single pool instance
-let pool: Pool | null = null
+const pool = new Pool(dbConfig)
 
-function getPool(): Pool {
-  if (!pool) {
-    pool = new Pool(dbConfig)
+// Handle pool errors
+pool.on("error", (err) => {
+  console.error("Unexpected error on idle client", err)
+  process.exit(-1)
+})
 
-    // Handle pool errors
-    pool.on("error", (err) => {
-      console.error("Unexpected error on idle client", err)
-      process.exit(-1)
-    })
+// Log pool events in development
+if (process.env.NODE_ENV === "development") {
+  pool.on("connect", () => {
+    console.log("🔗 New database connection established")
+  })
 
-    // Log pool events in development
-    if (process.env.NODE_ENV === "development") {
-      pool.on("connect", () => {
-        console.log("🔗 New database connection established")
-      })
-
-      pool.on("remove", () => {
-        console.log("🔌 Database connection removed from pool")
-      })
-    }
-  }
-
-  return pool
+  pool.on("remove", () => {
+    console.log("🔌 Database connection removed from pool")
+  })
 }
 
 // Get a client from the pool
 export async function getClient(): Promise<PoolClient> {
-  const pool = getPool()
-  return await pool.connect()
+  return pool.connect()
 }
 
 // Execute a query with automatic connection management
 export async function query(text: string, params?: any[]): Promise<any> {
-  const pool = getPool()
   const start = Date.now()
-
   try {
-    const result = await pool.query(text, params)
+    const res = await pool.query(text, params)
     const duration = Date.now() - start
-
-    if (process.env.NODE_ENV === "development") {
-      console.log("📊 Query executed:", { text: text.substring(0, 100), duration, rows: result.rowCount })
-    }
-
-    return result
+    console.log("📊 Query executed", { text: text.substring(0, 100), duration, rows: res.rowCount })
+    return res
   } catch (error) {
     console.error("❌ Database query error:", error)
     console.error("Query:", text)
@@ -105,11 +91,8 @@ export async function testConnection(): Promise<boolean> {
 
 // Close all connections (useful for graceful shutdown)
 export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end()
-    pool = null
-    console.log("🔒 Database pool closed")
-  }
+  await pool.end()
+  console.log("🔒 Database pool closed")
 }
 
 // Health check function
@@ -124,8 +107,6 @@ export async function healthCheck(): Promise<{
   }
 }> {
   try {
-    const pool = getPool()
-
     // Test basic connectivity
     await query("SELECT 1")
 
@@ -149,16 +130,5 @@ export async function healthCheck(): Promise<{
   }
 }
 
-// Export the pool for advanced usage
-export { getPool }
-
 // Default export for convenience
-export default {
-  query,
-  getClient,
-  transaction,
-  testConnection,
-  closePool,
-  healthCheck,
-  getPool,
-}
+export default pool
