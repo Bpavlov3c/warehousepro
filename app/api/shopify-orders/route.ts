@@ -1,40 +1,46 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
+import { getAllShopifyOrders, createShopifyOrder } from "@/lib/db-store"
 
-/**
- * POST body → { domain: string; accessToken: string; sinceId?: string }
- * Response  → { ok: true; orders: any[] }  OR  { ok: false; error: string }
- */
-export async function POST(req: Request) {
-  const { domain, accessToken, sinceId } = await req.json()
-
-  if (!domain || !accessToken) {
-    return NextResponse.json({ ok: false, error: "Missing domain or accessToken" }, { status: 400 })
-  }
-
-  const searchParams = new URLSearchParams({
-    status: "any",
-    limit: "250",
-  })
-  if (sinceId) searchParams.set("since_id", sinceId)
-
+export async function GET() {
   try {
-    const res = await fetch(`https://${domain}/admin/api/2023-10/orders.json?${searchParams}`, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-      next: { revalidate: 0 },
-    })
+    const orders = await getAllShopifyOrders()
+    return NextResponse.json(orders)
+  } catch (error) {
+    console.error("Error fetching Shopify orders:", error)
+    return NextResponse.json({ error: "Failed to fetch Shopify orders" }, { status: 500 })
+  }
+}
 
-    if (!res.ok) {
-      return NextResponse.json({ ok: false, error: `Shopify responded with ${res.status}` }, { status: 400 })
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+
+    // Validate required fields
+    if (!body.shopify_order_id || !body.order_number || !body.total_price || !body.order_date) {
+      return NextResponse.json(
+        { error: "Missing required fields: shopify_order_id, order_number, total_price, order_date" },
+        { status: 400 },
+      )
     }
 
-    const data = await res.json()
-    return NextResponse.json({ ok: true, orders: data.orders })
-  } catch (err) {
-    console.error("Order sync proxy error:", err)
-    return NextResponse.json({ ok: false, error: "Network error – unable to reach Shopify" }, { status: 500 })
+    const order = await createShopifyOrder({
+      shopify_order_id: body.shopify_order_id,
+      store_id: body.store_id,
+      order_number: body.order_number,
+      customer_email: body.customer_email,
+      customer_name: body.customer_name,
+      total_price: body.total_price,
+      currency: body.currency || "USD",
+      fulfillment_status: body.fulfillment_status,
+      financial_status: body.financial_status,
+      order_date: body.order_date,
+      shipping_address: body.shipping_address,
+      line_items: body.line_items,
+    })
+
+    return NextResponse.json(order, { status: 201 })
+  } catch (error) {
+    console.error("Error creating Shopify order:", error)
+    return NextResponse.json({ error: "Failed to create Shopify order" }, { status: 500 })
   }
 }

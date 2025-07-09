@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } from "@/lib/db-store"
+import { getPurchaseOrderById, updatePurchaseOrder, deletePurchaseOrder } from "@/lib/db-store"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const purchaseOrder = await getPurchaseOrder(params.id)
+    const purchaseOrder = await getPurchaseOrderById(params.id)
 
     if (!purchaseOrder) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
@@ -18,15 +18,15 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const data = await request.json()
+    const body = await request.json()
 
-    const purchaseOrder = await updatePurchaseOrder(params.id, data)
+    const updatedPurchaseOrder = await updatePurchaseOrder(params.id, body)
 
-    if (!purchaseOrder) {
+    if (!updatedPurchaseOrder) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
     }
 
-    return NextResponse.json(purchaseOrder)
+    return NextResponse.json(updatedPurchaseOrder)
   } catch (error) {
     console.error("Error updating purchase order:", error)
     return NextResponse.json({ error: "Failed to update purchase order" }, { status: 500 })
@@ -35,9 +35,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const success = await deletePurchaseOrder(params.id)
+    const deleted = await deletePurchaseOrder(params.id)
 
-    if (!success) {
+    if (!deleted) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
     }
 

@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getShopifyStores, createShopifyStore } from "@/lib/db-store"
+import { getAllShopifyStores, createShopifyStore } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const stores = await getShopifyStores()
+    const stores = await getAllShopifyStores()
     return NextResponse.json(stores)
   } catch (error) {
     console.error("Error fetching Shopify stores:", error)
@@ -13,18 +13,19 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json()
+    const body = await request.json()
 
     // Validate required fields
-    if (!data.name || !data.domain || !data.access_token) {
-      return NextResponse.json({ error: "Missing required fields: name, domain, access_token" }, { status: 400 })
+    if (!body.store_name || !body.shop_domain) {
+      return NextResponse.json({ error: "Missing required fields: store_name, shop_domain" }, { status: 400 })
     }
 
     const store = await createShopifyStore({
-      name: data.name,
-      domain: data.domain,
-      access_token: data.access_token,
-      is_active: data.is_active !== undefined ? data.is_active : true,
+      store_name: body.store_name,
+      shop_domain: body.shop_domain,
+      access_token: body.access_token,
+      is_active: body.is_active !== undefined ? body.is_active : true,
+      last_sync: body.last_sync,
     })
 
     return NextResponse.json(store, { status: 201 })

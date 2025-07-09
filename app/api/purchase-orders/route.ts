@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getPurchaseOrders, createPurchaseOrder } from "@/lib/db-store"
+import { getAllPurchaseOrders, createPurchaseOrder } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const purchaseOrders = await getPurchaseOrders()
+    const purchaseOrders = await getAllPurchaseOrders()
     return NextResponse.json(purchaseOrders)
   } catch (error) {
     console.error("Error fetching purchase orders:", error)
@@ -13,23 +13,23 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json()
+    const body = await request.json()
 
     // Validate required fields
-    if (!data.supplier || !data.order_date || !data.expected_delivery) {
+    if (!body.po_number || !body.supplier_name || !body.order_date) {
       return NextResponse.json(
-        { error: "Missing required fields: supplier, order_date, expected_delivery" },
+        { error: "Missing required fields: po_number, supplier_name, order_date" },
         { status: 400 },
       )
     }
 
-    // Calculate total cost from items
-    const totalCost = data.items?.reduce((sum: number, item: any) => sum + item.total_cost, 0) || 0
-
     const purchaseOrder = await createPurchaseOrder({
-      ...data,
-      total_cost: totalCost,
-      status: data.status || "pending",
+      po_number: body.po_number,
+      supplier_name: body.supplier_name,
+      order_date: body.order_date,
+      expected_delivery: body.expected_delivery,
+      status: body.status || "pending",
+      notes: body.notes,
     })
 
     return NextResponse.json(purchaseOrder, { status: 201 })

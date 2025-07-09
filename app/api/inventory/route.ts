@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getInventoryItems, createInventoryItem } from "@/lib/db-store"
+import { getAllInventoryItems, createInventoryItem } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const inventoryItems = await getInventoryItems()
+    const inventoryItems = await getAllInventoryItems()
     return NextResponse.json(inventoryItems)
   } catch (error) {
     console.error("Error fetching inventory items:", error)
@@ -13,24 +13,24 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json()
+    const body = await request.json()
 
     // Validate required fields
-    if (!data.sku || !data.product_name || !data.category) {
-      return NextResponse.json({ error: "Missing required fields: sku, product_name, category" }, { status: 400 })
+    if (!body.sku || !body.product_name) {
+      return NextResponse.json({ error: "Missing required fields: sku, product_name" }, { status: 400 })
     }
 
     const inventoryItem = await createInventoryItem({
-      sku: data.sku,
-      product_name: data.product_name,
-      category: data.category,
-      current_stock: data.current_stock || 0,
-      reserved_stock: data.reserved_stock || 0,
-      reorder_point: data.reorder_point || 0,
-      reorder_quantity: data.reorder_quantity || 0,
-      average_cost: data.average_cost || 0,
-      location: data.location,
-      supplier: data.supplier,
+      sku: body.sku,
+      product_name: body.product_name,
+      description: body.description,
+      category: body.category,
+      quantity_on_hand: body.quantity_on_hand || 0,
+      quantity_reserved: body.quantity_reserved || 0,
+      reorder_point: body.reorder_point || 10,
+      unit_cost: body.unit_cost || 0,
+      selling_price: body.selling_price || 0,
+      location: body.location,
     })
 
     return NextResponse.json(inventoryItem, { status: 201 })

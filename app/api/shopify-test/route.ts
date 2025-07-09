@@ -1,35 +1,43 @@
 import { NextResponse } from "next/server"
 
-/**
- * Body: { domain: string; accessToken: string }
- * Returns: { ok: boolean; error?: string }
- */
-export async function POST(request: Request) {
-  const { domain, accessToken } = await request.json()
-
-  // Basic validation
-  if (!domain || !accessToken) {
-    return NextResponse.json({ ok: false, error: "Missing domain or accessToken" }, { status: 400 })
-  }
-
+export async function GET() {
   try {
-    const res = await fetch(`https://${domain}/admin/api/2023-10/shop.json`, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
+    // This is a test endpoint to simulate Shopify API calls
+    const mockShopifyData = {
+      shop: {
+        name: "Test Store",
+        domain: "test-store.myshopify.com",
+        email: "test@example.com",
       },
-      // A short timeout so the UI isn’t stuck on bad domains
-      next: { revalidate: 0 }, // disable caching
-      cache: "no-store",
-    })
-
-    if (!res.ok) {
-      return NextResponse.json({ ok: false, error: `Shopify responded with ${res.status}` }, { status: 400 })
+      orders: [
+        {
+          id: 1001,
+          order_number: "#1001",
+          total_price: "149.99",
+          created_at: new Date().toISOString(),
+          customer: {
+            email: "customer@example.com",
+            first_name: "John",
+            last_name: "Doe",
+          },
+        },
+      ],
     }
 
-    return NextResponse.json({ ok: true })
-  } catch (err) {
-    console.error("Shopify connection error:", err)
-    return NextResponse.json({ ok: false, error: "Network error – unable to reach Shopify" }, { status: 500 })
+    return NextResponse.json({
+      success: true,
+      message: "Shopify API test successful",
+      data: mockShopifyData,
+    })
+  } catch (error) {
+    console.error("Shopify API test error:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Shopify API test failed",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }

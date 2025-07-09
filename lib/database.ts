@@ -4,7 +4,7 @@ import { Pool, type PoolClient } from "pg"
 const pool = new Pool({
   user: process.env.DB_USER || "warehouse_user",
   host: process.env.DB_HOST || "localhost",
-  database: process.env.DB_NAME || "warehouse_management",
+  database: process.env.DB_NAME || "postgres",
   password: process.env.DB_PASSWORD || "1",
   port: Number.parseInt(process.env.DB_PORT || "5432"),
   max: 20, // Maximum number of clients in the pool
