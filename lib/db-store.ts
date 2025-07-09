@@ -28,10 +28,12 @@ export class DatabaseStore {
       supplier: row.supplier_name,
       date: row.po_date,
       status: row.status,
-      totalCost: Number.parseFloat(row.total_cost || 0),
-      itemCount: row.items?.length || 0,
+      totalCost:
+        Number.parseFloat(row.delivery_cost || 0) +
+        (row.items?.reduce((sum: number, item: any) => sum + item.quantity * item.unitCost, 0) || 0),
+      itemCount: row.items?.filter((item: any) => item.sku).length || 0,
       deliveryCost: Number.parseFloat(row.delivery_cost || 0),
-      items: row.items || [],
+      items: row.items?.filter((item: any) => item.sku) || [],
       notes: row.notes,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -99,6 +101,78 @@ export class DatabaseStore {
     })
   }
 
+  async updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>): Promise<PurchaseOrder | null> {
+    return await transaction(async (client) => {
+      // Update purchase order
+      const updateFields = []
+      const values = []
+      let paramIndex = 1
+
+      if (updates.supplier) {
+        updateFields.push(`supplier_name = $${paramIndex++}`)
+        values.push(updates.supplier)
+      }
+      if (updates.date) {
+        updateFields.push(`po_date = $${paramIndex++}`)
+        values.push(updates.date)
+      }
+      if (updates.status) {
+        updateFields.push(`status = $${paramIndex++}`)
+        values.push(updates.status)
+      }
+      if (updates.deliveryCost !== undefined) {
+        updateFields.push(`delivery_cost = $${paramIndex++}`)
+        values.push(updates.deliveryCost)
+      }
+      if (updates.notes !== undefined) {
+        updateFields.push(`notes = $${paramIndex++}`)
+        values.push(updates.notes)
+      }
+
+      updateFields.push(`updated_at = CURRENT_TIMESTAMP`)
+      values.push(id)
+
+      const poResult = await client.query(
+        `UPDATE purchase_orders SET ${updateFields.join(", ")} WHERE po_number = $${paramIndex} RETURNING *`,
+        values,
+      )
+
+      if (poResult.rows.length === 0) return null
+
+      const po = poResult.rows[0]
+
+      // If items are being updated, replace them
+      if (updates.items) {
+        // Delete existing items
+        await client.query("DELETE FROM po_items WHERE po_id = $1", [po.id])
+
+        // Insert new items
+        for (const item of updates.items) {
+          await client.query(
+            `INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [po.id, item.sku, item.name, item.quantity, item.unitCost],
+          )
+
+          // Ensure product exists
+          await client.query(`INSERT INTO products (sku, name) VALUES ($1, $2) ON CONFLICT (sku) DO NOTHING`, [
+            item.sku,
+            item.name,
+          ])
+        }
+      }
+
+      // If status changed to delivered, update inventory
+      if (updates.status === "Delivered") {
+        await this.updateInventoryFromPO(client, po, updates.items || [])
+      }
+
+      // Return updated PO
+      const updatedPOs = await this.getPurchaseOrders()
+      return updatedPOs.find((p) => p.id === id) || null
+    })
+  }
+
   private async updateInventoryFromPO(client: any, po: any, items: POItem[]) {
     for (const item of items) {
       // Get product ID
@@ -122,7 +196,7 @@ export class DatabaseStore {
         INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date)
         VALUES ($1, $2, $3, $4, $5)
       `,
-        [productId, poItemId, item.quantity, item.unitCost + item.deliveryCostPerUnit, po.po_date],
+        [productId, poItemId, item.quantity, item.unitCost + (item.deliveryCostPerUnit || 0), po.po_date],
       )
     }
   }
@@ -135,7 +209,8 @@ export class DatabaseStore {
         p.name,
         COALESCE(SUM(i.quantity_available), 0) as in_stock,
         COALESCE(SUM(CASE WHEN po.status IN ('Pending', 'In Transit') THEN poi.quantity ELSE 0 END), 0) as incoming,
-        0 as reserved
+        0 as reserved,
+        COALESCE(AVG(i.unit_cost), 0) as unit_cost
       FROM products p
       LEFT JOIN inventory i ON p.id = i.product_id
       LEFT JOIN po_items poi ON p.sku = poi.sku
@@ -150,7 +225,64 @@ export class DatabaseStore {
       inStock: Number.parseInt(row.in_stock),
       incoming: Number.parseInt(row.incoming),
       reserved: Number.parseInt(row.reserved),
+      unitCost: Number.parseFloat(row.unit_cost),
     }))
+  }
+
+  async updateInventoryQuantity(sku: string, newQuantity: number): Promise<boolean> {
+    try {
+      await transaction(async (client) => {
+        // Get product ID
+        const productResult = await client.query("SELECT id FROM products WHERE sku = $1", [sku])
+        if (productResult.rows.length === 0) {
+          throw new Error(`Product with SKU ${sku} not found`)
+        }
+
+        const productId = productResult.rows[0].id
+
+        // Get current inventory
+        const inventoryResult = await client.query(
+          "SELECT SUM(quantity_available) as current_stock FROM inventory WHERE product_id = $1",
+          [productId],
+        )
+
+        const currentStock = Number.parseInt(inventoryResult.rows[0]?.current_stock || 0)
+        const difference = newQuantity - currentStock
+
+        if (difference > 0) {
+          // Add inventory (manual adjustment)
+          await client.query(
+            `INSERT INTO inventory (product_id, quantity_available, unit_cost, purchase_date)
+             VALUES ($1, $2, $3, CURRENT_DATE)`,
+            [productId, difference, 0], // Manual adjustments have 0 cost
+          )
+        } else if (difference < 0) {
+          // Remove inventory (FIFO)
+          let toRemove = Math.abs(difference)
+          const inventoryLots = await client.query(
+            `SELECT id, quantity_available FROM inventory 
+             WHERE product_id = $1 AND quantity_available > 0 
+             ORDER BY purchase_date ASC, id ASC`,
+            [productId],
+          )
+
+          for (const lot of inventoryLots.rows) {
+            if (toRemove <= 0) break
+
+            const removeFromLot = Math.min(toRemove, lot.quantity_available)
+            await client.query("UPDATE inventory SET quantity_available = quantity_available - $1 WHERE id = $2", [
+              removeFromLot,
+              lot.id,
+            ])
+            toRemove -= removeFromLot
+          }
+        }
+      })
+      return true
+    } catch (error) {
+      console.error("Error updating inventory:", error)
+      return false
+    }
   }
 
   // Shopify Stores
@@ -246,7 +378,7 @@ export class DatabaseStore {
       totalAmount: Number.parseFloat(row.total_amount),
       shippingCost: Number.parseFloat(row.shipping_cost || 0),
       taxAmount: Number.parseFloat(row.tax_amount || 0),
-      items: row.items || [],
+      items: row.items?.filter((item: any) => item.sku) || [],
       shippingAddress: row.shipping_address,
       profit: this.calculateOrderProfit(row),
       createdAt: row.created_at,

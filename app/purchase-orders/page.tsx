@@ -17,8 +17,21 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Plus, Search, Filter, Download, Eye, Calendar, DollarSign, Package, Trash2, Edit } from "lucide-react"
-import { dataStore, type PurchaseOrder } from "@/lib/store"
+import {
+  Plus,
+  Search,
+  Filter,
+  Download,
+  Eye,
+  Calendar,
+  DollarSign,
+  Package,
+  Trash2,
+  Edit,
+  AlertCircle,
+} from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import type { PurchaseOrder } from "@/lib/store"
 
 function buildItemsWithCosts(
   items: { sku: string; productName: string; quantity: string; unitCost: string }[],
@@ -51,6 +64,8 @@ export default function PurchaseOrders() {
   const [isEditStatusOpen, setIsEditStatusOpen] = useState(false)
   const [isEditPOOpen, setIsEditPOOpen] = useState(false)
   const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     supplier: "",
     poDate: "",
@@ -62,59 +77,112 @@ export default function PurchaseOrders() {
 
   // Load data on component mount
   useEffect(() => {
-    setPurchaseOrders(dataStore.getPurchaseOrders())
+    loadPurchaseOrders()
   }, [])
 
-  const handleCreatePO = () => {
+  const loadPurchaseOrders = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const response = await fetch("/api/purchase-orders")
+      if (!response.ok) {
+        throw new Error(`Failed to load purchase orders: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      setPurchaseOrders(data)
+    } catch (err) {
+      console.error("Error loading purchase orders:", err)
+      setError(err instanceof Error ? err.message : "Failed to load purchase orders")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreatePO = async () => {
     // Validate form data
     if (!formData.supplier || !formData.poDate) {
       alert("Please fill in required fields (Supplier and PO Date)")
       return
     }
 
-    // Calculate total cost from items
-    const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
-    const items = buildItemsWithCosts(poItems, deliveryCost)
+    try {
+      const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
+      const items = buildItemsWithCosts(poItems, deliveryCost)
 
-    const newPOData = {
-      supplier: formData.supplier,
-      date: formData.poDate,
-      status: "Draft" as const,
-      totalCost: items.reduce((s, i) => s + i.totalCost, 0),
-      itemCount: items.length,
-      deliveryCost,
-      items,
-      notes: formData.notes,
+      const newPOData = {
+        supplier: formData.supplier,
+        date: formData.poDate,
+        status: "Draft" as const,
+        totalCost: items.reduce((s, i) => s + i.totalCost, 0),
+        itemCount: items.length,
+        deliveryCost,
+        items,
+        notes: formData.notes,
+      }
+
+      const response = await fetch("/api/purchase-orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newPOData),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to create purchase order: ${response.statusText}`)
+      }
+
+      const createdPO = await response.json()
+
+      // Reload purchase orders
+      await loadPurchaseOrders()
+
+      // Reset form
+      setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
+      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
+      setIsNewPOOpen(false)
+
+      // Show success message
+      alert(`Purchase Order ${createdPO.id} created successfully!`)
+    } catch (err) {
+      console.error("Error creating purchase order:", err)
+      alert(`Error creating purchase order: ${err instanceof Error ? err.message : "Unknown error"}`)
     }
-
-    // Save to store
-    const createdPO = dataStore.createPurchaseOrder(newPOData)
-
-    // Update local state
-    setPurchaseOrders(dataStore.getPurchaseOrders())
-
-    // Reset form
-    setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
-    setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
-    setIsNewPOOpen(false)
-
-    // Show success message
-    alert(`Purchase Order ${createdPO.id} created successfully!`)
   }
 
-  const handleUpdateStatus = (newStatus: PurchaseOrder["status"]) => {
+  const handleUpdateStatus = async (newStatus: PurchaseOrder["status"]) => {
     if (!selectedPO) return
 
-    const updatedPO = dataStore.updatePurchaseOrder(selectedPO.id, { status: newStatus })
-    if (updatedPO) {
-      setPurchaseOrders(dataStore.getPurchaseOrders())
+    try {
+      const response = await fetch(`/api/purchase-orders/${selectedPO.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: newStatus }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to update purchase order: ${response.statusText}`)
+      }
+
+      const updatedPO = await response.json()
+
+      // Reload purchase orders
+      await loadPurchaseOrders()
+
       setSelectedPO(updatedPO)
       setIsEditStatusOpen(false)
       alert(`Purchase Order ${updatedPO.id} status updated to ${newStatus}`)
+    } catch (err) {
+      console.error("Error updating purchase order:", err)
+      alert(`Error updating purchase order: ${err instanceof Error ? err.message : "Unknown error"}`)
     }
   }
 
-  const handleEditPO = () => {
+  const handleEditPO = async () => {
     if (!editingPO) return
 
     // Validate form data
@@ -123,24 +191,32 @@ export default function PurchaseOrders() {
       return
     }
 
-    // Calculate total cost from items
-    const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
-    const items = buildItemsWithCosts(poItems, deliveryCost)
+    try {
+      const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
+      const items = buildItemsWithCosts(poItems, deliveryCost)
 
-    const updatedPOData = {
-      supplier: formData.supplier,
-      date: formData.poDate,
-      deliveryCost,
-      items,
-      notes: formData.notes,
-    }
+      const updatedPOData = {
+        supplier: formData.supplier,
+        date: formData.poDate,
+        deliveryCost,
+        items,
+        notes: formData.notes,
+      }
 
-    // Save to store
-    const updatedPO = dataStore.updatePurchaseOrder(editingPO.id, updatedPOData)
+      const response = await fetch(`/api/purchase-orders/${editingPO.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updatedPOData),
+      })
 
-    if (updatedPO) {
-      // Update local state
-      setPurchaseOrders(dataStore.getPurchaseOrders())
+      if (!response.ok) {
+        throw new Error(`Failed to update purchase order: ${response.statusText}`)
+      }
+
+      // Reload purchase orders
+      await loadPurchaseOrders()
 
       // Reset form
       setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
@@ -149,7 +225,10 @@ export default function PurchaseOrders() {
       setEditingPO(null)
 
       // Show success message
-      alert(`Purchase Order ${updatedPO.id} updated successfully!`)
+      alert(`Purchase Order ${editingPO.id} updated successfully!`)
+    } catch (err) {
+      console.error("Error updating purchase order:", err)
+      alert(`Error updating purchase order: ${err instanceof Error ? err.message : "Unknown error"}`)
     }
   }
 
@@ -216,6 +295,49 @@ export default function PurchaseOrders() {
   const totalValue = purchaseOrders.reduce((sum, po) => sum + po.totalCost, 0)
   const pendingPOs = purchaseOrders.filter((po) => po.status === "Pending" || po.status === "In Transit").length
   const avgValue = totalPOs > 0 ? totalValue / totalPOs : 0
+
+  if (loading) {
+    return (
+      <>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold">Purchase Orders</h1>
+          </div>
+        </header>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+            <p>Loading purchase orders...</p>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  if (error) {
+    return (
+      <>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold">Purchase Orders</h1>
+          </div>
+        </header>
+        <div className="flex-1 p-4">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {error}
+              <Button variant="outline" size="sm" className="ml-4 bg-transparent" onClick={loadPurchaseOrders}>
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        </div>
+      </>
+    )
+  }
 
   return (
     <>
