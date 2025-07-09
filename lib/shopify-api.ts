@@ -1,39 +1,15 @@
 export interface ShopifyOrder {
   id: number
   order_number: string
+  customer_name: string
   email: string
+  total_price: number
+  status: string
   created_at: string
-  updated_at: string
-  total_price: string
-  subtotal_price: string
-  total_tax: string
-  currency: string
-  financial_status: string
-  fulfillment_status: string
-  customer: {
-    id: number
-    email: string
-    first_name: string
-    last_name: string
-  }
-  shipping_address: {
-    first_name: string
-    last_name: string
-    address1: string
-    address2: string
-    city: string
-    province: string
-    country: string
-    zip: string
-  }
-  line_items: Array<{
-    id: number
-    title: string
+  items: Array<{
+    name: string
     quantity: number
-    price: string
-    sku: string
-    product_id: number
-    variant_id: number
+    price: number
   }>
 }
 
@@ -191,22 +167,20 @@ export async function syncStoreOrders(domain: string, accessToken: string, lastS
       shopifyOrderId: order.id.toString(),
       orderNumber: order.order_number,
       customerEmail: order.email,
-      customerName: order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : "",
+      customerName: order.customer_name,
       orderDate: order.created_at,
-      status: order.fulfillment_status || "unfulfilled",
-      totalAmount: Number.parseFloat(order.total_price),
+      status: order.status,
+      totalAmount: order.total_price,
       shippingCost: 0, // Calculate from shipping lines if needed
-      taxAmount: Number.parseFloat(order.total_tax || "0"),
-      currency: order.currency,
-      shippingAddress: order.shipping_address
-        ? `${order.shipping_address.address1}, ${order.shipping_address.city}, ${order.shipping_address.province} ${order.shipping_address.zip}`
-        : "",
-      items: order.line_items.map((item) => ({
-        sku: item.sku,
-        productName: item.title,
+      taxAmount: 0, // Calculate from tax lines if needed
+      currency: "USD", // Assume currency is USD for now
+      shippingAddress: "", // Calculate from shipping address if needed
+      items: order.items.map((item) => ({
+        sku: "", // Assume SKU is not available for now
+        productName: item.name,
         quantity: item.quantity,
-        unitPrice: Number.parseFloat(item.price),
-        totalPrice: Number.parseFloat(item.price) * item.quantity,
+        unitPrice: item.price,
+        totalPrice: item.price * item.quantity,
       })),
     }))
 
@@ -216,4 +190,30 @@ export async function syncStoreOrders(domain: string, accessToken: string, lastS
     console.error(`Failed to sync orders for ${domain}:`, error)
     throw error
   }
+}
+
+// Mock Shopify API functions for now
+export async function fetchShopifyOrders(storeId: number): Promise<ShopifyOrder[]> {
+  // Mock implementation - replace with actual Shopify API calls
+  return [
+    {
+      id: 1,
+      order_number: "#1001",
+      customer_name: "John Doe",
+      email: "john@example.com",
+      total_price: 99.99,
+      status: "fulfilled",
+      created_at: "2024-01-15T10:30:00Z",
+      items: [
+        { name: "Wireless Mouse", quantity: 1, price: 25.99 },
+        { name: "USB Cable", quantity: 2, price: 12.5 },
+      ],
+    },
+  ]
+}
+
+export async function testShopifyConnection(shopDomain: string, accessToken: string): Promise<boolean> {
+  // Mock implementation - replace with actual Shopify API test
+  console.log(`Testing connection to ${shopDomain}`)
+  return true
 }

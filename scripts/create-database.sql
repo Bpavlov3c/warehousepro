@@ -1,7 +1,38 @@
+-- Create database and user (run this as postgres superuser)
+-- This script should be run manually by a database administrator
+
+-- Create database (run this first if database doesn't exist)
+CREATE DATABASE warehouse_management;
+
+-- Create user if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'warehouse_user') THEN
+        CREATE USER warehouse_user WITH PASSWORD '1';
+    END IF;
+END
+$$;
+
+-- Grant privileges on the warehouse_management database
+GRANT CONNECT ON DATABASE warehouse_management TO warehouse_user;
+GRANT USAGE ON SCHEMA public TO warehouse_user;
+GRANT CREATE ON SCHEMA public TO warehouse_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO warehouse_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO warehouse_user;
+
+-- Grant default privileges for future tables and sequences
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO warehouse_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO warehouse_user;
+
+-- Make warehouse_user owner of public schema (optional, for full control)
+-- ALTER SCHEMA public OWNER TO warehouse_user;
+
+COMMENT ON ROLE warehouse_user IS 'User for warehouse management system';
+
 -- Create database schema for Warehouse Management System
 
 -- Purchase Orders table
-CREATE TABLE purchase_orders (
+CREATE TABLE IF NOT EXISTS purchase_orders (
     id SERIAL PRIMARY KEY,
     po_number VARCHAR(50) UNIQUE NOT NULL,
     supplier_name VARCHAR(255) NOT NULL,
@@ -14,7 +45,7 @@ CREATE TABLE purchase_orders (
 );
 
 -- Purchase Order Items table
-CREATE TABLE po_items (
+CREATE TABLE IF NOT EXISTS po_items (
     id SERIAL PRIMARY KEY,
     po_id INTEGER REFERENCES purchase_orders(id) ON DELETE CASCADE,
     sku VARCHAR(100) NOT NULL,
@@ -26,7 +57,7 @@ CREATE TABLE po_items (
 );
 
 -- Products table
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     sku VARCHAR(100) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -38,7 +69,7 @@ CREATE TABLE products (
 );
 
 -- Inventory table (FIFO tracking)
-CREATE TABLE inventory (
+CREATE TABLE IF NOT EXISTS inventory (
     id SERIAL PRIMARY KEY,
     product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
     po_item_id INTEGER REFERENCES po_items(id) ON DELETE CASCADE,
@@ -49,7 +80,7 @@ CREATE TABLE inventory (
 );
 
 -- Shopify Stores table
-CREATE TABLE shopify_stores (
+CREATE TABLE IF NOT EXISTS shopify_stores (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     shopify_domain VARCHAR(255) NOT NULL,
@@ -61,7 +92,7 @@ CREATE TABLE shopify_stores (
 );
 
 -- Shopify Orders table
-CREATE TABLE shopify_orders (
+CREATE TABLE IF NOT EXISTS shopify_orders (
     id SERIAL PRIMARY KEY,
     store_id INTEGER REFERENCES shopify_stores(id) ON DELETE CASCADE,
     shopify_order_id VARCHAR(100) NOT NULL,
@@ -80,7 +111,7 @@ CREATE TABLE shopify_orders (
 );
 
 -- Shopify Order Items table
-CREATE TABLE shopify_order_items (
+CREATE TABLE IF NOT EXISTS shopify_order_items (
     id SERIAL PRIMARY KEY,
     order_id INTEGER REFERENCES shopify_orders(id) ON DELETE CASCADE,
     sku VARCHAR(100) NOT NULL,
@@ -92,7 +123,7 @@ CREATE TABLE shopify_order_items (
 );
 
 -- Sales Fulfillment table (FIFO cost tracking)
-CREATE TABLE sales_fulfillment (
+CREATE TABLE IF NOT EXISTS sales_fulfillment (
     id SERIAL PRIMARY KEY,
     order_item_id INTEGER REFERENCES shopify_order_items(id) ON DELETE CASCADE,
     inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
@@ -102,15 +133,15 @@ CREATE TABLE sales_fulfillment (
 );
 
 -- Create indexes for better performance
-CREATE INDEX idx_po_items_sku ON po_items(sku);
-CREATE INDEX idx_products_sku ON products(sku);
-CREATE INDEX idx_inventory_product_id ON inventory(product_id);
-CREATE INDEX idx_shopify_orders_date ON shopify_orders(order_date);
-CREATE INDEX idx_shopify_order_items_sku ON shopify_order_items(sku);
-CREATE INDEX idx_sales_fulfillment_order_item ON sales_fulfillment(order_item_id);
+CREATE INDEX IF NOT EXISTS idx_po_items_sku ON po_items(sku);
+CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+CREATE INDEX IF NOT EXISTS idx_inventory_product_id ON inventory(product_id);
+CREATE INDEX IF NOT EXISTS idx_shopify_orders_date ON shopify_orders(order_date);
+CREATE INDEX IF NOT EXISTS idx_shopify_order_items_sku ON shopify_order_items(sku);
+CREATE INDEX IF NOT EXISTS idx_sales_fulfillment_order_item ON sales_fulfillment(order_item_id);
 
 -- Create views for reporting
-CREATE VIEW product_inventory_summary AS
+CREATE VIEW IF NOT EXISTS product_inventory_summary AS
 SELECT 
     p.sku,
     p.name,
@@ -123,7 +154,7 @@ FROM products p
 LEFT JOIN inventory i ON p.id = i.product_id
 GROUP BY p.id, p.sku, p.name, p.min_stock, p.max_stock;
 
-CREATE VIEW profit_analysis AS
+CREATE VIEW IF NOT EXISTS profit_analysis AS
 SELECT 
     soi.sku,
     soi.product_name,
@@ -136,3 +167,9 @@ SELECT
 FROM shopify_order_items soi
 LEFT JOIN sales_fulfillment sf ON soi.id = sf.order_item_id
 GROUP BY soi.sku, soi.product_name;
+
+-- Grant permissions (adjust as needed)
+-- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO warehouse_user;
+-- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO warehouse_user;
+
+SELECT 'Warehouse Management Database schema created successfully!' as message;
