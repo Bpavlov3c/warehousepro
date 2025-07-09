@@ -20,6 +20,29 @@ import { Textarea } from "@/components/ui/textarea"
 import { Plus, Search, Filter, Download, Eye, Calendar, DollarSign, Package, Trash2, Edit } from "lucide-react"
 import { dataStore, type PurchaseOrder } from "@/lib/store"
 
+function buildItemsWithCosts(
+  items: { sku: string; productName: string; quantity: string; unitCost: string }[],
+  deliveryCost: number,
+) {
+  const totalQty = items.reduce((sum, i) => sum + (Number.parseFloat(i.quantity) || 0), 0)
+  const deliveryPerUnit = totalQty ? deliveryCost / totalQty : 0
+
+  return items
+    .filter((i) => i.sku && i.productName)
+    .map((i) => {
+      const qty = Number.parseFloat(i.quantity) || 0
+      const unit = Number.parseFloat(i.unitCost) || 0
+      return {
+        sku: i.sku,
+        name: i.productName,
+        quantity: qty,
+        unitCost: unit,
+        deliveryCostPerUnit: deliveryPerUnit,
+        totalCost: qty * unit + qty * deliveryPerUnit,
+      }
+    })
+}
+
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [searchTerm, setSearchTerm] = useState("")
@@ -50,31 +73,17 @@ export default function PurchaseOrders() {
     }
 
     // Calculate total cost from items
-    const totalItemsCost = poItems.reduce((sum, item) => {
-      const quantity = Number.parseFloat(item.quantity) || 0
-      const unitCost = Number.parseFloat(item.unitCost) || 0
-      return sum + quantity * unitCost
-    }, 0)
-
     const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
-    const totalCost = totalItemsCost + deliveryCost
+    const items = buildItemsWithCosts(poItems, deliveryCost)
 
-    // Create new PO object
     const newPOData = {
       supplier: formData.supplier,
       date: formData.poDate,
       status: "Draft" as const,
-      totalCost: totalCost,
-      itemCount: poItems.filter((item) => item.sku && item.productName).length,
-      deliveryCost: deliveryCost,
-      items: poItems
-        .filter((item) => item.sku && item.productName)
-        .map((item) => ({
-          sku: item.sku,
-          name: item.productName,
-          quantity: Number.parseInt(item.quantity) || 0,
-          unitCost: Number.parseFloat(item.unitCost) || 0,
-        })),
+      totalCost: items.reduce((s, i) => s + i.totalCost, 0),
+      itemCount: items.length,
+      deliveryCost,
+      items,
       notes: formData.notes,
     }
 
@@ -115,27 +124,14 @@ export default function PurchaseOrders() {
     }
 
     // Calculate total cost from items
-    const totalItemsCost = poItems.reduce((sum, item) => {
-      const quantity = Number.parseFloat(item.quantity) || 0
-      const unitCost = Number.parseFloat(item.unitCost) || 0
-      return sum + quantity * unitCost
-    }, 0)
-
     const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
+    const items = buildItemsWithCosts(poItems, deliveryCost)
 
-    // Update PO data
     const updatedPOData = {
       supplier: formData.supplier,
       date: formData.poDate,
-      deliveryCost: deliveryCost,
-      items: poItems
-        .filter((item) => item.sku && item.productName)
-        .map((item) => ({
-          sku: item.sku,
-          name: item.productName,
-          quantity: Number.parseInt(item.quantity) || 0,
-          unitCost: Number.parseFloat(item.unitCost) || 0,
-        })),
+      deliveryCost,
+      items,
       notes: formData.notes,
     }
 
@@ -557,9 +553,16 @@ export default function PurchaseOrders() {
                                             <TableCell>{item.sku}</TableCell>
                                             <TableCell>{item.name}</TableCell>
                                             <TableCell>{item.quantity}</TableCell>
-                                            <TableCell>${item.unitCost.toFixed(2)}</TableCell>
-                                            <TableCell>${item.deliveryCostPerUnit.toFixed(2)}</TableCell>
-                                            <TableCell>${item.totalCost.toFixed(2)}</TableCell>
+                                            <TableCell>${(item.unitCost ?? 0).toFixed(2)}</TableCell>
+                                            <TableCell>${(item.deliveryCostPerUnit ?? 0).toFixed(2)}</TableCell>
+                                            <TableCell>
+                                              $
+                                              {(
+                                                item.totalCost ??
+                                                item.quantity * item.unitCost +
+                                                  item.quantity * (item.deliveryCostPerUnit ?? 0)
+                                              ).toFixed(2)}
+                                            </TableCell>
                                           </TableRow>
                                         ))}
                                       </TableBody>
