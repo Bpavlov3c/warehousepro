@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getPurchaseOrderById, updatePurchaseOrder, deletePurchaseOrder } from "@/lib/db-store"
+import { getPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } from "@/lib/db-store"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const purchaseOrder = await getPurchaseOrderById(params.id)
+    const purchaseOrder = await getPurchaseOrder(params.id)
 
     if (!purchaseOrder) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
@@ -18,33 +18,15 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const body = await request.json()
+    const data = await request.json()
 
-    // If items are provided, recalculate costs
-    if (body.items) {
-      const itemsWithCosts = body.items.map((item: any) => {
-        const deliveryCostPerUnit =
-          (body.deliveryCost || 0) / body.items.reduce((sum: number, i: any) => sum + i.quantity, 0)
-        const totalCost = (item.unitCost + deliveryCostPerUnit) * item.quantity
+    const purchaseOrder = await updatePurchaseOrder(params.id, data)
 
-        return {
-          ...item,
-          deliveryCostPerUnit,
-          totalCost,
-        }
-      })
-
-      body.items = itemsWithCosts
-      body.totalCost = itemsWithCosts.reduce((sum: number, item: any) => sum + item.totalCost, 0)
-    }
-
-    const updatedPurchaseOrder = await updatePurchaseOrder(params.id, body)
-
-    if (!updatedPurchaseOrder) {
+    if (!purchaseOrder) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
     }
 
-    return NextResponse.json(updatedPurchaseOrder)
+    return NextResponse.json(purchaseOrder)
   } catch (error) {
     console.error("Error updating purchase order:", error)
     return NextResponse.json({ error: "Failed to update purchase order" }, { status: 500 })
@@ -53,13 +35,13 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const deleted = await deletePurchaseOrder(params.id)
+    const success = await deletePurchaseOrder(params.id)
 
-    if (!deleted) {
+    if (!success) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ message: "Purchase order deleted successfully" })
   } catch (error) {
     console.error("Error deleting purchase order:", error)
     return NextResponse.json({ error: "Failed to delete purchase order" }, { status: 500 })

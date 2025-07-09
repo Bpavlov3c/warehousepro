@@ -6,7 +6,7 @@ CREATE DATABASE warehouse_management;
 
 -- Create user
 DROP USER IF EXISTS warehouse_user;
-CREATE USER warehouse_user WITH PASSWORD 'warehouse_secure_2024!';
+CREATE USER warehouse_user WITH PASSWORD '1';
 
 -- Grant privileges
 GRANT ALL PRIVILEGES ON DATABASE warehouse_management TO warehouse_user;
@@ -26,4 +26,4 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO warehouse_us
 \echo 'Database and user created successfully!'
 \echo 'Database: warehouse_management'
 \echo 'User: warehouse_user'
-\echo 'Password: warehouse_secure_2024!'
+\echo 'Password: 1'

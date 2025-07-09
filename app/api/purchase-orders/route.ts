@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAllPurchaseOrders, createPurchaseOrder } from "@/lib/db-store"
+import { getPurchaseOrders, createPurchaseOrder } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const purchaseOrders = await getAllPurchaseOrders()
+    const purchaseOrders = await getPurchaseOrders()
     return NextResponse.json(purchaseOrders)
   } catch (error) {
     console.error("Error fetching purchase orders:", error)
@@ -13,36 +13,26 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    const data = await request.json()
 
-    // Calculate costs for each item
-    const itemsWithCosts = body.items.map((item: any) => {
-      const deliveryCostPerUnit =
-        (body.deliveryCost || 0) / body.items.reduce((sum: number, i: any) => sum + i.quantity, 0)
-      const totalCost = (item.unitCost + deliveryCostPerUnit) * item.quantity
-
-      return {
-        ...item,
-        deliveryCostPerUnit,
-        totalCost,
-      }
-    })
-
-    // Calculate total cost
-    const totalCost = itemsWithCosts.reduce((sum: number, item: any) => sum + item.totalCost, 0)
-
-    const purchaseOrderData = {
-      supplier: body.supplier,
-      orderDate: body.orderDate,
-      expectedDelivery: body.expectedDelivery,
-      status: body.status || "pending",
-      items: itemsWithCosts,
-      totalCost,
-      notes: body.notes,
+    // Validate required fields
+    if (!data.supplier || !data.order_date || !data.expected_delivery) {
+      return NextResponse.json(
+        { error: "Missing required fields: supplier, order_date, expected_delivery" },
+        { status: 400 },
+      )
     }
 
-    const newPurchaseOrder = await createPurchaseOrder(purchaseOrderData)
-    return NextResponse.json(newPurchaseOrder, { status: 201 })
+    // Calculate total cost from items
+    const totalCost = data.items?.reduce((sum: number, item: any) => sum + item.total_cost, 0) || 0
+
+    const purchaseOrder = await createPurchaseOrder({
+      ...data,
+      total_cost: totalCost,
+      status: data.status || "pending",
+    })
+
+    return NextResponse.json(purchaseOrder, { status: 201 })
   } catch (error) {
     console.error("Error creating purchase order:", error)
     return NextResponse.json({ error: "Failed to create purchase order" }, { status: 500 })

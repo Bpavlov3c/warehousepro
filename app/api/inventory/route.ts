@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAllInventoryItems, createInventoryItem } from "@/lib/db-store"
+import { getInventoryItems, createInventoryItem } from "@/lib/db-store"
 
 export async function GET() {
   try {
-    const inventoryItems = await getAllInventoryItems()
+    const inventoryItems = await getInventoryItems()
     return NextResponse.json(inventoryItems)
   } catch (error) {
     console.error("Error fetching inventory items:", error)
@@ -13,24 +13,27 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    const data = await request.json()
 
-    const inventoryItemData = {
-      sku: body.sku,
-      productName: body.productName,
-      category: body.category,
-      currentStock: body.currentStock || 0,
-      reservedStock: body.reservedStock || 0,
-      availableStock: (body.currentStock || 0) - (body.reservedStock || 0),
-      reorderPoint: body.reorderPoint || 0,
-      reorderQuantity: body.reorderQuantity || 0,
-      averageCost: body.averageCost || 0,
-      location: body.location,
-      supplier: body.supplier,
+    // Validate required fields
+    if (!data.sku || !data.product_name || !data.category) {
+      return NextResponse.json({ error: "Missing required fields: sku, product_name, category" }, { status: 400 })
     }
 
-    const newInventoryItem = await createInventoryItem(inventoryItemData)
-    return NextResponse.json(newInventoryItem, { status: 201 })
+    const inventoryItem = await createInventoryItem({
+      sku: data.sku,
+      product_name: data.product_name,
+      category: data.category,
+      current_stock: data.current_stock || 0,
+      reserved_stock: data.reserved_stock || 0,
+      reorder_point: data.reorder_point || 0,
+      reorder_quantity: data.reorder_quantity || 0,
+      average_cost: data.average_cost || 0,
+      location: data.location,
+      supplier: data.supplier,
+    })
+
+    return NextResponse.json(inventoryItem, { status: 201 })
   } catch (error) {
     console.error("Error creating inventory item:", error)
     return NextResponse.json({ error: "Failed to create inventory item" }, { status: 500 })

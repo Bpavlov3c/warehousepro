@@ -4,16 +4,17 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "db:create": "psql -U warehouse_user -d warehouse_management -h localhost -f scripts/create-database.sql",
+    "db:create": "psql -U warehouse_user -d warehouse_management -f scripts/create-database.sql",
     "db:reset": "npm run db:setup && npm run db:create && npm run db:seed",
-    "db:seed": "psql -U warehouse_user -d warehouse_management -h localhost -f scripts/seed-sample-data.sql",
-    "db:setup": "psql -U postgres -h localhost -f scripts/setup-database.sql",
-    "db:test": "npx tsx scripts/test-db.ts",
+    "db:seed": "psql -U warehouse_user -d warehouse_management -f scripts/seed-sample-data.sql",
+    "db:setup": "psql -U postgres -f scripts/setup-database.sql",
+    "db:test": "tsx scripts/test-db.ts",
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.3.2",
     "@radix-ui/react-accordion": "latest",
     "@radix-ui/react-alert-dialog": "latest",
     "@radix-ui/react-aspect-ratio": "latest",
@@ -33,6 +34,7 @@
     "@radix-ui/react-scroll-area": "latest",
     "@radix-ui/react-select": "latest",
     "@radix-ui/react-separator": "latest",
+    "@radix-ui/react-sheet": "^1.0.4",
     "@radix-ui/react-slider": "latest",
     "@radix-ui/react-slot": "latest",
     "@radix-ui/react-switch": "latest",
@@ -61,19 +63,20 @@
     "sonner": "latest",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "tsx": "^4.7.0",
-    "vaul": "latest"
+    "vaul": "latest",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "@types/pg": "^8.11.0",
+    "@types/pg": "^8.10.9",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "14.1.0",
+    "eslint-config-next": "14.0.4",
     "postcss": "^8.5",
     "tailwindcss": "^3.3.0",
+    "tsx": "^4.6.2",
     "typescript": "^5"
   }
 }
