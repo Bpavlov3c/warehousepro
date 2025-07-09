@@ -8,7 +8,7 @@
     "db:reset": "npm run db:setup && npm run db:create && npm run db:seed",
     "db:seed": "psql -U warehouse_user -d warehouse_management -h localhost -f scripts/seed-sample-data.sql",
     "db:setup": "psql -U postgres -h localhost -f scripts/setup-database.sql",
-    "db:test": "node -e \"require('./lib/database').testConnection()\"",
+    "db:test": "node -e \"const { testConnection } = require('./lib/database.js'); testConnection().then(result => console.log('Database test:', result ? 'SUCCESS' : 'FAILED')).catch(err => console.error('Database test FAILED:', err.message))\"",
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start"

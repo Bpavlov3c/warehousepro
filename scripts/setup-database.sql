@@ -4,7 +4,7 @@
 CREATE DATABASE warehouse_management;
 
 -- Create user
-CREATE USER warehouse_user WITH PASSWORD '1';
+CREATE USER warehouse_user WITH ENCRYPTED PASSWORD 'warehouse_secure_2024!';
 
 -- Grant privileges
 GRANT ALL PRIVILEGES ON DATABASE warehouse_management TO warehouse_user;

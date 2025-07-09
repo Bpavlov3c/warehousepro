@@ -1,731 +1,508 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
-  Plus,
-  Search,
-  Filter,
-  Download,
-  Eye,
-  Calendar,
-  DollarSign,
-  Package,
-  Trash2,
-  Edit,
-  AlertCircle,
-} from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import type { PurchaseOrder } from "@/lib/store"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Plus, Edit, Trash2, Eye, Package, Calendar, Truck } from "lucide-react"
+import { toast } from "sonner"
 
-function buildItemsWithCosts(
-  items: { sku: string; productName: string; quantity: string; unitCost: string }[],
-  deliveryCost: number,
-) {
-  const totalQty = items.reduce((sum, i) => sum + (Number.parseFloat(i.quantity) || 0), 0)
-  const deliveryPerUnit = totalQty ? deliveryCost / totalQty : 0
-
-  return items
-    .filter((i) => i.sku && i.productName)
-    .map((i) => {
-      const qty = Number.parseFloat(i.quantity) || 0
-      const unit = Number.parseFloat(i.unitCost) || 0
-      return {
-        sku: i.sku,
-        name: i.productName,
-        quantity: qty,
-        unitCost: unit,
-        deliveryCostPerUnit: deliveryPerUnit,
-        totalCost: qty * unit + qty * deliveryPerUnit,
-      }
-    })
+interface Product {
+  id: string
+  sku: string
+  name: string
+  category: string
+  supplier: string
+  unit_cost: number
+  current_stock: number
+  reorder_point: number
 }
 
-export default function PurchaseOrders() {
+interface PurchaseOrderItem {
+  id?: string
+  product_id: string
+  sku: string
+  product_name: string
+  quantity: number
+  unit_cost: number
+  delivery_cost_per_unit?: number
+  total_cost?: number
+}
+
+interface PurchaseOrder {
+  id?: string
+  po_number: string
+  supplier: string
+  status: "draft" | "sent" | "delivered"
+  order_date: string
+  expected_delivery: string | null
+  delivery_cost: number
+  notes: string | null
+  items: PurchaseOrderItem[]
+  created_at?: string
+  updated_at?: string
+}
+
+export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
-  const [isNewPOOpen, setIsNewPOOpen] = useState(false)
-  const [isEditStatusOpen, setIsEditStatusOpen] = useState(false)
-  const [isEditPOOpen, setIsEditPOOpen] = useState(false)
-  const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [products, setProducts] = useState<Product[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
+  const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
+  const [formData, setFormData] = useState<PurchaseOrder>({
+    po_number: "",
     supplier: "",
-    poDate: "",
-    deliveryCost: "",
-    notes: "",
+    status: "draft",
+    order_date: new Date().toISOString().split("T")[0],
+    expected_delivery: null,
+    delivery_cost: 0,
+    notes: null,
+    items: [],
   })
 
-  const [poItems, setPoItems] = useState([{ sku: "", productName: "", quantity: "", unitCost: "" }])
-
-  // Load data on component mount
+  // Load data
   useEffect(() => {
-    loadPurchaseOrders()
+    loadData()
   }, [])
 
-  const loadPurchaseOrders = async () => {
+  const loadData = async () => {
     try {
-      setLoading(true)
+      setIsLoading(true)
       setError(null)
 
-      const response = await fetch("/api/purchase-orders")
-      if (!response.ok) {
-        throw new Error(`Failed to load purchase orders: ${response.statusText}`)
+      const [poResponse, productsResponse] = await Promise.all([fetch("/api/purchase-orders"), fetch("/api/inventory")])
+
+      if (!poResponse.ok) {
+        throw new Error(`Failed to fetch purchase orders: ${poResponse.statusText}`)
+      }
+      if (!productsResponse.ok) {
+        throw new Error(`Failed to fetch products: ${productsResponse.statusText}`)
       }
 
-      const data = await response.json()
-      setPurchaseOrders(data)
-    } catch (err) {
-      console.error("Error loading purchase orders:", err)
-      setError(err instanceof Error ? err.message : "Failed to load purchase orders")
+      const poData = await poResponse.json()
+      const productsData = await productsResponse.json()
+
+      setPurchaseOrders(poData)
+      setProducts(productsData)
+    } catch (error) {
+      console.error("Error loading data:", error)
+      setError(error instanceof Error ? error.message : "Failed to load data")
+      toast.error("Failed to load data")
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
-  const handleCreatePO = async () => {
-    // Validate form data
-    if (!formData.supplier || !formData.poDate) {
-      alert("Please fill in required fields (Supplier and PO Date)")
-      return
-    }
-
-    try {
-      const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
-      const items = buildItemsWithCosts(poItems, deliveryCost)
-
-      const newPOData = {
-        supplier: formData.supplier,
-        date: formData.poDate,
-        status: "Draft" as const,
-        totalCost: items.reduce((s, i) => s + i.totalCost, 0),
-        itemCount: items.length,
-        deliveryCost,
-        items,
-        notes: formData.notes,
-      }
-
-      const response = await fetch("/api/purchase-orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(newPOData),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to create purchase order: ${response.statusText}`)
-      }
-
-      const createdPO = await response.json()
-
-      // Reload purchase orders
-      await loadPurchaseOrders()
-
-      // Reset form
-      setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
-      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
-      setIsNewPOOpen(false)
-
-      // Show success message
-      alert(`Purchase Order ${createdPO.id} created successfully!`)
-    } catch (err) {
-      console.error("Error creating purchase order:", err)
-      alert(`Error creating purchase order: ${err instanceof Error ? err.message : "Unknown error"}`)
-    }
+  const generatePONumber = () => {
+    const date = new Date()
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    const random = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, "0")
+    return `PO-${year}${month}${day}-${random}`
   }
 
-  const handleUpdateStatus = async (newStatus: PurchaseOrder["status"]) => {
-    if (!selectedPO) return
-
-    try {
-      const response = await fetch(`/api/purchase-orders/${selectedPO.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: newStatus }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to update purchase order: ${response.statusText}`)
-      }
-
-      const updatedPO = await response.json()
-
-      // Reload purchase orders
-      await loadPurchaseOrders()
-
-      setSelectedPO(updatedPO)
-      setIsEditStatusOpen(false)
-      alert(`Purchase Order ${updatedPO.id} status updated to ${newStatus}`)
-    } catch (err) {
-      console.error("Error updating purchase order:", err)
-      alert(`Error updating purchase order: ${err instanceof Error ? err.message : "Unknown error"}`)
-    }
-  }
-
-  const handleEditPO = async () => {
-    if (!editingPO) return
-
-    // Validate form data
-    if (!formData.supplier || !formData.poDate) {
-      alert("Please fill in required fields (Supplier and PO Date)")
-      return
-    }
-
-    try {
-      const deliveryCost = Number.parseFloat(formData.deliveryCost) || 0
-      const items = buildItemsWithCosts(poItems, deliveryCost)
-
-      const updatedPOData = {
-        supplier: formData.supplier,
-        date: formData.poDate,
-        deliveryCost,
-        items,
-        notes: formData.notes,
-      }
-
-      const response = await fetch(`/api/purchase-orders/${editingPO.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(updatedPOData),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to update purchase order: ${response.statusText}`)
-      }
-
-      // Reload purchase orders
-      await loadPurchaseOrders()
-
-      // Reset form
-      setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
-      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
-      setIsEditPOOpen(false)
-      setEditingPO(null)
-
-      // Show success message
-      alert(`Purchase Order ${editingPO.id} updated successfully!`)
-    } catch (err) {
-      console.error("Error updating purchase order:", err)
-      alert(`Error updating purchase order: ${err instanceof Error ? err.message : "Unknown error"}`)
-    }
-  }
-
-  const openEditPODialog = (po: PurchaseOrder) => {
-    setEditingPO(po)
+  const resetForm = () => {
     setFormData({
-      supplier: po.supplier,
-      poDate: po.date,
-      deliveryCost: po.deliveryCost.toString(),
-      notes: po.notes || "",
+      po_number: generatePONumber(),
+      supplier: "",
+      status: "draft",
+      order_date: new Date().toISOString().split("T")[0],
+      expected_delivery: null,
+      delivery_cost: 0,
+      notes: null,
+      items: [],
     })
-    setPoItems(
-      po.items.map((item) => ({
-        sku: item.sku,
-        productName: item.name,
-        quantity: item.quantity.toString(),
-        unitCost: item.unitCost.toString(),
-      })),
-    )
-    setIsEditPOOpen(true)
   }
 
-  const addPoItem = () => {
-    setPoItems([...poItems, { sku: "", productName: "", quantity: "", unitCost: "" }])
+  const handleCreate = () => {
+    resetForm()
+    setIsCreateDialogOpen(true)
   }
 
-  const removePoItem = (index: number) => {
-    if (poItems.length > 1) {
-      setPoItems(poItems.filter((_, i) => i !== index))
+  const handleEdit = (po: PurchaseOrder) => {
+    setSelectedPO(po)
+    setFormData({
+      ...po,
+      order_date: po.order_date
+        ? new Date(po.order_date).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      expected_delivery: po.expected_delivery ? new Date(po.expected_delivery).toISOString().split("T")[0] : null,
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const handleView = (po: PurchaseOrder) => {
+    setSelectedPO(po)
+    setIsViewDialogOpen(true)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (formData.items.length === 0) {
+      toast.error("Please add at least one item to the purchase order")
+      return
+    }
+
+    try {
+      const url = selectedPO ? `/api/purchase-orders/${selectedPO.id}` : "/api/purchase-orders"
+      const method = selectedPO ? "PUT" : "POST"
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          purchaseOrder: {
+            po_number: formData.po_number,
+            supplier: formData.supplier,
+            status: formData.status,
+            order_date: formData.order_date,
+            expected_delivery: formData.expected_delivery,
+            delivery_cost: formData.delivery_cost,
+            notes: formData.notes,
+          },
+          items: formData.items,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to save purchase order")
+      }
+
+      toast.success(selectedPO ? "Purchase order updated successfully" : "Purchase order created successfully")
+      setIsCreateDialogOpen(false)
+      setIsEditDialogOpen(false)
+      setSelectedPO(null)
+      await loadData()
+    } catch (error) {
+      console.error("Error saving purchase order:", error)
+      toast.error(error instanceof Error ? error.message : "Failed to save purchase order")
     }
   }
 
-  const updatePoItem = (index: number, field: string, value: string) => {
-    const updatedItems = poItems.map((item, i) => (i === index ? { ...item, [field]: value } : item))
-    setPoItems(updatedItems)
+  const handleDelete = async (po: PurchaseOrder) => {
+    try {
+      const response = await fetch(`/api/purchase-orders/${po.id}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to delete purchase order")
+      }
+
+      toast.success("Purchase order deleted successfully")
+      await loadData()
+    } catch (error) {
+      console.error("Error deleting purchase order:", error)
+      toast.error(error instanceof Error ? error.message : "Failed to delete purchase order")
+    }
   }
 
-  const handleExport = () => {
-    console.log("Exporting purchase orders...")
+  const handleMarkDelivered = async (po: PurchaseOrder) => {
+    try {
+      const response = await fetch(`/api/purchase-orders/${po.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          markAsDelivered: true,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to mark as delivered")
+      }
+
+      toast.success("Purchase order marked as delivered and inventory updated")
+      await loadData()
+    } catch (error) {
+      console.error("Error marking as delivered:", error)
+      toast.error(error instanceof Error ? error.message : "Failed to mark as delivered")
+    }
   }
 
-  const getStatusColor = (status: string) => {
+  const addItem = () => {
+    setFormData((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          product_id: "",
+          sku: "",
+          product_name: "",
+          quantity: 1,
+          unit_cost: 0,
+        },
+      ],
+    }))
+  }
+
+  const updateItem = (index: number, field: keyof PurchaseOrderItem, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      items: prev.items.map((item, i) => {
+        if (i === index) {
+          const updatedItem = { ...item, [field]: value }
+
+          // Auto-fill product details when product is selected
+          if (field === "product_id" && value) {
+            const product = products.find((p) => p.id === value)
+            if (product) {
+              updatedItem.sku = product.sku
+              updatedItem.product_name = product.name
+              updatedItem.unit_cost = product.unit_cost
+            }
+          }
+
+          return updatedItem
+        }
+        return item
+      }),
+    }))
+  }
+
+  const removeItem = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index),
+    }))
+  }
+
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case "Draft":
-        return "bg-gray-100 text-gray-800"
-      case "Pending":
-        return "bg-yellow-100 text-yellow-800"
-      case "In Transit":
-        return "bg-blue-100 text-blue-800"
-      case "Delivered":
-        return "bg-green-100 text-green-800"
+      case "draft":
+        return <Badge variant="secondary">Draft</Badge>
+      case "sent":
+        return <Badge variant="default">Sent</Badge>
+      case "delivered":
+        return (
+          <Badge variant="outline" className="border-green-500 text-green-700">
+            Delivered
+          </Badge>
+        )
       default:
-        return "bg-gray-100 text-gray-800"
+        return <Badge variant="secondary">{status}</Badge>
     }
   }
 
-  const filteredPOs = purchaseOrders.filter(
-    (po) =>
-      po.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      po.supplier.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const calculateTotal = (items: PurchaseOrderItem[], deliveryCost = 0) => {
+    const itemsTotal = items.reduce((sum, item) => sum + item.quantity * item.unit_cost, 0)
+    return itemsTotal + deliveryCost
+  }
 
-  const totalPOs = purchaseOrders.length
-  const totalValue = purchaseOrders.reduce((sum, po) => sum + po.totalCost, 0)
-  const pendingPOs = purchaseOrders.filter((po) => po.status === "Pending" || po.status === "In Transit").length
-  const avgValue = totalPOs > 0 ? totalValue / totalPOs : 0
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold">Purchase Orders</h1>
-          </div>
-        </header>
-        <div className="flex-1 flex items-center justify-center">
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
             <p>Loading purchase orders...</p>
           </div>
         </div>
-      </>
+      </div>
     )
   }
 
   if (error) {
     return (
-      <>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold">Purchase Orders</h1>
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <p className="text-red-600 mb-4">Error: {error}</p>
+            <Button onClick={loadData}>Retry</Button>
           </div>
-        </header>
-        <div className="flex-1 p-4">
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              {error}
-              <Button variant="outline" size="sm" className="ml-4 bg-transparent" onClick={loadPurchaseOrders}>
-                Retry
-              </Button>
-            </AlertDescription>
-          </Alert>
         </div>
-      </>
+      </div>
     )
   }
 
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">Purchase Orders</h1>
+    <div className="container mx-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Purchase Orders</h1>
+          <p className="text-muted-foreground">Manage your purchase orders and track deliveries</p>
         </div>
-      </header>
+        <Button onClick={handleCreate}>
+          <Plus className="mr-2 h-4 w-4" />
+          Create Purchase Order
+        </Button>
+      </div>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total POs</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalPOs}</div>
-              <p className="text-xs text-muted-foreground">All time</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${totalValue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">All purchase orders</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Pending/In Transit</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{pendingPOs}</div>
-              <p className="text-xs text-muted-foreground">Awaiting delivery</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Avg PO Value</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${avgValue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">Per order</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Actions Bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search purchase orders..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 w-[300px]"
-              />
-            </div>
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Filter
-            </Button>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-            <Dialog open={isNewPOOpen} onOpenChange={setIsNewPOOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  New PO
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Create New Purchase Order</DialogTitle>
-                  <DialogDescription>Add a new purchase order to track inventory costs</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="supplier">Supplier *</Label>
-                      <Input
-                        id="supplier"
-                        placeholder="Supplier name"
-                        value={formData.supplier}
-                        onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="po-date">PO Date *</Label>
-                      <Input
-                        id="po-date"
-                        type="date"
-                        value={formData.poDate}
-                        onChange={(e) => setFormData({ ...formData, poDate: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="delivery-cost">Delivery Cost</Label>
-                    <Input
-                      id="delivery-cost"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={formData.deliveryCost}
-                      onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
-                    />
-                  </div>
-
-                  {/* PO Items Section */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-base font-medium">Purchase Order Items</Label>
-                      <Button type="button" variant="outline" size="sm" onClick={addPoItem}>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Item
-                      </Button>
-                    </div>
-
-                    <div className="space-y-3">
-                      {poItems.map((item, index) => (
-                        <div key={index} className="grid grid-cols-12 gap-2 items-end">
-                          <div className="col-span-3">
-                            <Label className="text-xs">SKU</Label>
-                            <Input
-                              placeholder="SKU"
-                              value={item.sku}
-                              onChange={(e) => updatePoItem(index, "sku", e.target.value)}
-                            />
-                          </div>
-                          <div className="col-span-4">
-                            <Label className="text-xs">Product Name</Label>
-                            <Input
-                              placeholder="Product name"
-                              value={item.productName}
-                              onChange={(e) => updatePoItem(index, "productName", e.target.value)}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <Label className="text-xs">Quantity</Label>
-                            <Input
-                              type="number"
-                              placeholder="Qty"
-                              value={item.quantity}
-                              onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <Label className="text-xs">Unit Cost</Label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              placeholder="0.00"
-                              value={item.unitCost}
-                              onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
-                            />
-                          </div>
-                          <div className="col-span-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removePoItem(index)}
-                              disabled={poItems.length === 1}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Total Preview */}
-                    <div className="bg-muted p-3 rounded-lg">
-                      <div className="flex justify-between text-sm">
-                        <span>Items Total:</span>
-                        <span>
-                          $
-                          {poItems
-                            .reduce((sum, item) => {
-                              const qty = Number.parseFloat(item.quantity) || 0
-                              const cost = Number.parseFloat(item.unitCost) || 0
-                              return sum + qty * cost
-                            }, 0)
-                            .toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Delivery Cost:</span>
-                        <span>${Number.parseFloat(formData.deliveryCost || "0").toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-medium border-t pt-2 mt-2">
-                        <span>Total:</span>
-                        <span>
-                          $
-                          {(
-                            poItems.reduce((sum, item) => {
-                              const qty = Number.parseFloat(item.quantity) || 0
-                              const cost = Number.parseFloat(item.unitCost) || 0
-                              return sum + qty * cost
-                            }, 0) + Number.parseFloat(formData.deliveryCost || "0")
-                          ).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="notes">Notes</Label>
-                    <Textarea
-                      id="notes"
-                      placeholder="Additional notes..."
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end space-x-2">
-                  <Button variant="outline" onClick={() => setIsNewPOOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleCreatePO}>Create PO</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-        </div>
-
-        {/* Purchase Orders Table */}
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Purchase Orders</CardTitle>
-            <CardDescription>Manage and track all purchase orders</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total POs</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
+            <div className="text-2xl font-bold">{purchaseOrders.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Draft</CardTitle>
+            <Edit className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "draft").length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Sent</CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "sent").length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Delivered</CardTitle>
+            <Truck className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{purchaseOrders.filter((po) => po.status === "delivered").length}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Purchase Orders Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Purchase Orders</CardTitle>
+          <CardDescription>A list of all purchase orders with their current status</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {purchaseOrders.length === 0 ? (
+            <div className="text-center py-8">
+              <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No purchase orders</h3>
+              <p className="text-gray-500 mb-4">Get started by creating your first purchase order.</p>
+              <Button onClick={handleCreate}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Purchase Order
+              </Button>
+            </div>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>PO Number</TableHead>
                   <TableHead>Supplier</TableHead>
-                  <TableHead>Date</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Total Cost</TableHead>
+                  <TableHead>Order Date</TableHead>
+                  <TableHead>Expected Delivery</TableHead>
+                  <TableHead>Total</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPOs.map((po) => (
+                {purchaseOrders.map((po) => (
                   <TableRow key={po.id}>
-                    <TableCell className="font-medium">{po.id}</TableCell>
+                    <TableCell className="font-medium">{po.po_number}</TableCell>
                     <TableCell>{po.supplier}</TableCell>
-                    <TableCell>{po.date}</TableCell>
+                    <TableCell>{getStatusBadge(po.status)}</TableCell>
+                    <TableCell>{new Date(po.order_date).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      <Badge className={getStatusColor(po.status)}>{po.status}</Badge>
+                      {po.expected_delivery ? new Date(po.expected_delivery).toLocaleDateString() : "Not set"}
                     </TableCell>
-                    <TableCell>{po.itemCount} items</TableCell>
-                    <TableCell>${po.totalCost.toLocaleString()}</TableCell>
+                    <TableCell>${calculateTotal(po.items, po.delivery_cost).toFixed(2)}</TableCell>
                     <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" onClick={() => setSelectedPO(po)}>
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle>Purchase Order Details - {selectedPO?.id}</DialogTitle>
-                              <DialogDescription>Complete information for this purchase order</DialogDescription>
-                            </DialogHeader>
-                            {selectedPO && (
-                              <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <Label className="text-sm font-medium">Supplier</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedPO.supplier}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Date</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedPO.date}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Status</Label>
-                                    <div className="flex items-center space-x-2">
-                                      <Badge className={getStatusColor(selectedPO.status)}>{selectedPO.status}</Badge>
-                                      <Button variant="outline" size="sm" onClick={() => setIsEditStatusOpen(true)}>
-                                        <Edit className="h-4 w-4 mr-1" />
-                                        Change
-                                      </Button>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Delivery Cost</Label>
-                                    <p className="text-sm text-muted-foreground">${selectedPO.deliveryCost}</p>
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <Label className="text-sm font-medium">Items</Label>
-                                  <div className="max-h-60 overflow-y-auto">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>SKU</TableHead>
-                                          <TableHead>Product Name</TableHead>
-                                          <TableHead>Quantity</TableHead>
-                                          <TableHead>Unit Cost</TableHead>
-                                          <TableHead>Delivery/Unit</TableHead>
-                                          <TableHead>Total</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {selectedPO.items.map((item, index) => (
-                                          <TableRow key={index}>
-                                            <TableCell>{item.sku}</TableCell>
-                                            <TableCell>{item.name}</TableCell>
-                                            <TableCell>{item.quantity}</TableCell>
-                                            <TableCell>${(item.unitCost ?? 0).toFixed(2)}</TableCell>
-                                            <TableCell>${(item.deliveryCostPerUnit ?? 0).toFixed(2)}</TableCell>
-                                            <TableCell>
-                                              $
-                                              {(
-                                                item.totalCost ??
-                                                item.quantity * item.unitCost +
-                                                  item.quantity * (item.deliveryCostPerUnit ?? 0)
-                                              ).toFixed(2)}
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-
-                                  <div className="mt-4 space-y-2 border-t pt-4">
-                                    <div className="flex justify-between text-sm">
-                                      <span>Items Subtotal:</span>
-                                      <span>
-                                        $
-                                        {selectedPO.items
-                                          .reduce((sum, item) => sum + item.unitCost * item.quantity, 0)
-                                          .toFixed(2)}
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between text-sm">
-                                      <span>Delivery Cost:</span>
-                                      <span>${selectedPO.deliveryCost.toFixed(2)}</span>
-                                    </div>
-                                    <div className="flex justify-between font-medium border-t pt-2">
-                                      <span>Total:</span>
-                                      <span>${selectedPO.totalCost.toFixed(2)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {selectedPO.notes && (
-                                  <div>
-                                    <Label className="text-sm font-medium">Notes</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedPO.notes}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </DialogContent>
-                        </Dialog>
-                        {po.status === "Draft" && (
-                          <Button variant="ghost" size="sm" onClick={() => openEditPODialog(po)}>
+                      <div className="flex space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => handleView(po)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {po.status !== "delivered" && (
+                          <Button variant="outline" size="sm" onClick={() => handleEdit(po)}>
                             <Edit className="h-4 w-4" />
                           </Button>
+                        )}
+                        {po.status === "sent" && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <Truck className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Mark as Delivered</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will mark the purchase order as delivered and update inventory levels. This
+                                  action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleMarkDelivered(po)}>
+                                  Mark as Delivered
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                        {po.status === "draft" && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Purchase Order</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This action cannot be undone. This will permanently delete the purchase order.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDelete(po)}>Delete</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         )}
                       </div>
                     </TableCell>
@@ -733,215 +510,310 @@ export default function PurchaseOrders() {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+          )}
+        </CardContent>
+      </Card>
 
-        {/* Status Change Dialog */}
-        <Dialog open={isEditStatusOpen} onOpenChange={setIsEditStatusOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Change PO Status - {selectedPO?.id}</DialogTitle>
-              <DialogDescription>
-                Update the status of this purchase order. This will affect inventory tracking.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Current Status</Label>
-                <Badge className={getStatusColor(selectedPO?.status || "")}>{selectedPO?.status}</Badge>
-              </div>
-              <div className="space-y-2">
-                <Label>New Status</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" onClick={() => handleUpdateStatus("Draft")} className="justify-start">
-                    Draft
-                  </Button>
-                  <Button variant="outline" onClick={() => handleUpdateStatus("Pending")} className="justify-start">
-                    Pending
-                  </Button>
-                  <Button variant="outline" onClick={() => handleUpdateStatus("In Transit")} className="justify-start">
-                    In Transit
-                  </Button>
-                  <Button variant="outline" onClick={() => handleUpdateStatus("Delivered")} className="justify-start">
-                    Delivered
-                  </Button>
-                </div>
-              </div>
-              <div className="text-sm text-muted-foreground space-y-1">
-                <p>
-                  <strong>Draft:</strong> No inventory impact
-                </p>
-                <p>
-                  <strong>Pending/In Transit:</strong> Added to "Incoming" inventory
-                </p>
-                <p>
-                  <strong>Delivered:</strong> Added to "In Stock" inventory
-                </p>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit PO Dialog */}
-        <Dialog open={isEditPOOpen} onOpenChange={setIsEditPOOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Purchase Order - {editingPO?.id}</DialogTitle>
-              <DialogDescription>Update purchase order details (only available for Draft status)</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-supplier">Supplier *</Label>
-                  <Input
-                    id="edit-supplier"
-                    placeholder="Supplier name"
-                    value={formData.supplier}
-                    onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-po-date">PO Date *</Label>
-                  <Input
-                    id="edit-po-date"
-                    type="date"
-                    value={formData.poDate}
-                    onChange={(e) => setFormData({ ...formData, poDate: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-delivery-cost">Delivery Cost</Label>
+      {/* Create/Edit Dialog */}
+      <Dialog
+        open={isCreateDialogOpen || isEditDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsCreateDialogOpen(false)
+            setIsEditDialogOpen(false)
+            setSelectedPO(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedPO ? "Edit Purchase Order" : "Create Purchase Order"}</DialogTitle>
+            <DialogDescription>
+              {selectedPO ? "Update the purchase order details" : "Create a new purchase order for your supplier"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="po_number">PO Number</Label>
                 <Input
-                  id="edit-delivery-cost"
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={formData.deliveryCost}
-                  onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
+                  id="po_number"
+                  value={formData.po_number}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, po_number: e.target.value }))}
+                  required
                 />
               </div>
-
-              {/* PO Items Section */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-base font-medium">Purchase Order Items</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={addPoItem}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Item
-                  </Button>
-                </div>
-
-                <div className="space-y-3">
-                  {poItems.map((item, index) => (
-                    <div key={index} className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-3">
-                        <Label className="text-xs">SKU</Label>
-                        <Input
-                          placeholder="SKU"
-                          value={item.sku}
-                          onChange={(e) => updatePoItem(index, "sku", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-4">
-                        <Label className="text-xs">Product Name</Label>
-                        <Input
-                          placeholder="Product name"
-                          value={item.productName}
-                          onChange={(e) => updatePoItem(index, "productName", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Label className="text-xs">Quantity</Label>
-                        <Input
-                          type="number"
-                          placeholder="Qty"
-                          value={item.quantity}
-                          onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Label className="text-xs">Unit Cost</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          placeholder="0.00"
-                          value={item.unitCost}
-                          onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removePoItem(index)}
-                          disabled={poItems.length === 1}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Total Preview */}
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="flex justify-between text-sm">
-                    <span>Items Total:</span>
-                    <span>
-                      $
-                      {poItems
-                        .reduce((sum, item) => {
-                          const qty = Number.parseFloat(item.quantity) || 0
-                          const cost = Number.parseFloat(item.unitCost) || 0
-                          return sum + qty * cost
-                        }, 0)
-                        .toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Delivery Cost:</span>
-                    <span>${Number.parseFloat(formData.deliveryCost || "0").toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between font-medium border-t pt-2 mt-2">
-                    <span>Total:</span>
-                    <span>
-                      $
-                      {(
-                        poItems.reduce((sum, item) => {
-                          const qty = Number.parseFloat(item.quantity) || 0
-                          const cost = Number.parseFloat(item.unitCost) || 0
-                          return sum + qty * cost
-                        }, 0) + Number.parseFloat(formData.deliveryCost || "0")
-                      ).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-notes">Notes</Label>
-                <Textarea
-                  id="edit-notes"
-                  placeholder="Additional notes..."
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              <div>
+                <Label htmlFor="supplier">Supplier</Label>
+                <Input
+                  id="supplier"
+                  value={formData.supplier}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, supplier: e.target.value }))}
+                  required
                 />
               </div>
             </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsEditPOOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleEditPO}>Update PO</Button>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value: "draft" | "sent" | "delivered") =>
+                    setFormData((prev) => ({ ...prev, status: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="sent">Sent</SelectItem>
+                    {selectedPO && <SelectItem value="delivered">Delivered</SelectItem>}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="order_date">Order Date</Label>
+                <Input
+                  id="order_date"
+                  type="date"
+                  value={formData.order_date}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, order_date: e.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="expected_delivery">Expected Delivery</Label>
+                <Input
+                  id="expected_delivery"
+                  type="date"
+                  value={formData.expected_delivery || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      expected_delivery: e.target.value || null,
+                    }))
+                  }
+                />
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-    </>
+
+            <div>
+              <Label htmlFor="delivery_cost">Delivery Cost</Label>
+              <Input
+                id="delivery_cost"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.delivery_cost}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    delivery_cost: Number.parseFloat(e.target.value) || 0,
+                  }))
+                }
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                value={formData.notes || ""}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    notes: e.target.value || null,
+                  }))
+                }
+                rows={3}
+              />
+            </div>
+
+            {/* Items Section */}
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <Label className="text-base font-semibold">Items</Label>
+                <Button type="button" onClick={addItem} size="sm">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Item
+                </Button>
+              </div>
+
+              <ScrollArea className="h-64 border rounded-md p-4">
+                {formData.items.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No items added yet. Click "Add Item" to get started.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {formData.items.map((item, index) => (
+                      <div key={index} className="border rounded-lg p-4 space-y-3">
+                        <div className="flex justify-between items-center">
+                          <h4 className="font-medium">Item {index + 1}</h4>
+                          <Button type="button" variant="outline" size="sm" onClick={() => removeItem(index)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label>Product</Label>
+                            <Select
+                              value={item.product_id}
+                              onValueChange={(value) => updateItem(index, "product_id", value)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select product" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {products.map((product) => (
+                                  <SelectItem key={product.id} value={product.id}>
+                                    {product.name} ({product.sku})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label>Quantity</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 1)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label>Unit Cost</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.unit_cost}
+                              onChange={(e) => updateItem(index, "unit_cost", Number.parseFloat(e.target.value) || 0)}
+                            />
+                          </div>
+                          <div>
+                            <Label>Total</Label>
+                            <Input value={`$${(item.quantity * item.unit_cost).toFixed(2)}`} disabled />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
+
+            {/* Total */}
+            <div className="border-t pt-4">
+              <div className="flex justify-between items-center text-lg font-semibold">
+                <span>Total (including delivery):</span>
+                <span>${calculateTotal(formData.items, formData.delivery_cost).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="submit">{selectedPO ? "Update Purchase Order" : "Create Purchase Order"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Dialog */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Purchase Order Details</DialogTitle>
+            <DialogDescription>View purchase order information and items</DialogDescription>
+          </DialogHeader>
+          {selectedPO && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">PO Number</Label>
+                  <p className="text-sm">{selectedPO.po_number}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Supplier</Label>
+                  <p className="text-sm">{selectedPO.supplier}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                  <div className="mt-1">{getStatusBadge(selectedPO.status)}</div>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Order Date</Label>
+                  <p className="text-sm">{new Date(selectedPO.order_date).toLocaleDateString()}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Expected Delivery</Label>
+                  <p className="text-sm">
+                    {selectedPO.expected_delivery
+                      ? new Date(selectedPO.expected_delivery).toLocaleDateString()
+                      : "Not set"}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Delivery Cost</Label>
+                  <p className="text-sm">${selectedPO.delivery_cost?.toFixed(2) || "0.00"}</p>
+                </div>
+              </div>
+
+              {selectedPO.notes && (
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Notes</Label>
+                  <p className="text-sm mt-1">{selectedPO.notes}</p>
+                </div>
+              )}
+
+              <div>
+                <Label className="text-base font-semibold">Items</Label>
+                <ScrollArea className="h-64 mt-2">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Quantity</TableHead>
+                        <TableHead>Unit Cost</TableHead>
+                        <TableHead>Delivery Cost/Unit</TableHead>
+                        <TableHead>Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedPO.items.map((item, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{item.sku}</TableCell>
+                          <TableCell>{item.product_name}</TableCell>
+                          <TableCell>{item.quantity}</TableCell>
+                          <TableCell>${item.unit_cost?.toFixed(2) || "0.00"}</TableCell>
+                          <TableCell>${item.delivery_cost_per_unit?.toFixed(2) || "0.00"}</TableCell>
+                          <TableCell>
+                            ${item.total_cost?.toFixed(2) || (item.quantity * item.unit_cost).toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="flex justify-between items-center text-lg font-semibold">
+                  <span>Total:</span>
+                  <span>${calculateTotal(selectedPO.items, selectedPO.delivery_cost).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }

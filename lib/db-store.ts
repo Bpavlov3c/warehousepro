@@ -1,411 +1,530 @@
 import { query, transaction } from "./database"
-import type { PurchaseOrder, POItem, InventoryItem, ShopifyStore, ShopifyOrder } from "./store"
+import type { PoolClient } from "pg"
 
-export class DatabaseStore {
-  // Purchase Orders
-  async getPurchaseOrders(): Promise<PurchaseOrder[]> {
-    const result = await query(`
-      SELECT 
-        po.*,
-        json_agg(
-          json_build_object(
-            'sku', poi.sku,
-            'name', poi.product_name,
-            'quantity', poi.quantity,
-            'unitCost', poi.unit_cost,
-            'deliveryCostPerUnit', COALESCE(po.delivery_cost / NULLIF(SUM(poi.quantity) OVER (PARTITION BY po.id), 0), 0),
-            'totalCost', poi.total_cost + COALESCE(po.delivery_cost / NULLIF(SUM(poi.quantity) OVER (PARTITION BY po.id), 0) * poi.quantity, 0)
-          ) ORDER BY poi.id
-        ) as items
-      FROM purchase_orders po
-      LEFT JOIN po_items poi ON po.id = poi.po_id
-      GROUP BY po.id
-      ORDER BY po.created_at DESC
-    `)
+// Types
+export interface Store {
+  id: string
+  name: string
+  shopify_domain: string
+  access_token: string
+  created_at: Date
+  updated_at: Date
+}
 
-    return result.rows.map((row) => ({
-      id: row.po_number,
-      supplier: row.supplier_name,
-      date: row.po_date,
-      status: row.status,
-      totalCost:
-        Number.parseFloat(row.delivery_cost || 0) +
-        (row.items?.reduce((sum: number, item: any) => sum + item.quantity * item.unitCost, 0) || 0),
-      itemCount: row.items?.filter((item: any) => item.sku).length || 0,
-      deliveryCost: Number.parseFloat(row.delivery_cost || 0),
-      items: row.items?.filter((item: any) => item.sku) || [],
-      notes: row.notes,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }))
-  }
+export interface Product {
+  id: string
+  sku: string
+  name: string
+  category: string
+  supplier: string
+  unit_cost: number
+  current_stock: number
+  reorder_point: number
+  created_at: Date
+  updated_at: Date
+}
 
-  async createPurchaseOrder(po: Omit<PurchaseOrder, "id" | "createdAt" | "updatedAt">): Promise<PurchaseOrder> {
-    return await transaction(async (client) => {
-      // Generate PO number
-      const poNumberResult = await client.query(
-        "SELECT 'PO-' || EXTRACT(YEAR FROM NOW()) || '-' || LPAD((COUNT(*) + 1)::text, 3, '0') as po_number FROM purchase_orders WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM NOW())",
-      )
-      const poNumber = poNumberResult.rows[0].po_number
+export interface PurchaseOrder {
+  id: string
+  po_number: string
+  supplier: string
+  status: "draft" | "sent" | "delivered"
+  order_date: Date
+  expected_delivery: Date | null
+  delivery_cost: number
+  notes: string | null
+  created_at: Date
+  updated_at: Date
+  items: PurchaseOrderItem[]
+}
 
-      // Insert purchase order
-      const poResult = await client.query(
-        `
-        INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, status, notes)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *
-      `,
-        [poNumber, po.supplier, po.date, po.deliveryCost, po.status, po.notes],
-      )
+export interface PurchaseOrderItem {
+  id: string
+  po_id: string
+  product_id: string
+  sku: string
+  product_name: string
+  quantity: number
+  unit_cost: number
+  delivery_cost_per_unit: number
+  total_cost: number
+  created_at: Date
+  updated_at: Date
+}
 
-      const poId = poResult.rows[0].id
+export interface ShopifyOrder {
+  id: string
+  store_id: string
+  shopify_order_id: string
+  order_number: string
+  customer_email: string
+  total_amount: number
+  status: string
+  created_at: Date
+  updated_at: Date
+  items: ShopifyOrderItem[]
+}
 
-      // Insert PO items
-      for (const item of po.items) {
-        await client.query(
-          `
-          INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost)
-          VALUES ($1, $2, $3, $4, $5)
-        `,
-          [poId, item.sku, item.name, item.quantity, item.unitCost],
-        )
+export interface ShopifyOrderItem {
+  id: string
+  order_id: string
+  product_id: string
+  sku: string
+  product_name: string
+  quantity: number
+  price: number
+  created_at: Date
+  updated_at: Date
+}
 
-        // Ensure product exists
-        await client.query(
-          `
-          INSERT INTO products (sku, name) VALUES ($1, $2)
-          ON CONFLICT (sku) DO NOTHING
-        `,
-          [item.sku, item.name],
-        )
-      }
+export interface InventoryTransaction {
+  id: string
+  product_id: string
+  transaction_type: "purchase" | "sale" | "adjustment"
+  quantity: number
+  unit_cost: number
+  reference_id: string | null
+  reference_type: string | null
+  created_at: Date
+}
 
-      // If delivered, update inventory
-      if (po.status === "Delivered") {
-        await this.updateInventoryFromPO(client, poResult.rows[0], po.items)
-      }
+// Store operations
+export async function getStores(): Promise<Store[]> {
+  const result = await query("SELECT * FROM stores ORDER BY created_at DESC")
+  return result.rows
+}
 
-      return {
-        id: poNumber,
-        supplier: po.supplier,
-        date: po.date,
-        status: po.status,
-        totalCost: po.totalCost,
-        itemCount: po.items.length,
-        deliveryCost: po.deliveryCost,
-        items: po.items,
-        notes: po.notes,
-        createdAt: poResult.rows[0].created_at,
-        updatedAt: poResult.rows[0].updated_at,
-      }
-    })
-  }
+export async function createStore(store: Omit<Store, "id" | "created_at" | "updated_at">): Promise<Store> {
+  const result = await query(
+    `INSERT INTO stores (name, shopify_domain, access_token) 
+     VALUES ($1, $2, $3) 
+     RETURNING *`,
+    [store.name, store.shopify_domain, store.access_token],
+  )
+  return result.rows[0]
+}
 
-  async updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>): Promise<PurchaseOrder | null> {
-    return await transaction(async (client) => {
-      // Update purchase order
-      const updateFields = []
-      const values = []
-      let paramIndex = 1
+export async function updateStore(id: string, updates: Partial<Store>): Promise<Store> {
+  const setClause = Object.keys(updates)
+    .filter((key) => key !== "id" && key !== "created_at" && key !== "updated_at")
+    .map((key, index) => `${key} = $${index + 2}`)
+    .join(", ")
 
-      if (updates.supplier) {
-        updateFields.push(`supplier_name = $${paramIndex++}`)
-        values.push(updates.supplier)
-      }
-      if (updates.date) {
-        updateFields.push(`po_date = $${paramIndex++}`)
-        values.push(updates.date)
-      }
-      if (updates.status) {
-        updateFields.push(`status = $${paramIndex++}`)
-        values.push(updates.status)
-      }
-      if (updates.deliveryCost !== undefined) {
-        updateFields.push(`delivery_cost = $${paramIndex++}`)
-        values.push(updates.deliveryCost)
-      }
-      if (updates.notes !== undefined) {
-        updateFields.push(`notes = $${paramIndex++}`)
-        values.push(updates.notes)
-      }
+  const values = Object.values(updates).filter((_, index) => {
+    const key = Object.keys(updates)[index]
+    return key !== "id" && key !== "created_at" && key !== "updated_at"
+  })
 
-      updateFields.push(`updated_at = CURRENT_TIMESTAMP`)
-      values.push(id)
+  const result = await query(
+    `UPDATE stores SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
+    [id, ...values],
+  )
+  return result.rows[0]
+}
 
-      const poResult = await client.query(
-        `UPDATE purchase_orders SET ${updateFields.join(", ")} WHERE po_number = $${paramIndex} RETURNING *`,
-        values,
-      )
+export async function deleteStore(id: string): Promise<void> {
+  await query("DELETE FROM stores WHERE id = $1", [id])
+}
 
-      if (poResult.rows.length === 0) return null
+// Product operations
+export async function getProducts(): Promise<Product[]> {
+  const result = await query("SELECT * FROM products ORDER BY name")
+  return result.rows
+}
 
-      const po = poResult.rows[0]
+export async function createProduct(product: Omit<Product, "id" | "created_at" | "updated_at">): Promise<Product> {
+  const result = await query(
+    `INSERT INTO products (sku, name, category, supplier, unit_cost, current_stock, reorder_point) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7) 
+     RETURNING *`,
+    [
+      product.sku,
+      product.name,
+      product.category,
+      product.supplier,
+      product.unit_cost,
+      product.current_stock,
+      product.reorder_point,
+    ],
+  )
+  return result.rows[0]
+}
 
-      // If items are being updated, replace them
-      if (updates.items) {
-        // Delete existing items
-        await client.query("DELETE FROM po_items WHERE po_id = $1", [po.id])
+export async function updateProduct(id: string, updates: Partial<Product>): Promise<Product> {
+  const setClause = Object.keys(updates)
+    .filter((key) => key !== "id" && key !== "created_at" && key !== "updated_at")
+    .map((key, index) => `${key} = $${index + 2}`)
+    .join(", ")
 
-        // Insert new items
-        for (const item of updates.items) {
-          await client.query(
-            `INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [po.id, item.sku, item.name, item.quantity, item.unitCost],
-          )
+  const values = Object.values(updates).filter((_, index) => {
+    const key = Object.keys(updates)[index]
+    return key !== "id" && key !== "created_at" && key !== "updated_at"
+  })
 
-          // Ensure product exists
-          await client.query(`INSERT INTO products (sku, name) VALUES ($1, $2) ON CONFLICT (sku) DO NOTHING`, [
-            item.sku,
-            item.name,
-          ])
-        }
-      }
+  const result = await query(
+    `UPDATE products SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
+    [id, ...values],
+  )
+  return result.rows[0]
+}
 
-      // If status changed to delivered, update inventory
-      if (updates.status === "Delivered") {
-        await this.updateInventoryFromPO(client, po, updates.items || [])
-      }
+export async function deleteProduct(id: string): Promise<void> {
+  await query("DELETE FROM products WHERE id = $1", [id])
+}
 
-      // Return updated PO
-      const updatedPOs = await this.getPurchaseOrders()
-      return updatedPOs.find((p) => p.id === id) || null
-    })
-  }
+// Purchase Order operations
+export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
+  const result = await query(`
+    SELECT 
+      po.*,
+      json_agg(
+        json_build_object(
+          'id', poi.id,
+          'po_id', poi.po_id,
+          'product_id', poi.product_id,
+          'sku', poi.sku,
+          'product_name', poi.product_name,
+          'quantity', poi.quantity,
+          'unit_cost', poi.unit_cost,
+          'delivery_cost_per_unit', poi.delivery_cost_per_unit,
+          'total_cost', poi.total_cost,
+          'created_at', poi.created_at,
+          'updated_at', poi.updated_at
+        ) ORDER BY poi.created_at
+      ) as items
+    FROM purchase_orders po
+    LEFT JOIN purchase_order_items poi ON po.id = poi.po_id
+    GROUP BY po.id
+    ORDER BY po.created_at DESC
+  `)
 
-  private async updateInventoryFromPO(client: any, po: any, items: POItem[]) {
-    for (const item of items) {
-      // Get product ID
-      const productResult = await client.query("SELECT id FROM products WHERE sku = $1", [item.sku])
-      if (productResult.rows.length === 0) continue
+  return result.rows.map((row) => ({
+    ...row,
+    items: row.items.filter((item: any) => item.id !== null),
+  }))
+}
 
-      const productId = productResult.rows[0].id
+export async function getPurchaseOrder(id: string): Promise<PurchaseOrder | null> {
+  const result = await query(
+    `
+    SELECT 
+      po.*,
+      json_agg(
+        json_build_object(
+          'id', poi.id,
+          'po_id', poi.po_id,
+          'product_id', poi.product_id,
+          'sku', poi.sku,
+          'product_name', poi.product_name,
+          'quantity', poi.quantity,
+          'unit_cost', poi.unit_cost,
+          'delivery_cost_per_unit', poi.delivery_cost_per_unit,
+          'total_cost', poi.total_cost,
+          'created_at', poi.created_at,
+          'updated_at', poi.updated_at
+        ) ORDER BY poi.created_at
+      ) as items
+    FROM purchase_orders po
+    LEFT JOIN purchase_order_items poi ON po.id = poi.po_id
+    WHERE po.id = $1
+    GROUP BY po.id
+  `,
+    [id],
+  )
 
-      // Get PO item ID
-      const poItemResult = await client.query("SELECT id FROM po_items WHERE po_id = $1 AND sku = $2", [
-        po.id,
-        item.sku,
-      ])
-      if (poItemResult.rows.length === 0) continue
+  if (result.rows.length === 0) return null
 
-      const poItemId = poItemResult.rows[0].id
-
-      // Add to inventory
-      await client.query(
-        `
-        INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date)
-        VALUES ($1, $2, $3, $4, $5)
-      `,
-        [productId, poItemId, item.quantity, item.unitCost + (item.deliveryCostPerUnit || 0), po.po_date],
-      )
-    }
-  }
-
-  // Inventory
-  async getInventory(): Promise<InventoryItem[]> {
-    const result = await query(`
-      SELECT 
-        p.sku,
-        p.name,
-        COALESCE(SUM(i.quantity_available), 0) as in_stock,
-        COALESCE(SUM(CASE WHEN po.status IN ('Pending', 'In Transit') THEN poi.quantity ELSE 0 END), 0) as incoming,
-        0 as reserved,
-        COALESCE(AVG(i.unit_cost), 0) as unit_cost
-      FROM products p
-      LEFT JOIN inventory i ON p.id = i.product_id
-      LEFT JOIN po_items poi ON p.sku = poi.sku
-      LEFT JOIN purchase_orders po ON poi.po_id = po.id
-      GROUP BY p.sku, p.name
-      ORDER BY p.name
-    `)
-
-    return result.rows.map((row) => ({
-      sku: row.sku,
-      name: row.name,
-      inStock: Number.parseInt(row.in_stock),
-      incoming: Number.parseInt(row.incoming),
-      reserved: Number.parseInt(row.reserved),
-      unitCost: Number.parseFloat(row.unit_cost),
-    }))
-  }
-
-  async updateInventoryQuantity(sku: string, newQuantity: number): Promise<boolean> {
-    try {
-      await transaction(async (client) => {
-        // Get product ID
-        const productResult = await client.query("SELECT id FROM products WHERE sku = $1", [sku])
-        if (productResult.rows.length === 0) {
-          throw new Error(`Product with SKU ${sku} not found`)
-        }
-
-        const productId = productResult.rows[0].id
-
-        // Get current inventory
-        const inventoryResult = await client.query(
-          "SELECT SUM(quantity_available) as current_stock FROM inventory WHERE product_id = $1",
-          [productId],
-        )
-
-        const currentStock = Number.parseInt(inventoryResult.rows[0]?.current_stock || 0)
-        const difference = newQuantity - currentStock
-
-        if (difference > 0) {
-          // Add inventory (manual adjustment)
-          await client.query(
-            `INSERT INTO inventory (product_id, quantity_available, unit_cost, purchase_date)
-             VALUES ($1, $2, $3, CURRENT_DATE)`,
-            [productId, difference, 0], // Manual adjustments have 0 cost
-          )
-        } else if (difference < 0) {
-          // Remove inventory (FIFO)
-          let toRemove = Math.abs(difference)
-          const inventoryLots = await client.query(
-            `SELECT id, quantity_available FROM inventory 
-             WHERE product_id = $1 AND quantity_available > 0 
-             ORDER BY purchase_date ASC, id ASC`,
-            [productId],
-          )
-
-          for (const lot of inventoryLots.rows) {
-            if (toRemove <= 0) break
-
-            const removeFromLot = Math.min(toRemove, lot.quantity_available)
-            await client.query("UPDATE inventory SET quantity_available = quantity_available - $1 WHERE id = $2", [
-              removeFromLot,
-              lot.id,
-            ])
-            toRemove -= removeFromLot
-          }
-        }
-      })
-      return true
-    } catch (error) {
-      console.error("Error updating inventory:", error)
-      return false
-    }
-  }
-
-  // Shopify Stores
-  async getShopifyStores(): Promise<ShopifyStore[]> {
-    const result = await query(`
-      SELECT 
-        s.*,
-        COUNT(so.id) as total_orders,
-        COALESCE(SUM(so.total_amount), 0) as monthly_revenue
-      FROM shopify_stores s
-      LEFT JOIN shopify_orders so ON s.id = so.store_id 
-        AND so.order_date >= DATE_TRUNC('month', CURRENT_DATE)
-      GROUP BY s.id
-      ORDER BY s.created_at DESC
-    `)
-
-    return result.rows.map((row) => ({
-      id: row.id.toString(),
-      name: row.name,
-      shopifyDomain: row.shopify_domain,
-      accessToken: row.access_token,
-      status: row.status,
-      lastSync: row.last_sync ? this.formatTimeAgo(row.last_sync) : "Never",
-      totalOrders: Number.parseInt(row.total_orders),
-      monthlyRevenue: Number.parseFloat(row.monthly_revenue),
-      webhookUrl: row.webhook_url,
-      notes: row.notes,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }))
-  }
-
-  async createShopifyStore(store: Omit<ShopifyStore, "id" | "createdAt" | "updatedAt">): Promise<ShopifyStore> {
-    const result = await query(
-      `
-      INSERT INTO shopify_stores (name, shopify_domain, access_token, webhook_url, status)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-    `,
-      [store.name, store.shopifyDomain, store.accessToken, store.webhookUrl, store.status],
-    )
-
-    const row = result.rows[0]
-    return {
-      id: row.id.toString(),
-      name: row.name,
-      shopifyDomain: row.shopify_domain,
-      accessToken: row.access_token,
-      status: row.status,
-      lastSync: "Never",
-      totalOrders: 0,
-      monthlyRevenue: 0,
-      webhookUrl: row.webhook_url,
-      notes: row.notes,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }
-  }
-
-  // Shopify Orders
-  async getShopifyOrders(): Promise<ShopifyOrder[]> {
-    const result = await query(`
-      SELECT 
-        so.*,
-        s.name as store_name,
-        json_agg(
-          json_build_object(
-            'id', soi.id,
-            'sku', soi.sku,
-            'productName', soi.product_name,
-            'quantity', soi.quantity,
-            'unitPrice', soi.unit_price,
-            'totalPrice', soi.total_price
-          ) ORDER BY soi.id
-        ) as items
-      FROM shopify_orders so
-      JOIN shopify_stores s ON so.store_id = s.id
-      LEFT JOIN shopify_order_items soi ON so.id = soi.order_id
-      GROUP BY so.id, s.name
-      ORDER BY so.order_date DESC
-    `)
-
-    return result.rows.map((row) => ({
-      id: row.id.toString(),
-      storeId: row.store_id.toString(),
-      storeName: row.store_name,
-      shopifyOrderId: row.shopify_order_id,
-      orderNumber: row.order_number,
-      customerName: row.customer_name,
-      customerEmail: row.customer_email,
-      orderDate: row.order_date,
-      status: row.status,
-      totalAmount: Number.parseFloat(row.total_amount),
-      shippingCost: Number.parseFloat(row.shipping_cost || 0),
-      taxAmount: Number.parseFloat(row.tax_amount || 0),
-      items: row.items?.filter((item: any) => item.sku) || [],
-      shippingAddress: row.shipping_address,
-      profit: this.calculateOrderProfit(row),
-      createdAt: row.created_at,
-    }))
-  }
-
-  private calculateOrderProfit(order: any): number {
-    // Simplified profit calculation - in real implementation, use FIFO costing
-    const revenue =
-      Number.parseFloat(order.total_amount) -
-      Number.parseFloat(order.shipping_cost || 0) -
-      Number.parseFloat(order.tax_amount || 0)
-    const estimatedCost = revenue * 0.6 // Assume 40% margin
-    return revenue - estimatedCost
-  }
-
-  private formatTimeAgo(date: Date): string {
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-
-    if (diffHours < 1) return "Less than 1 hour ago"
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`
-
-    const diffDays = Math.floor(diffHours / 24)
-    return `${diffDays} day${diffDays > 1 ? "s" : ""} ago`
+  const row = result.rows[0]
+  return {
+    ...row,
+    items: row.items.filter((item: any) => item.id !== null),
   }
 }
 
-export const dbStore = new DatabaseStore()
+export async function createPurchaseOrder(
+  po: Omit<PurchaseOrder, "id" | "created_at" | "updated_at" | "items">,
+  items: Omit<PurchaseOrderItem, "id" | "po_id" | "created_at" | "updated_at">[],
+): Promise<PurchaseOrder> {
+  return await transaction(async (client: PoolClient) => {
+    // Create purchase order
+    const poResult = await client.query(
+      `INSERT INTO purchase_orders (po_number, supplier, status, order_date, expected_delivery, delivery_cost, notes) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING *`,
+      [po.po_number, po.supplier, po.status, po.order_date, po.expected_delivery, po.delivery_cost, po.notes],
+    )
+
+    const createdPO = poResult.rows[0]
+
+    // Create purchase order items
+    const createdItems = []
+    for (const item of items) {
+      const itemResult = await client.query(
+        `INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+         RETURNING *`,
+        [
+          createdPO.id,
+          item.product_id,
+          item.sku,
+          item.product_name,
+          item.quantity,
+          item.unit_cost,
+          item.delivery_cost_per_unit,
+          item.total_cost,
+        ],
+      )
+      createdItems.push(itemResult.rows[0])
+    }
+
+    return {
+      ...createdPO,
+      items: createdItems,
+    }
+  })
+}
+
+export async function updatePurchaseOrder(
+  id: string,
+  updates: Partial<Omit<PurchaseOrder, "id" | "created_at" | "updated_at" | "items">>,
+  items?: Omit<PurchaseOrderItem, "id" | "po_id" | "created_at" | "updated_at">[],
+): Promise<PurchaseOrder> {
+  return await transaction(async (client: PoolClient) => {
+    // Update purchase order
+    const setClause = Object.keys(updates)
+      .filter((key) => key !== "id" && key !== "created_at" && key !== "updated_at" && key !== "items")
+      .map((key, index) => `${key} = $${index + 2}`)
+      .join(", ")
+
+    const values = Object.values(updates).filter((_, index) => {
+      const key = Object.keys(updates)[index]
+      return key !== "id" && key !== "created_at" && key !== "updated_at" && key !== "items"
+    })
+
+    const poResult = await client.query(
+      `UPDATE purchase_orders SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
+      [id, ...values],
+    )
+
+    const updatedPO = poResult.rows[0]
+
+    // Update items if provided
+    if (items) {
+      // Delete existing items
+      await client.query("DELETE FROM purchase_order_items WHERE po_id = $1", [id])
+
+      // Create new items
+      const createdItems = []
+      for (const item of items) {
+        const itemResult = await client.query(
+          `INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+           RETURNING *`,
+          [
+            id,
+            item.product_id,
+            item.sku,
+            item.product_name,
+            item.quantity,
+            item.unit_cost,
+            item.delivery_cost_per_unit,
+            item.total_cost,
+          ],
+        )
+        createdItems.push(itemResult.rows[0])
+      }
+
+      return {
+        ...updatedPO,
+        items: createdItems,
+      }
+    }
+
+    // If no items update, fetch existing items
+    const itemsResult = await client.query("SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at", [
+      id,
+    ])
+
+    return {
+      ...updatedPO,
+      items: itemsResult.rows,
+    }
+  })
+}
+
+export async function deletePurchaseOrder(id: string): Promise<void> {
+  await transaction(async (client: PoolClient) => {
+    await client.query("DELETE FROM purchase_order_items WHERE po_id = $1", [id])
+    await client.query("DELETE FROM purchase_orders WHERE id = $1", [id])
+  })
+}
+
+// When a PO is marked as delivered, update inventory
+export async function markPurchaseOrderDelivered(id: string): Promise<PurchaseOrder> {
+  return await transaction(async (client: PoolClient) => {
+    // Get the PO and its items
+    const poResult = await client.query("SELECT * FROM purchase_orders WHERE id = $1", [id])
+    const itemsResult = await client.query("SELECT * FROM purchase_order_items WHERE po_id = $1", [id])
+
+    if (poResult.rows.length === 0) {
+      throw new Error("Purchase order not found")
+    }
+
+    const po = poResult.rows[0]
+    const items = itemsResult.rows
+
+    // Update PO status
+    await client.query("UPDATE purchase_orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", [
+      "delivered",
+      id,
+    ])
+
+    // Update inventory for each item
+    for (const item of items) {
+      // Update product stock
+      await client.query(
+        "UPDATE products SET current_stock = current_stock + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [item.quantity, item.product_id],
+      )
+
+      // Create inventory transaction
+      await client.query(
+        `INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) 
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [item.product_id, "purchase", item.quantity, item.total_cost / item.quantity, id, "purchase_order"],
+      )
+    }
+
+    // Return updated PO with items
+    const updatedPO = { ...po, status: "delivered" as const }
+    return {
+      ...updatedPO,
+      items,
+    }
+  })
+}
+
+// Shopify Order operations
+export async function getShopifyOrders(): Promise<ShopifyOrder[]> {
+  const result = await query(`
+    SELECT 
+      so.*,
+      s.name as store_name,
+      json_agg(
+        json_build_object(
+          'id', soi.id,
+          'order_id', soi.order_id,
+          'product_id', soi.product_id,
+          'sku', soi.sku,
+          'product_name', soi.product_name,
+          'quantity', soi.quantity,
+          'price', soi.price,
+          'created_at', soi.created_at,
+          'updated_at', soi.updated_at
+        ) ORDER BY soi.created_at
+      ) as items
+    FROM shopify_orders so
+    LEFT JOIN shopify_order_items soi ON so.id = soi.order_id
+    LEFT JOIN stores s ON so.store_id = s.id
+    GROUP BY so.id, s.name
+    ORDER BY so.created_at DESC
+  `)
+
+  return result.rows.map((row) => ({
+    ...row,
+    items: row.items.filter((item: any) => item.id !== null),
+  }))
+}
+
+export async function createShopifyOrder(
+  order: Omit<ShopifyOrder, "id" | "created_at" | "updated_at" | "items">,
+  items: Omit<ShopifyOrderItem, "id" | "order_id" | "created_at" | "updated_at">[],
+): Promise<ShopifyOrder> {
+  return await transaction(async (client: PoolClient) => {
+    // Create shopify order
+    const orderResult = await client.query(
+      `INSERT INTO shopify_orders (store_id, shopify_order_id, order_number, customer_email, total_amount, status) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
+       RETURNING *`,
+      [
+        order.store_id,
+        order.shopify_order_id,
+        order.order_number,
+        order.customer_email,
+        order.total_amount,
+        order.status,
+      ],
+    )
+
+    const createdOrder = orderResult.rows[0]
+
+    // Create order items and update inventory
+    const createdItems = []
+    for (const item of items) {
+      const itemResult = await client.query(
+        `INSERT INTO shopify_order_items (order_id, product_id, sku, product_name, quantity, price) 
+         VALUES ($1, $2, $3, $4, $5, $6) 
+         RETURNING *`,
+        [createdOrder.id, item.product_id, item.sku, item.product_name, item.quantity, item.price],
+      )
+      createdItems.push(itemResult.rows[0])
+
+      // Update product stock (FIFO)
+      await client.query(
+        "UPDATE products SET current_stock = current_stock - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [item.quantity, item.product_id],
+      )
+
+      // Create inventory transaction
+      await client.query(
+        `INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) 
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [item.product_id, "sale", -item.quantity, item.price, createdOrder.id, "shopify_order"],
+      )
+    }
+
+    return {
+      ...createdOrder,
+      items: createdItems,
+    }
+  })
+}
+
+// Inventory operations
+export async function getInventoryTransactions(): Promise<InventoryTransaction[]> {
+  const result = await query(`
+    SELECT 
+      it.*,
+      p.name as product_name,
+      p.sku as product_sku
+    FROM inventory_transactions it
+    LEFT JOIN products p ON it.product_id = p.id
+    ORDER BY it.created_at DESC
+  `)
+  return result.rows
+}
+
+export async function createInventoryAdjustment(
+  productId: string,
+  quantity: number,
+  unitCost: number,
+  notes?: string,
+): Promise<InventoryTransaction> {
+  return await transaction(async (client: PoolClient) => {
+    // Update product stock
+    await client.query(
+      "UPDATE products SET current_stock = current_stock + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+      [quantity, productId],
+    )
+
+    // Create inventory transaction
+    const result = await client.query(
+      `INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
+       RETURNING *`,
+      [productId, "adjustment", quantity, unitCost, null, notes || "manual_adjustment"],
+    )
+
+    return result.rows[0]
+  })
+}

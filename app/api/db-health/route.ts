@@ -6,9 +6,10 @@ export async function GET() {
     const health = await healthCheck()
     return NextResponse.json(health)
   } catch (error) {
+    console.error("Database health check failed:", error)
     return NextResponse.json(
       {
-        status: "error",
+        status: "unhealthy",
         error: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },

@@ -1,7 +1,7 @@
 -- Seed sample data for Warehouse Management System
 
 -- Clear existing data (in correct order due to foreign key constraints)
-TRUNCATE TABLE sales_fulfillment, shopify_order_items, shopify_orders, shopify_stores, inventory, po_items, purchase_orders, products RESTART IDENTITY CASCADE;
+TRUNCATE TABLE sales_fulfillment, shopify_order_items, shopify_orders, shopify_stores, inventory, po_items, purchase_orders, products, stores, purchase_order_items, inventory_transactions RESTART IDENTITY CASCADE;
 
 -- Insert sample products
 INSERT INTO products (sku, name, description, min_stock, max_stock) VALUES
@@ -10,6 +10,11 @@ INSERT INTO products (sku, name, description, min_stock, max_stock) VALUES
 ('PC-003', 'Phone Case', 'Protective phone case for iPhone 14', 20, 200),
 ('KB-004', 'Mechanical Keyboard', 'RGB mechanical gaming keyboard', 8, 80),
 ('MS-005', 'Wireless Mouse', 'Ergonomic wireless mouse with precision tracking', 15, 150);
+
+-- Insert sample stores
+INSERT INTO stores (name, shopify_domain, access_token) VALUES
+('Main Store', 'main-store.myshopify.com', 'sample_access_token_1'),
+('Secondary Store', 'secondary-store.myshopify.com', 'sample_access_token_2');
 
 -- Insert sample purchase orders
 INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, status, notes) VALUES
@@ -20,7 +25,10 @@ INSERT INTO purchase_orders (po_number, supplier_name, po_date, delivery_cost, s
 ('PO-2024-005', 'Digital World', '2024-01-25', 300.00, 'Draft', 'Camera and accessories order'),
 ('PO-2024-006', 'AccessoryHub', '2024-02-01', 75.00, 'In Transit', 'Phone accessories restock'),
 ('PO-2024-007', 'ElectroMart', '2024-02-10', 300.00, 'Pending', 'Gaming peripherals order'),
-('PO-2024-008', 'ComponentSource', '2024-02-15', 125.00, 'Draft', 'Computer accessories draft order');
+('PO-2024-008', 'ComponentSource', '2024-02-15', 125.00, 'Draft', 'Computer accessories draft order'),
+('PO-20241201-001', 'TechCorp', '2024-11-15', 25.00, 'Delivered', 'Rush order for holiday season'),
+('PO-20241201-002', 'ToolMaster', '2024-11-20', 15.00, 'Sent', 'Standard delivery'),
+('PO-20241201-003', 'PartsCo', '2024-12-01', 10.00, 'Draft', 'Restock order');
 
 -- Insert sample PO items
 INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost) VALUES
@@ -51,6 +59,14 @@ INSERT INTO po_items (po_id, sku, product_name, quantity, unit_cost) VALUES
 -- PO-2024-008 items
 (8, 'WH-001', 'Wireless Headphones', 30, 78.00);
 
+-- Insert sample products with additional fields
+INSERT INTO products (sku, name, category, supplier, unit_cost, current_stock, reorder_point) VALUES
+('WIDGET-001', 'Premium Widget', 'Electronics', 'TechCorp', 25.50, 100, 20),
+('GADGET-002', 'Smart Gadget', 'Electronics', 'TechCorp', 45.00, 75, 15),
+('TOOL-003', 'Professional Tool', 'Tools', 'ToolMaster', 89.99, 50, 10),
+('PART-004', 'Replacement Part', 'Parts', 'PartsCo', 12.75, 200, 50),
+('CABLE-005', 'USB Cable', 'Accessories', 'CableCorp', 8.99, 150, 30);
+
 -- Insert inventory records (only for delivered POs)
 INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, purchase_date) VALUES
 -- From PO-2024-001 (Delivered) - with delivery cost distributed
@@ -64,6 +80,80 @@ INSERT INTO inventory (product_id, po_item_id, quantity_available, unit_cost, pu
 -- From PO-2024-006 (In Transit)
 (3, 7, 95, 16.50, '2024-02-01'), -- PC-003: 150 ordered, some manual additions
 (8, 8, 38, 36.25, '2024-02-01'); -- MS-005: 40 ordered, some manual additions
+
+-- Insert purchase order items for new POs
+DO $$
+DECLARE
+    po1_id UUID;
+    po2_id UUID;
+    po3_id UUID;
+    widget_id UUID;
+    gadget_id UUID;
+    tool_id UUID;
+    part_id UUID;
+    cable_id UUID;
+BEGIN
+    -- Get purchase order IDs
+    SELECT id INTO po1_id FROM purchase_orders WHERE po_number = 'PO-20241201-001';
+    SELECT id INTO po2_id FROM purchase_orders WHERE po_number = 'PO-20241201-002';
+    SELECT id INTO po3_id FROM purchase_orders WHERE po_number = 'PO-20241201-003';
+    
+    -- Get product IDs
+    SELECT id INTO widget_id FROM products WHERE sku = 'WIDGET-001';
+    SELECT id INTO gadget_id FROM products WHERE sku = 'GADGET-002';
+    SELECT id INTO tool_id FROM products WHERE sku = 'TOOL-003';
+    SELECT id INTO part_id FROM products WHERE sku = 'PART-004';
+    SELECT id INTO cable_id FROM products WHERE sku = 'CABLE-005';
+    
+    -- Insert purchase order items for PO1 (delivered)
+    INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+    (po1_id, widget_id, 'WIDGET-001', 'Premium Widget', 50, 25.50, 0.50, 1300.00),
+    (po1_id, gadget_id, 'GADGET-002', 'Smart Gadget', 25, 45.00, 0.50, 1137.50);
+    
+    -- Insert purchase order items for PO2 (sent)
+    INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+    (po2_id, tool_id, 'TOOL-003', 'Professional Tool', 20, 89.99, 0.75, 1814.80);
+    
+    -- Insert purchase order items for PO3 (draft)
+    INSERT INTO purchase_order_items (po_id, product_id, sku, product_name, quantity, unit_cost, delivery_cost_per_unit, total_cost) VALUES
+    (po3_id, part_id, 'PART-004', 'Replacement Part', 100, 12.75, 0.10, 1285.00),
+    (po3_id, cable_id, 'CABLE-005', 'USB Cable', 50, 8.99, 0.10, 454.50);
+    
+    -- Insert inventory transactions for delivered PO
+    INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) VALUES
+    (widget_id, 'purchase', 50, 26.00, po1_id, 'purchase_order'),
+    (gadget_id, 'purchase', 25, 45.50, po1_id, 'purchase_order');
+    
+    -- Insert sample Shopify orders
+    INSERT INTO shopify_orders (store_id, shopify_order_id, order_number, customer_email, total_amount, status) VALUES
+    ((SELECT id FROM stores WHERE name = 'Main Store'), '12345678901', '#1001', 'customer1@example.com', 156.48, 'fulfilled'),
+    ((SELECT id FROM stores WHERE name = 'Main Store'), '12345678902', '#1002', 'customer2@example.com', 98.99, 'pending'),
+    ((SELECT id FROM stores WHERE name = 'Secondary Store'), '12345678903', '#2001', 'customer3@example.com', 71.49, 'fulfilled');
+    
+    -- Insert Shopify order items
+    INSERT INTO shopify_order_items (order_id, product_id, sku, product_name, quantity, price) VALUES
+    ((SELECT id FROM shopify_orders WHERE order_number = '#1001'), widget_id, 'WIDGET-001', 'Premium Widget', 2, 29.99),
+    ((SELECT id FROM shopify_orders WHERE order_number = '#1001'), gadget_id, 'GADGET-002', 'Smart Gadget', 2, 49.99),
+    ((SELECT id FROM shopify_orders WHERE order_number = '#1002'), tool_id, 'TOOL-003', 'Professional Tool', 1, 99.99),
+    ((SELECT id FROM shopify_orders WHERE order_number = '#2001'), cable_id, 'CABLE-005', 'USB Cable', 3, 12.99),
+    ((SELECT id FROM shopify_orders WHERE order_number = '#2001'), part_id, 'PART-004', 'Replacement Part', 2, 15.99);
+    
+    -- Create inventory transactions for sales
+    INSERT INTO inventory_transactions (product_id, transaction_type, quantity, unit_cost, reference_id, reference_type) VALUES
+    (widget_id, 'sale', -2, 29.99, (SELECT id FROM shopify_orders WHERE order_number = '#1001'), 'shopify_order'),
+    (gadget_id, 'sale', -2, 49.99, (SELECT id FROM shopify_orders WHERE order_number = '#1001'), 'shopify_order'),
+    (tool_id, 'sale', -1, 99.99, (SELECT id FROM shopify_orders WHERE order_number = '#1002'), 'shopify_order'),
+    (cable_id, 'sale', -3, 12.99, (SELECT id FROM shopify_orders WHERE order_number = '#2001'), 'shopify_order'),
+    (part_id, 'sale', -2, 15.99, (SELECT id FROM shopify_orders WHERE order_number = '#2001'), 'shopify_order');
+    
+END $$;
+
+-- Update current stock based on transactions
+UPDATE products SET current_stock = current_stock - 2 WHERE sku = 'WIDGET-001'; -- Sales
+UPDATE products SET current_stock = current_stock - 2 WHERE sku = 'GADGET-002'; -- Sales  
+UPDATE products SET current_stock = current_stock - 1 WHERE sku = 'TOOL-003'; -- Sales
+UPDATE products SET current_stock = current_stock - 3 WHERE sku = 'CABLE-005'; -- Sales
+UPDATE products SET current_stock = current_stock - 2 WHERE sku = 'PART-004'; -- Sales
 
 -- Insert sample Shopify stores
 INSERT INTO shopify_stores (name, shopify_domain, access_token, webhook_url, status, last_sync) VALUES
@@ -167,4 +257,10 @@ SELECT 'Shopify Orders', COUNT(*) FROM shopify_orders
 UNION ALL
 SELECT 'Order Items', COUNT(*) FROM shopify_order_items
 UNION ALL
-SELECT 'Sales Fulfillment', COUNT(*) FROM sales_fulfillment;
+SELECT 'Sales Fulfillment', COUNT(*) FROM sales_fulfillment
+UNION ALL
+SELECT 'Stores', COUNT(*) FROM stores
+UNION ALL
+SELECT 'Purchase Order Items', COUNT(*) FROM purchase_order_items
+UNION ALL
+SELECT 'Inventory Transactions', COUNT(*) FROM inventory_transactions;
