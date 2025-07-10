@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Progress } from "@/components/ui/progress"
 import {
   Search,
   Filter,
@@ -38,8 +39,8 @@ export default function ShopifyOrders() {
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
   const [selectedStoreId, setSelectedStoreId] = useState<string>("all")
   const [isSyncing, setIsSyncing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, store: "" })
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
-  const [orderItemsWithCosts, setOrderItemsWithCosts] = useState<Map<string, any[]>>(new Map())
 
   // Load data on component mount
   useEffect(() => {
@@ -51,14 +52,6 @@ export default function ShopifyOrders() {
         ])
         setOrders(ordersData)
         setStores(storesData)
-
-        // Load cost prices for all order items
-        // const costsMap = new Map()
-        // for (const order of ordersData) {
-        //   const itemsWithCosts = await supabaseStore.getOrderItemsWithCosts(order.items)
-        //   costsMap.set(order.id, itemsWithCosts)
-        // }
-        // setOrderItemsWithCosts(costsMap)
       } catch (error) {
         console.error("Error loading data:", error)
       }
@@ -129,6 +122,8 @@ export default function ShopifyOrders() {
 
   const syncAllOrders = async () => {
     setIsSyncing(true)
+    setSyncProgress({ current: 0, total: 0, store: "" })
+
     try {
       const storesData = await supabaseStore.getShopifyStores()
       setStores(storesData)
@@ -137,13 +132,15 @@ export default function ShopifyOrders() {
 
       for (const store of connectedStores) {
         try {
+          setSyncProgress({ current: 0, total: 0, store: store.name })
+
           // Update store status to show syncing
           await supabaseStore.updateShopifyStore(store.id, { status: "Testing" })
           const freshStores1 = await supabaseStore.getShopifyStores()
           setStores(freshStores1)
 
-          // Sync orders from this store
-          const newOrders = await syncStoreOrders(store)
+          // Sync orders from this store with progress tracking
+          const newOrders = await syncStoreOrdersWithProgress(store)
           totalNewOrders += newOrders.length
 
           // Update store with successful sync
@@ -172,10 +169,11 @@ export default function ShopifyOrders() {
       alert("Failed to sync orders. Please try again.")
     } finally {
       setIsSyncing(false)
+      setSyncProgress({ current: 0, total: 0, store: "" })
     }
   }
 
-  const syncStoreOrders = async (store: ShopifyStore): Promise<ShopifyOrder[]> => {
+  const syncStoreOrdersWithProgress = async (store: ShopifyStore): Promise<ShopifyOrder[]> => {
     try {
       const res = await fetch("/api/shopify-orders", {
         method: "POST",
@@ -292,7 +290,7 @@ export default function ShopifyOrders() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${totalRevenue.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{totalRevenue.toLocaleString()} лв</div>
               <p className="text-xs text-muted-foreground">From Shopify stores</p>
             </CardContent>
           </Card>
@@ -303,7 +301,7 @@ export default function ShopifyOrders() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${totalProfit.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{totalProfit.toLocaleString()} лв</div>
               <p className="text-xs text-muted-foreground">Gross profit</p>
             </CardContent>
           </Card>
@@ -319,6 +317,31 @@ export default function ShopifyOrders() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Sync Progress */}
+        {isSyncing && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Syncing Orders</CardTitle>
+              <CardDescription>{syncProgress.store && `Syncing from ${syncProgress.store}...`}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Progress</span>
+                  <span>
+                    {syncProgress.current}
+                    {syncProgress.total > 0 && `/${syncProgress.total}`} orders
+                  </span>
+                </div>
+                <Progress
+                  value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0}
+                  className="w-full"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Actions Bar */}
         <div className="flex items-center justify-between">
@@ -440,13 +463,13 @@ export default function ShopifyOrders() {
                           <Badge variant="secondary">{order.items.length} items</Badge>
                         </TableCell>
                         <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          ${order.totalAmount.toFixed(2)}
+                          {order.totalAmount.toFixed(2)} лв
                         </TableCell>
                         <TableCell
                           className="text-green-600 font-medium"
                           onClick={() => toggleOrderExpansion(order.id)}
                         >
-                          ${order.profit.toFixed(2)}
+                          {order.profit.toFixed(2)} лв
                         </TableCell>
                         <TableCell>
                           <Dialog>
@@ -518,15 +541,15 @@ export default function ShopifyOrders() {
                                                 <TableCell>{item.sku}</TableCell>
                                                 <TableCell>{item.product_name}</TableCell>
                                                 <TableCell>{item.quantity}</TableCell>
-                                                <TableCell>${item.unit_price.toFixed(2)}</TableCell>
+                                                <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
                                                 <TableCell>
-                                                  {item.cost_price > 0 ? `$${item.cost_price.toFixed(2)}` : "N/A"}
+                                                  {item.cost_price > 0 ? `${item.cost_price.toFixed(2)} лв` : "N/A"}
                                                 </TableCell>
-                                                <TableCell>${item.total_price.toFixed(2)}</TableCell>
+                                                <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
                                                 <TableCell
                                                   className={itemProfit >= 0 ? "text-green-600" : "text-red-600"}
                                                 >
-                                                  {item.cost_price > 0 ? `$${itemProfit.toFixed(2)}` : "N/A"}
+                                                  {item.cost_price > 0 ? `${itemProfit.toFixed(2)} лв` : "N/A"}
                                                 </TableCell>
                                               </TableRow>
                                             )
@@ -545,29 +568,29 @@ export default function ShopifyOrders() {
                                       <div className="flex justify-between">
                                         <span>Subtotal:</span>
                                         <span>
-                                          $
                                           {(
                                             selectedOrder.total_amount -
                                             selectedOrder.shipping_cost -
                                             selectedOrder.tax_amount
-                                          ).toFixed(2)}
+                                          ).toFixed(2)}{" "}
+                                          лв
                                         </span>
                                       </div>
                                       <div className="flex justify-between">
                                         <span>Shipping:</span>
-                                        <span>${selectedOrder.shipping_cost.toFixed(2)}</span>
+                                        <span>{selectedOrder.shipping_cost.toFixed(2)} лв</span>
                                       </div>
                                       <div className="flex justify-between">
                                         <span>Tax:</span>
-                                        <span>${selectedOrder.tax_amount.toFixed(2)}</span>
+                                        <span>{selectedOrder.tax_amount.toFixed(2)} лв</span>
                                       </div>
                                       <div className="flex justify-between font-medium">
                                         <span>Total:</span>
-                                        <span>${selectedOrder.total_amount.toFixed(2)}</span>
+                                        <span>{selectedOrder.total_amount.toFixed(2)} лв</span>
                                       </div>
                                       <div className="flex justify-between text-green-600 font-medium">
                                         <span>Profit:</span>
-                                        <span>${selectedOrder.profit.toFixed(2)}</span>
+                                        <span>{selectedOrder.profit.toFixed(2)} лв</span>
                                       </div>
                                     </div>
                                   </div>
@@ -587,7 +610,7 @@ export default function ShopifyOrders() {
                                 <div className="flex items-center justify-between">
                                   <h4 className="font-medium text-sm">Order Items ({order.items.length})</h4>
                                   <div className="text-sm text-muted-foreground">
-                                    Shipping: ${order.shippingCost.toFixed(2)} | Tax: ${order.taxAmount.toFixed(2)}
+                                    Shipping: {order.shippingCost.toFixed(2)} лв | Tax: {order.taxAmount.toFixed(2)} лв
                                   </div>
                                 </div>
 
@@ -611,24 +634,24 @@ export default function ShopifyOrders() {
                                             <div className="text-muted-foreground">Qty</div>
                                           </div>
                                           <div className="text-center">
-                                            <div className="font-medium">${item.unit_price.toFixed(2)}</div>
+                                            <div className="font-medium">{item.unit_price.toFixed(2)} лв</div>
                                             <div className="text-muted-foreground">Sale Price</div>
                                           </div>
                                           <div className="text-center">
                                             <div className="font-medium">
-                                              {item.cost_price > 0 ? `$${item.cost_price.toFixed(2)}` : "N/A"}
+                                              {item.cost_price > 0 ? `${item.cost_price.toFixed(2)} лв` : "N/A"}
                                             </div>
                                             <div className="text-muted-foreground">Cost Price</div>
                                           </div>
                                           <div className="text-center">
-                                            <div className="font-medium">${item.total_price.toFixed(2)}</div>
+                                            <div className="font-medium">{item.total_price.toFixed(2)} лв</div>
                                             <div className="text-muted-foreground">Total Sale</div>
                                           </div>
                                           <div className="text-center">
                                             <div
                                               className={`font-medium ${itemProfit >= 0 ? "text-green-600" : "text-red-600"}`}
                                             >
-                                              {item.cost_price > 0 ? `$${itemProfit.toFixed(2)}` : "N/A"}
+                                              {item.cost_price > 0 ? `${itemProfit.toFixed(2)} лв` : "N/A"}
                                             </div>
                                             <div className="text-muted-foreground">Item Profit</div>
                                           </div>
@@ -645,31 +668,31 @@ export default function ShopifyOrders() {
                                       <div className="flex justify-between">
                                         <span>Subtotal (before tax/shipping):</span>
                                         <span>
-                                          ${(order.totalAmount - order.shippingCost - order.taxAmount).toFixed(2)}
+                                          {(order.totalAmount - order.shippingCost - order.taxAmount).toFixed(2)} лв
                                         </span>
                                       </div>
                                       <div className="flex justify-between">
                                         <span>Total Cost of Items:</span>
                                         <span>
-                                          $
                                           {getOrderItemsForDisplay(order)
                                             .reduce((sum, item) => sum + item.cost_price * item.quantity, 0)
-                                            .toFixed(2)}
+                                            .toFixed(2)}{" "}
+                                          лв
                                         </span>
                                       </div>
                                     </div>
                                     <div>
                                       <div className="flex justify-between">
                                         <span>Shipping:</span>
-                                        <span>${order.shippingCost.toFixed(2)}</span>
+                                        <span>{order.shippingCost.toFixed(2)} лв</span>
                                       </div>
                                       <div className="flex justify-between">
                                         <span>Tax:</span>
-                                        <span>${order.taxAmount.toFixed(2)}</span>
+                                        <span>{order.taxAmount.toFixed(2)} лв</span>
                                       </div>
                                       <div className="flex justify-between font-medium text-green-600 border-t pt-2">
                                         <span>Net Profit:</span>
-                                        <span>${order.profit.toFixed(2)}</span>
+                                        <span>{order.profit.toFixed(2)} лв</span>
                                       </div>
                                     </div>
                                   </div>

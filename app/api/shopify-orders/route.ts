@@ -1,40 +1,134 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
+import { supabaseStore } from "@/lib/supabase-store"
+import { ShopifyAPI } from "@/lib/shopify-api"
 
-/**
- * POST body → { domain: string; accessToken: string; sinceId?: string }
- * Response  → { ok: true; orders: any[] }  OR  { ok: false; error: string }
- */
-export async function POST(req: Request) {
-  const { domain, accessToken, sinceId } = await req.json()
-
-  if (!domain || !accessToken) {
-    return NextResponse.json({ ok: false, error: "Missing domain or accessToken" }, { status: 400 })
-  }
-
-  const searchParams = new URLSearchParams({
-    status: "any",
-    limit: "250",
-  })
-  if (sinceId) searchParams.set("since_id", sinceId)
-
+export async function POST(request: NextRequest) {
   try {
-    const res = await fetch(`https://${domain}/admin/api/2023-10/orders.json?${searchParams}`, {
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-      next: { revalidate: 0 },
-    })
+    console.log("Starting Shopify orders sync...")
 
-    if (!res.ok) {
-      return NextResponse.json({ ok: false, error: `Shopify responded with ${res.status}` }, { status: 400 })
+    // Get all connected stores
+    const stores = await supabaseStore.getShopifyStores()
+    const connectedStores = stores.filter((store) => store.status === "Connected")
+
+    if (connectedStores.length === 0) {
+      return NextResponse.json({
+        success: false,
+        message: "No connected Shopify stores found",
+      })
     }
 
-    const data = await res.json()
-    return NextResponse.json({ ok: true, orders: data.orders })
-  } catch (err) {
-    console.error("Order sync proxy error:", err)
-    return NextResponse.json({ ok: false, error: "Network error – unable to reach Shopify" }, { status: 500 })
+    let totalOrdersSynced = 0
+    const results = []
+
+    for (const store of connectedStores) {
+      try {
+        console.log(`Syncing orders for store: ${store.name}`)
+
+        const shopifyAPI = new ShopifyAPI({
+          shopDomain: store.shopifyDomain,
+          accessToken: store.accessToken,
+        })
+
+        // Test connection first
+        const isConnected = await shopifyAPI.testConnection()
+        if (!isConnected) {
+          console.error(`Failed to connect to store: ${store.name}`)
+          results.push({
+            store: store.name,
+            success: false,
+            error: "Connection failed",
+            ordersSynced: 0,
+          })
+          continue
+        }
+
+        // Fetch all orders with progress tracking
+        let currentProgress = 0
+        let totalEstimate = 0
+
+        const orders = await shopifyAPI.getAllOrders((current, total) => {
+          currentProgress = current
+          totalEstimate = total
+          console.log(`Store ${store.name}: ${current}/${total} orders fetched`)
+        })
+
+        console.log(`Fetched ${orders.length} orders from ${store.name}`)
+
+        if (orders.length === 0) {
+          results.push({
+            store: store.name,
+            success: true,
+            ordersSynced: 0,
+            message: "No orders found",
+          })
+          continue
+        }
+
+        // Transform orders for database
+        const transformedOrders = orders.map((order) => shopifyAPI.transformOrderForDatabase(order, store.id))
+
+        // Save to database in batches
+        const batchSize = 100
+        let syncedCount = 0
+
+        for (let i = 0; i < transformedOrders.length; i += batchSize) {
+          const batch = transformedOrders.slice(i, i + batchSize)
+          console.log(`Saving batch ${Math.floor(i / batchSize) + 1} for ${store.name} (${batch.length} orders)`)
+
+          await supabaseStore.addShopifyOrders(batch)
+          syncedCount += batch.length
+
+          console.log(`Saved ${syncedCount}/${transformedOrders.length} orders for ${store.name}`)
+        }
+
+        // Update store sync status
+        await supabaseStore.updateShopifyStore(store.id, {
+          lastSync: new Date().toISOString(),
+          totalOrders: orders.length,
+        })
+
+        totalOrdersSynced += syncedCount
+        results.push({
+          store: store.name,
+          success: true,
+          ordersSynced: syncedCount,
+        })
+
+        console.log(`Completed sync for ${store.name}: ${syncedCount} orders`)
+      } catch (error) {
+        console.error(`Error syncing store ${store.name}:`, error)
+        results.push({
+          store: store.name,
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+          ordersSynced: 0,
+        })
+      }
+    }
+
+    console.log(`Sync completed. Total orders synced: ${totalOrdersSynced}`)
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully synced ${totalOrdersSynced} orders from ${connectedStores.length} stores`,
+      totalOrdersSynced,
+      storeResults: results,
+    })
+  } catch (error) {
+    console.error("Error in Shopify orders sync:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Failed to sync Shopify orders",
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    message: "Use POST to sync Shopify orders",
+  })
 }
