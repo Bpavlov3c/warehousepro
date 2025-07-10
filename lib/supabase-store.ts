@@ -851,7 +851,7 @@ async function updateShopifyStore(id: string, updates: Partial<ShopifyStore>): P
     if (updates.shopifyDomain) dbUpdates.shopify_domain = updates.shopifyDomain
     if (updates.accessToken) dbUpdates.access_token = updates.accessToken
     if (updates.status) dbUpdates.status = updates.status
-    if (updates.lastSync) dbUpdates.last_sync = updates.lastSync
+    if (updates.lastSync) dbUpdates.lastSync = updates.lastSync
     if (updates.totalOrders !== undefined) dbUpdates.total_orders = updates.totalOrders
     if (updates.monthlyRevenue !== undefined) dbUpdates.monthly_revenue = updates.monthlyRevenue
     if (updates.webhookUrl) dbUpdates.webhook_url = updates.webhookUrl
@@ -1060,12 +1060,19 @@ export const supabaseStore = {
   addShopifyOrders,
 }
 
-// Generate PO Number
+// Generate a reasonably unique PO number (date + ms + random)
 function generatePONumber(): string {
   const now = new Date()
+
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, "0")
   const day = String(now.getDate()).padStart(2, "0")
-  const time = String(now.getTime()).slice(-4)
-  return `PO-${year}${month}${day}-${time}`
+
+  // Milliseconds in the current day (5-6 digits) – keeps numbers short but time-based
+  const msOfDay = String(now.getTime() % 86_400_000).padStart(6, "0")
+
+  // 3-digit random component to avoid duplicate keys when many POs are created in the same ms
+  const random = String(Math.floor(Math.random() * 900) + 100) // 100-999
+
+  return `PO-${year}${month}${day}-${msOfDay}${random}`
 }

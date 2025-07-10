@@ -81,6 +81,7 @@ export default function ShopifyOrders() {
         "Order Date",
         "Status",
         "Total Amount",
+        "Revenue (excl. tax)",
         "Shipping Cost",
         "Tax Amount",
         "Profit",
@@ -96,6 +97,7 @@ export default function ShopifyOrders() {
         new Date(order.orderDate).toLocaleDateString(),
         order.status,
         order.totalAmount.toFixed(2),
+        (order.totalAmount - order.taxAmount).toFixed(2),
         order.shippingCost.toFixed(2),
         order.taxAmount.toFixed(2),
         order.profit.toFixed(2),
@@ -253,7 +255,8 @@ export default function ShopifyOrders() {
   })
 
   const totalOrders = orders.length
-  const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0)
+  // Revenue excluding tax (consistent with reports)
+  const totalRevenue = orders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
   const totalProfit = orders.reduce((sum, order) => sum + order.profit, 0)
   const connectedStores = stores.filter((s) => s.status === "Connected")
 
@@ -286,12 +289,12 @@ export default function ShopifyOrders() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Revenue</CardTitle>
+              <CardTitle className="text-sm font-medium">Revenue (excl. tax)</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{totalRevenue.toLocaleString()} лв</div>
-              <p className="text-xs text-muted-foreground">From Shopify stores</p>
+              <p className="text-xs text-muted-foreground">Revenue without tax</p>
             </CardContent>
           </Card>
 
@@ -419,7 +422,7 @@ export default function ShopifyOrders() {
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Items</TableHead>
-                    <TableHead>Total</TableHead>
+                    <TableHead>Revenue</TableHead>
                     <TableHead>Profit</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
@@ -463,7 +466,8 @@ export default function ShopifyOrders() {
                           <Badge variant="secondary">{order.items.length} items</Badge>
                         </TableCell>
                         <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          {order.totalAmount.toFixed(2)} лв
+                          {(order.totalAmount - order.taxAmount).toFixed(2)} лв
+                          <div className="text-xs text-muted-foreground">Total: {order.totalAmount.toFixed(2)} лв</div>
                         </TableCell>
                         <TableCell
                           className="text-green-600 font-medium"
@@ -588,6 +592,12 @@ export default function ShopifyOrders() {
                                         <span>Total:</span>
                                         <span>{selectedOrder.total_amount.toFixed(2)} лв</span>
                                       </div>
+                                      <div className="flex justify-between text-blue-600 font-medium">
+                                        <span>Revenue (excl. tax):</span>
+                                        <span>
+                                          {(selectedOrder.total_amount - selectedOrder.tax_amount).toFixed(2)} лв
+                                        </span>
+                                      </div>
                                       <div className="flex justify-between text-green-600 font-medium">
                                         <span>Profit:</span>
                                         <span>{selectedOrder.profit.toFixed(2)} лв</span>
@@ -610,7 +620,8 @@ export default function ShopifyOrders() {
                                 <div className="flex items-center justify-between">
                                   <h4 className="font-medium text-sm">Order Items ({order.items.length})</h4>
                                   <div className="text-sm text-muted-foreground">
-                                    Shipping: {order.shippingCost.toFixed(2)} лв | Tax: {order.taxAmount.toFixed(2)} лв
+                                    Revenue: {(order.totalAmount - order.taxAmount).toFixed(2)} лв | Shipping:{" "}
+                                    {order.shippingCost.toFixed(2)} лв | Tax: {order.taxAmount.toFixed(2)} лв
                                   </div>
                                 </div>
 
@@ -666,10 +677,8 @@ export default function ShopifyOrders() {
                                   <div className="grid grid-cols-2 gap-4 text-sm">
                                     <div>
                                       <div className="flex justify-between">
-                                        <span>Subtotal (before tax/shipping):</span>
-                                        <span>
-                                          {(order.totalAmount - order.shippingCost - order.taxAmount).toFixed(2)} лв
-                                        </span>
+                                        <span>Revenue (excl. tax):</span>
+                                        <span>{(order.totalAmount - order.taxAmount).toFixed(2)} лв</span>
                                       </div>
                                       <div className="flex justify-between">
                                         <span>Total Cost of Items:</span>
