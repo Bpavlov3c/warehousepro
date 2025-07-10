@@ -29,6 +29,7 @@ import {
   Edit,
 } from "lucide-react"
 import { dataStore, type InventoryItem } from "@/lib/store"
+import { supabaseStore } from "@/lib/supabase-store"
 
 export default function Inventory() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
@@ -47,10 +48,18 @@ export default function Inventory() {
 
   // Load data on component mount
   useEffect(() => {
-    setInventoryItems(dataStore.getInventory())
+    const loadData = async () => {
+      try {
+        const inventory = await supabaseStore.getInventory()
+        setInventoryItems(inventory)
+      } catch (error) {
+        console.error("Error loading inventory:", error)
+      }
+    }
+    loadData()
   }, [])
 
-  const handleAddInventory = () => {
+  const handleAddInventory = async () => {
     if (!formData.sku || !formData.name || !formData.quantity || !formData.unitCost) {
       alert("Please fill in all fields")
       return
@@ -64,15 +73,21 @@ export default function Inventory() {
       return
     }
 
-    const success = dataStore.addManualInventory(formData.sku, formData.name, quantity, unitCost)
+    try {
+      const success = await supabaseStore.addManualInventory(formData.sku, formData.name, quantity, unitCost)
 
-    if (success) {
-      setInventoryItems(dataStore.getInventory())
-      setFormData({ sku: "", name: "", quantity: "", unitCost: "" })
-      setIsAddInventoryOpen(false)
-      alert(`Successfully added ${quantity} units of ${formData.name}`)
-    } else {
-      alert("Failed to add inventory")
+      if (success) {
+        const updatedInventory = await supabaseStore.getInventory()
+        setInventoryItems(updatedInventory)
+        setFormData({ sku: "", name: "", quantity: "", unitCost: "" })
+        setIsAddInventoryOpen(false)
+        alert(`Successfully added ${quantity} units of ${formData.name}`)
+      } else {
+        alert("Failed to add inventory")
+      }
+    } catch (error) {
+      console.error("Error adding inventory:", error)
+      alert("Error adding inventory. Please try again.")
     }
   }
 
@@ -105,17 +120,18 @@ export default function Inventory() {
     const csvContent = [
       ["SKU", "Product Name", "In Stock", "Incoming", "Reserved", "Available", "Status", "Unit Cost"],
       ...inventoryItems.map((item) => {
-        const available = item.inStock - item.reserved
+        const available = (item.inStock ?? 0) - (item.reserved ?? 0)
         const status = getStockStatus(item.inStock, item.incoming).status
-        const unitCost = dataStore.getInventoryUnitCost(item.sku)
+        const rawUnitCost = dataStore.getInventoryUnitCost(item.sku)
+        const unitCost = Number.isFinite(rawUnitCost) ? rawUnitCost : 0
 
         return [
           item.sku,
           item.name,
-          item.inStock.toString(),
-          item.incoming.toString(),
-          item.reserved.toString(),
-          available.toString(),
+          (item.inStock ?? 0).toString(),
+          (item.incoming ?? 0).toString(),
+          (item.reserved ?? 0).toString(),
+          Number(available).toString(),
           status,
           unitCost.toFixed(2),
         ]
@@ -141,23 +157,24 @@ export default function Inventory() {
 
   const generateReorderReport = () => {
     const lowStockItems = inventoryItems.filter((item) => {
-      const available = item.inStock - item.reserved
-      return available <= 10 || item.inStock === 0 // Items with 10 or fewer available or out of stock
+      const available = (item.inStock ?? 0) - (item.reserved ?? 0)
+      return available <= 10 || (item.inStock ?? 0) === 0 // Items with 10 or fewer available or out of stock
     })
 
     const csvContent = [
       ["SKU", "Product Name", "Current Stock", "Available", "Status", "Suggested Reorder Qty", "Unit Cost"],
       ...lowStockItems.map((item) => {
-        const available = item.inStock - item.reserved
+        const available = (item.inStock ?? 0) - (item.reserved ?? 0)
         const status = getStockStatus(item.inStock, item.incoming).status
-        const unitCost = dataStore.getInventoryUnitCost(item.sku)
+        const rawUnitCost = dataStore.getInventoryUnitCost(item.sku)
+        const unitCost = Number.isFinite(rawUnitCost) ? rawUnitCost : 0
         const suggestedReorder = Math.max(50 - available, 20) // Suggest reordering to 50 units or minimum 20
 
         return [
           item.sku,
           item.name,
-          item.inStock.toString(),
-          available.toString(),
+          (item.inStock ?? 0).toString(),
+          Number(available).toString(),
           status,
           suggestedReorder.toString(),
           unitCost.toFixed(2),
@@ -189,9 +206,9 @@ export default function Inventory() {
   }
 
   const totalItems = inventoryItems.length
-  const totalInStock = inventoryItems.reduce((sum, item) => sum + item.inStock, 0)
-  const totalIncoming = inventoryItems.reduce((sum, item) => sum + item.incoming, 0)
-  const outOfStockItems = inventoryItems.filter((item) => item.inStock === 0).length
+  const totalInStock = inventoryItems.reduce((sum, item) => sum + (item.inStock ?? 0), 0)
+  const totalIncoming = inventoryItems.reduce((sum, item) => sum + (item.incoming ?? 0), 0)
+  const outOfStockItems = inventoryItems.filter((item) => (item.inStock ?? 0) === 0).length
 
   const filteredItems = inventoryItems.filter(
     (item) =>
@@ -200,8 +217,8 @@ export default function Inventory() {
   )
 
   const lowStockItems = inventoryItems.filter((item) => {
-    const available = item.inStock - item.reserved
-    return available <= 10 || item.inStock === 0
+    const available = (item.inStock ?? 0) - (item.reserved ?? 0)
+    return available <= 10 || (item.inStock ?? 0) === 0
   })
 
   return (
@@ -384,29 +401,32 @@ export default function Inventory() {
               <TableBody>
                 {filteredItems.map((item) => {
                   const stockInfo = getStockStatus(item.inStock, item.incoming)
-                  const available = item.inStock - item.reserved
-                  const unitCost = dataStore.getInventoryUnitCost(item.sku)
+                  const available = (item.inStock ?? 0) - (item.reserved ?? 0)
+                  const rawUnitCost = dataStore.getInventoryUnitCost(item.sku)
+                  const unitCost = Number.isFinite(rawUnitCost) ? rawUnitCost : 0
                   return (
                     <TableRow key={item.sku}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.name}</TableCell>
                       <TableCell>
                         <div className="flex items-center space-x-2">
-                          <span className={item.inStock === 0 ? "text-red-600" : ""}>{item.inStock}</span>
-                          {item.inStock === 0 && <AlertTriangle className="h-4 w-4 text-red-500" />}
+                          <span className={item.inStock === 0 ? "text-red-600" : ""}>
+                            {(item.inStock ?? 0).toLocaleString()}
+                          </span>
+                          {(item.inStock ?? 0) === 0 && <AlertTriangle className="h-4 w-4 text-red-500" />}
                         </div>
                       </TableCell>
                       <TableCell>
                         <span className={item.incoming > 0 ? "text-blue-600 font-medium" : "text-muted-foreground"}>
-                          {item.incoming}
+                          {(item.incoming ?? 0).toLocaleString()}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className="text-orange-600">{item.reserved}</span>
+                        <span className="text-orange-600">{(item.reserved ?? 0).toLocaleString()}</span>
                       </TableCell>
                       <TableCell>
                         <span className={available <= 0 ? "text-red-600 font-medium" : "text-green-600 font-medium"}>
-                          {available}
+                          {available.toLocaleString()}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -421,7 +441,7 @@ export default function Inventory() {
                           size="sm"
                           onClick={() => {
                             setSelectedItem(item)
-                            setEditQuantity(item.inStock.toString())
+                            setEditQuantity((item.inStock ?? 0).toString())
                             setIsEditQuantityOpen(true)
                           }}
                         >
@@ -460,7 +480,7 @@ export default function Inventory() {
                 <p>Current: {selectedItem?.inStock} units</p>
                 <p>Reserved: {selectedItem?.reserved} units</p>
                 <p>
-                  Available after change: {(Number.parseInt(editQuantity) || 0) - (selectedItem?.reserved || 0)} units
+                  Available after change: {(Number.parseInt(editQuantity) || 0) - (selectedItem?.reserved ?? 0)} units
                 </p>
               </div>
             </div>
@@ -498,7 +518,7 @@ export default function Inventory() {
                   </TableHeader>
                   <TableBody>
                     {lowStockItems.map((item) => {
-                      const available = item.inStock - item.reserved
+                      const available = (item.inStock ?? 0) - (item.reserved ?? 0)
                       const stockInfo = getStockStatus(item.inStock, item.incoming)
                       const suggestedReorder = Math.max(50 - available, 20)
 
@@ -506,9 +526,9 @@ export default function Inventory() {
                         <TableRow key={item.sku}>
                           <TableCell className="font-medium">{item.sku}</TableCell>
                           <TableCell>{item.name}</TableCell>
-                          <TableCell>{item.inStock}</TableCell>
+                          <TableCell>{(item.inStock ?? 0).toLocaleString()}</TableCell>
                           <TableCell className={available <= 0 ? "text-red-600 font-medium" : ""}>
-                            {available}
+                            {available.toLocaleString()}
                           </TableCell>
                           <TableCell>
                             <Badge className={stockInfo.color}>{stockInfo.status}</Badge>

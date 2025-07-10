@@ -29,7 +29,8 @@ import {
   Settings,
   AlertCircle,
 } from "lucide-react"
-import { dataStore, type ShopifyOrder, type ShopifyStore } from "@/lib/store"
+import { supabaseStore, type ShopifyOrder, type ShopifyStore } from "@/lib/supabase-store"
+// import { dataStore } from "@/lib/data-store" // Declare dataStore variable
 
 export default function ShopifyOrders() {
   const [orders, setOrders] = useState<ShopifyOrder[]>([])
@@ -41,8 +42,19 @@ export default function ShopifyOrders() {
 
   // Load data on component mount
   useEffect(() => {
-    setOrders(dataStore.getShopifyOrders())
-    setStores(dataStore.getShopifyStores())
+    const loadData = async () => {
+      try {
+        const [ordersData, storesData] = await Promise.all([
+          supabaseStore.getShopifyOrders(),
+          supabaseStore.getShopifyStores(),
+        ])
+        setOrders(ordersData)
+        setStores(storesData)
+      } catch (error) {
+        console.error("Error loading data:", error)
+      }
+    }
+    loadData()
   }, [])
 
   const handleExport = () => {
@@ -105,28 +117,33 @@ export default function ShopifyOrders() {
       for (const store of connectedStores) {
         try {
           // Update store status to show syncing
-          dataStore.updateShopifyStore(store.id, { status: "Testing" })
-          setStores(dataStore.getShopifyStores())
+          await supabaseStore.updateShopifyStore(store.id, { status: "Testing" })
+          const freshStores1 = await supabaseStore.getShopifyStores()
+          setStores(freshStores1)
 
           // Sync orders from this store
           const newOrders = await syncStoreOrders(store)
           totalNewOrders += newOrders.length
 
           // Update store with successful sync
-          dataStore.updateShopifyStore(store.id, {
+          await supabaseStore.updateShopifyStore(store.id, {
             status: "Connected",
             lastSync: "Just now",
             totalOrders: store.totalOrders + newOrders.length,
           })
+          const freshStores2 = await supabaseStore.getShopifyStores()
+          setStores(freshStores2)
         } catch (error) {
           console.error(`Failed to sync orders for ${store.name}:`, error)
-          dataStore.updateShopifyStore(store.id, { status: "Error" })
+          await supabaseStore.updateShopifyStore(store.id, { status: "Error" })
+          const freshStores3 = await supabaseStore.getShopifyStores()
+          setStores(freshStores3)
         }
       }
 
       // Refresh data
-      setOrders(dataStore.getShopifyOrders())
-      setStores(dataStore.getShopifyStores())
+      setOrders(await supabaseStore.getShopifyOrders())
+      setStores(await supabaseStore.getShopifyStores())
 
       alert(`Successfully synced ${totalNewOrders} new orders from ${connectedStores.length} stores`)
     } catch (error) {
@@ -144,28 +161,32 @@ export default function ShopifyOrders() {
     setIsSyncing(true)
     try {
       // Update store status to show syncing
-      dataStore.updateShopifyStore(storeId, { status: "Testing" })
-      setStores(dataStore.getShopifyStores())
+      await supabaseStore.updateShopifyStore(storeId, { status: "Testing" })
+      const freshStores1 = await supabaseStore.getShopifyStores()
+      setStores(freshStores1)
 
       // Sync orders
       const newOrders = await syncStoreOrders(store)
 
       // Update store with new sync time and order count
-      dataStore.updateShopifyStore(storeId, {
+      await supabaseStore.updateShopifyStore(storeId, {
         status: "Connected",
         lastSync: "Just now",
         totalOrders: store.totalOrders + newOrders.length,
       })
+      const freshStores2 = await supabaseStore.getShopifyStores()
+      setStores(freshStores2)
 
       // Refresh data
-      setOrders(dataStore.getShopifyOrders())
-      setStores(dataStore.getShopifyStores())
+      setOrders(await supabaseStore.getShopifyOrders())
+      setStores(await supabaseStore.getShopifyStores())
 
       alert(`Successfully synced ${newOrders.length} new orders from ${store.name}`)
     } catch (error) {
       console.error("Sync failed:", error)
-      dataStore.updateShopifyStore(storeId, { status: "Error" })
-      setStores(dataStore.getShopifyStores())
+      await supabaseStore.updateShopifyStore(storeId, { status: "Error" })
+      const freshStores3 = await supabaseStore.getShopifyStores()
+      setStores(freshStores3)
       alert("Failed to sync orders. Please check your store connection.")
     } finally {
       setIsSyncing(false)
@@ -188,43 +209,33 @@ export default function ShopifyOrders() {
 
       // Transform Shopify orders to our format
       const transformedOrders = data.orders.map((shopifyOrder: any) => ({
-        storeId: store.id,
-        storeName: store.name,
-        shopifyOrderId: shopifyOrder.id.toString(),
-        orderNumber: shopifyOrder.order_number || shopifyOrder.name,
-        customerName: shopifyOrder.customer
+        store_id: store.id,
+        shopify_order_id: shopifyOrder.id.toString(),
+        order_number: shopifyOrder.order_number || shopifyOrder.name,
+        customer_name: shopifyOrder.customer
           ? `${shopifyOrder.customer.first_name || ""} ${shopifyOrder.customer.last_name || ""}`.trim()
           : "Unknown Customer",
-        customerEmail: shopifyOrder.email || shopifyOrder.customer?.email || "",
-        orderDate: shopifyOrder.created_at,
+        customer_email: shopifyOrder.email || shopifyOrder.customer?.email || "",
+        order_date: shopifyOrder.created_at,
         status: shopifyOrder.fulfillment_status || "unfulfilled",
-        totalAmount: Number.parseFloat(shopifyOrder.total_price || "0"),
-        shippingCost: Number.parseFloat(shopifyOrder.shipping_lines?.[0]?.price || "0"),
-        taxAmount: Number.parseFloat(shopifyOrder.total_tax || "0"),
+        total_amount: Number.parseFloat(shopifyOrder.total_price || "0"),
+        shipping_cost: Number.parseFloat(shopifyOrder.shipping_lines?.[0]?.price || "0"),
+        tax_amount: Number.parseFloat(shopifyOrder.total_tax || "0"),
         items:
           shopifyOrder.line_items?.map((item: any, index: number) => ({
-            id: `item-${shopifyOrder.id}-${index}`,
             sku: item.sku || `unknown-${item.id}`,
-            productName: item.title || item.name,
+            product_name: item.title || item.name,
             quantity: item.quantity,
-            unitPrice: Number.parseFloat(item.price || "0"),
-            totalPrice: Number.parseFloat(item.price || "0") * item.quantity,
+            unit_price: Number.parseFloat(item.price || "0"),
+            total_price: Number.parseFloat(item.price || "0") * item.quantity,
           })) || [],
-        shippingAddress: shopifyOrder.shipping_address
+        shipping_address: shopifyOrder.shipping_address
           ? `${shopifyOrder.shipping_address.address1 || ""}, ${shopifyOrder.shipping_address.city || ""}, ${shopifyOrder.shipping_address.province || ""} ${shopifyOrder.shipping_address.zip || ""}`.trim()
           : "No address provided",
-        profit: 0, // Will be calculated
       }))
 
-      // Calculate profit for each order
-      transformedOrders.forEach((order: any) => {
-        order.profit = dataStore.calculateOrderProfit(order)
-      })
-
-      // Add orders to store
-      const newOrders = dataStore.addShopifyOrders(transformedOrders)
+      const newOrders = await supabaseStore.addShopifyOrders(transformedOrders)
       console.log(`Added ${newOrders.length} new orders from ${store.name}`)
-
       return newOrders
     } catch (err) {
       console.error("Order sync failed:", err)
@@ -544,10 +555,10 @@ export default function ShopifyOrders() {
                                         {selectedOrder.items.map((item, index) => (
                                           <TableRow key={index}>
                                             <TableCell>{item.sku}</TableCell>
-                                            <TableCell>{item.productName}</TableCell>
+                                            <TableCell>{item.product_name}</TableCell>
                                             <TableCell>{item.quantity}</TableCell>
-                                            <TableCell>${item.unitPrice.toFixed(2)}</TableCell>
-                                            <TableCell>${item.totalPrice.toFixed(2)}</TableCell>
+                                            <TableCell>${item.unit_price.toFixed(2)}</TableCell>
+                                            <TableCell>${item.total_price.toFixed(2)}</TableCell>
                                           </TableRow>
                                         ))}
                                       </TableBody>
@@ -558,7 +569,7 @@ export default function ShopifyOrders() {
                                 <div className="grid grid-cols-2 gap-4">
                                   <div>
                                     <Label className="text-sm font-medium">Shipping Address</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedOrder.shippingAddress}</p>
+                                    <p className="text-sm text-muted-foreground">{selectedOrder.shipping_address}</p>
                                   </div>
                                   <div className="space-y-2">
                                     <div className="flex justify-between">
@@ -566,23 +577,23 @@ export default function ShopifyOrders() {
                                       <span>
                                         $
                                         {(
-                                          selectedOrder.totalAmount -
-                                          selectedOrder.shippingCost -
-                                          selectedOrder.taxAmount
+                                          selectedOrder.total_amount -
+                                          selectedOrder.shipping_cost -
+                                          selectedOrder.tax_amount
                                         ).toFixed(2)}
                                       </span>
                                     </div>
                                     <div className="flex justify-between">
                                       <span>Shipping:</span>
-                                      <span>${selectedOrder.shippingCost.toFixed(2)}</span>
+                                      <span>${selectedOrder.shipping_cost.toFixed(2)}</span>
                                     </div>
                                     <div className="flex justify-between">
                                       <span>Tax:</span>
-                                      <span>${selectedOrder.taxAmount.toFixed(2)}</span>
+                                      <span>${selectedOrder.tax_amount.toFixed(2)}</span>
                                     </div>
                                     <div className="flex justify-between font-medium">
                                       <span>Total:</span>
-                                      <span>${selectedOrder.totalAmount.toFixed(2)}</span>
+                                      <span>${selectedOrder.total_amount.toFixed(2)}</span>
                                     </div>
                                     <div className="flex justify-between text-green-600 font-medium">
                                       <span>Profit:</span>

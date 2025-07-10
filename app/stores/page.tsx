@@ -32,7 +32,8 @@ import {
   AlertCircle,
   ExternalLink,
 } from "lucide-react"
-import { dataStore, type ShopifyStore } from "@/lib/store"
+import { supabaseStore, type ShopifyStore } from "@/lib/supabase-store"
+// import { dataStore } from "@/lib/data-store" // Declare the dataStore variable
 
 export default function Stores() {
   const [stores, setStores] = useState<ShopifyStore[]>([])
@@ -51,7 +52,15 @@ export default function Stores() {
 
   // Load data on component mount
   useEffect(() => {
-    setStores(dataStore.getShopifyStores())
+    const loadData = async () => {
+      try {
+        const stores = await supabaseStore.getShopifyStores()
+        setStores(stores)
+      } catch (error) {
+        console.error("Error loading stores:", error)
+      }
+    }
+    loadData()
   }, [])
 
   const handleCreateStore = async () => {
@@ -63,18 +72,16 @@ export default function Stores() {
       if (isValid) {
         const newStoreData = {
           name: formData.name,
-          shopifyDomain: formData.shopifyDomain,
-          accessToken: formData.accessToken,
+          shopify_domain: formData.shopifyDomain,
+          access_token: formData.accessToken,
           status: "Connected" as const,
-          lastSync: "Never",
-          totalOrders: 0,
-          monthlyRevenue: 0,
-          webhookUrl: formData.webhookUrl,
+          webhook_url: formData.webhookUrl,
           notes: formData.notes,
         }
 
-        const newStore = dataStore.createShopifyStore(newStoreData)
-        setStores(dataStore.getShopifyStores())
+        const newStore = await supabaseStore.createShopifyStore(newStoreData)
+        const updatedStores = await supabaseStore.getShopifyStores()
+        setStores(updatedStores)
         setIsNewStoreOpen(false)
         setFormData({ name: "", shopifyDomain: "", accessToken: "", webhookUrl: "", notes: "" })
         alert(`Store "${newStore.name}" added successfully!`)
@@ -99,20 +106,26 @@ export default function Stores() {
       if (isValid) {
         const updates = {
           name: formData.name,
-          shopifyDomain: formData.shopifyDomain,
-          accessToken: formData.accessToken,
-          webhookUrl: formData.webhookUrl,
+          shopify_domain: formData.shopifyDomain,
+          access_token: formData.accessToken,
+          webhook_url: formData.webhookUrl,
           notes: formData.notes,
           status: "Connected" as const,
         }
 
-        const updatedStore = dataStore.updateShopifyStore(selectedStore.id, updates)
-        if (updatedStore) {
-          setStores(dataStore.getShopifyStores())
-          setIsEditStoreOpen(false)
-          setSelectedStore(null)
-          alert(`Store "${updatedStore.name}" updated successfully!`)
-        }
+        // const updatedStore = dataStore.updateShopifyStore(selectedStore.id, updates)
+        // if (updatedStore) {
+        //   setStores(dataStore.getShopifyStores())
+        //   setIsEditStoreOpen(false)
+        //   setSelectedStore(null)
+        //   alert(`Store "${updatedStore.name}" updated successfully!`)
+        // }
+        await supabaseStore.updateShopifyStore(selectedStore.id, updates)
+        const refreshed = await supabaseStore.getShopifyStores()
+        setStores(refreshed)
+        setIsEditStoreOpen(false)
+        setSelectedStore(null)
+        alert(`Store "${formData.name}" updated successfully!`)
       } else {
         alert("Failed to connect to Shopify store. Please check your credentials.")
       }
@@ -148,26 +161,27 @@ export default function Stores() {
     if (!store) return
 
     try {
-      // Update store status to show syncing
-      dataStore.updateShopifyStore(storeId, { status: "Testing" })
-      setStores(dataStore.getShopifyStores())
+      await supabaseStore.updateShopifyStore(storeId, { status: "Testing" })
+      const updatedStores = await supabaseStore.getShopifyStores()
+      setStores(updatedStores)
 
-      // Sync orders
-      const orders = await syncShopifyOrders(store.shopifyDomain, store.accessToken)
+      const orders = await syncShopifyOrders(store.shopify_domain, store.access_token)
 
-      // Update store with new sync time and order count
-      dataStore.updateShopifyStore(storeId, {
+      await supabaseStore.updateShopifyStore(storeId, {
         status: "Connected",
-        lastSync: "Just now",
-        totalOrders: store.totalOrders + orders.length,
+        last_sync: new Date().toISOString(),
+        total_orders: store.total_orders + orders.length,
       })
-      setStores(dataStore.getShopifyStores())
+
+      const finalStores = await supabaseStore.getShopifyStores()
+      setStores(finalStores)
 
       alert(`Successfully synced ${orders.length} orders from ${store.name}`)
     } catch (error) {
       console.error("Sync failed:", error)
-      dataStore.updateShopifyStore(storeId, { status: "Error" })
-      setStores(dataStore.getShopifyStores())
+      await supabaseStore.updateShopifyStore(storeId, { status: "Error" })
+      const errorStores = await supabaseStore.getShopifyStores()
+      setStores(errorStores)
       alert("Failed to sync orders. Please check your store connection.")
     }
   }
@@ -193,16 +207,20 @@ export default function Stores() {
     }
   }
 
-  const handleDeleteStore = (storeId: string) => {
+  const handleDeleteStore = async (storeId: string) => {
     const store = stores.find((s) => s.id === storeId)
     if (!store) return
 
     if (confirm(`Are you sure you want to delete "${store.name}"? This action cannot be undone.`)) {
-      const success = dataStore.deleteShopifyStore(storeId)
-      if (success) {
-        setStores(dataStore.getShopifyStores())
-        alert(`Store "${store.name}" deleted successfully.`)
-      }
+      // const success = dataStore.deleteShopifyStore(storeId)
+      // if (success) {
+      //   setStores(dataStore.getShopifyStores())
+      //   alert(`Store "${store.name}" deleted successfully.`)
+      // }
+      await supabaseStore.deleteShopifyStore(storeId)
+      const refreshed = await supabaseStore.getShopifyStores()
+      setStores(refreshed)
+      alert(`Store "${store.name}" deleted successfully.`)
     }
   }
 
