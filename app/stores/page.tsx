@@ -165,12 +165,12 @@ export default function Stores() {
       const updatedStores = await supabaseStore.getShopifyStores()
       setStores(updatedStores)
 
-      const orders = await syncShopifyOrders(store.shopify_domain, store.access_token)
+      const orders = await syncShopifyOrders(store.shopifyDomain, store.accessToken)
 
       await supabaseStore.updateShopifyStore(storeId, {
         status: "Connected",
-        last_sync: new Date().toISOString(),
-        total_orders: store.total_orders + orders.length,
+        lastSync: new Date().toISOString(),
+        totalOrders: store.totalOrders + orders.length,
       })
 
       const finalStores = await supabaseStore.getShopifyStores()

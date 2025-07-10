@@ -5,10 +5,11 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, Plus, Package, DollarSign, TrendingUp, Calendar, Trash2, Eye } from "lucide-react"
+import { Search, Plus, Package, DollarSign, TrendingUp, Calendar, Trash2, Eye, Download, Edit } from "lucide-react"
 import { supabaseStore, type PurchaseOrder } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
@@ -85,6 +86,81 @@ export default function PurchaseOrders() {
     }
   }
 
+  const handleEditPO = async () => {
+    if (!editingPO) return
+
+    // Validate form data
+    if (!formData.supplier || !formData.poDate) {
+      alert("Please fill in required fields (Supplier and PO Date)")
+      return
+    }
+
+    try {
+      // Prepare items data - filter out empty items
+      const validItems = poItems
+        .filter((item) => item.sku.trim() && item.productName.trim())
+        .map((item) => ({
+          sku: item.sku.trim(),
+          product_name: item.productName.trim(),
+          quantity: Number.parseInt(item.quantity) || 0,
+          unit_cost: Number.parseFloat(item.unitCost) || 0,
+        }))
+
+      const updateData = {
+        supplier_name: formData.supplier,
+        po_date: formData.poDate,
+        delivery_cost: Number.parseFloat(formData.deliveryCost) || 0,
+        notes: formData.notes,
+        items: validItems,
+      }
+
+      console.log("Updating PO with data:", updateData)
+
+      await supabaseStore.updatePurchaseOrderWithItems(editingPO.id, updateData)
+
+      // Refresh the purchase orders list
+      const updatedPOs = await supabaseStore.getPurchaseOrders()
+      setPurchaseOrders(updatedPOs)
+
+      // Reset form and close dialog
+      setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
+      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
+      setIsEditPOOpen(false)
+      setEditingPO(null)
+
+      alert(`Purchase Order ${editingPO.po_number} updated successfully!`)
+    } catch (error) {
+      console.error("Error updating purchase order:", error)
+      alert("Error updating purchase order. Please try again.")
+    }
+  }
+
+  const openEditDialog = (po: PurchaseOrder) => {
+    setEditingPO(po)
+    setFormData({
+      supplier: po.supplier_name,
+      poDate: po.po_date,
+      deliveryCost: po.delivery_cost.toString(),
+      notes: po.notes || "",
+    })
+
+    // Populate items for editing
+    const editItems = po.items.map((item) => ({
+      sku: item.sku,
+      productName: item.product_name,
+      quantity: item.quantity.toString(),
+      unitCost: item.unit_cost.toString(),
+    }))
+
+    // Ensure at least one empty row
+    if (editItems.length === 0) {
+      editItems.push({ sku: "", productName: "", quantity: "", unitCost: "" })
+    }
+
+    setPoItems(editItems)
+    setIsEditPOOpen(true)
+  }
+
   const handleUpdateStatus = async (po: PurchaseOrder, newStatus: PurchaseOrder["status"]) => {
     try {
       await supabaseStore.updatePurchaseOrder(po.id, { status: newStatus })
@@ -152,6 +228,66 @@ export default function PurchaseOrders() {
     },
     { totalOrders: 0, totalItems: 0, totalValue: 0, deliveredOrders: 0 },
   )
+
+  const handleExportPO = (po: PurchaseOrder) => {
+    const { itemCount, totalCost } = calculateOrderStats(po)
+    const shippingCostPerLineItem = po.items.length > 0 ? po.delivery_cost / po.items.length : 0
+
+    // Create CSV content with headers
+    const csvContent = [
+      // PO Header Information
+      ["Purchase Order Export"],
+      [""],
+      ["PO Number", po.po_number],
+      ["Supplier", po.supplier_name],
+      ["Date", new Date(po.po_date).toLocaleDateString()],
+      ["Status", po.status],
+      ["Delivery Cost", `$${po.delivery_cost.toFixed(2)}`],
+      ["Total Cost", `$${totalCost.toFixed(2)}`],
+      ["Notes", po.notes || ""],
+      [""],
+      // Items Header
+      ["Items"],
+      ["SKU", "Product Name", "Quantity", "Unit Cost", "Shipping/Unit", "Total Unit Cost", "Line Total"],
+      // Items Data
+      ...po.items.map((item) => [
+        item.sku,
+        item.product_name,
+        item.quantity.toString(),
+        `$${item.unit_cost.toFixed(2)}`,
+        `$${(shippingCostPerLineItem / item.quantity).toFixed(2)}`,
+        `$${(item.unit_cost + shippingCostPerLineItem / item.quantity).toFixed(2)}`,
+        `$${item.total_cost.toFixed(2)}`,
+      ]),
+      [""],
+      // Summary
+      ["Summary"],
+      ["Total Items", itemCount.toString()],
+      ["Total Quantity", po.items.reduce((sum, item) => sum + item.quantity, 0).toString()],
+      ["Subtotal", `$${po.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)}`],
+      ["Delivery Cost", `$${po.delivery_cost.toFixed(2)}`],
+      [
+        "Shipping Cost Per Unit",
+        `$${(shippingCostPerLineItem / po.items.reduce((sum, item) => sum + item.quantity, 0)).toFixed(2)}`,
+      ],
+      ["Grand Total", `$${totalCost.toFixed(2)}`],
+    ]
+
+    // Convert to CSV string
+    const csvString = csvContent.map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
+
+    // Create and download file
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `PO_${po.po_number}_${new Date().toISOString().split("T")[0]}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
 
   if (loading) {
     return (
@@ -263,7 +399,7 @@ export default function PurchaseOrders() {
                 <TableHead className="w-[80px]">Status</TableHead>
                 <TableHead className="w-[60px] text-right">Items</TableHead>
                 <TableHead className="w-[100px] text-right">Total</TableHead>
-                <TableHead className="w-[120px] text-right">Actions</TableHead>
+                <TableHead className="w-[160px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -285,6 +421,8 @@ export default function PurchaseOrders() {
               ) : (
                 filteredOrders.map((po) => {
                   const { itemCount, totalCost } = calculateOrderStats(po)
+                  const isEditable = po.status.toLowerCase() !== "delivered"
+
                   return (
                     <TableRow key={po.id} className="h-12">
                       <TableCell className="font-medium">{po.po_number}</TableCell>
@@ -296,7 +434,28 @@ export default function PurchaseOrders() {
                       <TableCell className="text-right">{itemCount}</TableCell>
                       <TableCell className="text-right font-medium">${totalCost.toFixed(2)}</TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex justify-end gap-1 items-center">
+                          <Select
+                            value={po.status}
+                            onValueChange={(newStatus) => handleUpdateStatus(po, newStatus as PurchaseOrder["status"])}
+                          >
+                            <SelectTrigger className="w-[110px] h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Draft">Draft</SelectItem>
+                              <SelectItem value="Pending">Pending</SelectItem>
+                              <SelectItem value="In Transit">In Transit</SelectItem>
+                              <SelectItem value="Delivered">Delivered</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          {isEditable && (
+                            <Button variant="ghost" size="sm" onClick={() => openEditDialog(po)} title="Edit PO">
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          )}
+
                           <Button
                             variant="ghost"
                             size="sm"
@@ -304,24 +463,13 @@ export default function PurchaseOrders() {
                               setSelectedPO(po)
                               setIsViewPOOpen(true)
                             }}
+                            title="View Details"
                           >
                             <Eye className="w-4 h-4" />
                           </Button>
-                          {po.status === "Draft" && (
-                            <Button variant="ghost" size="sm" onClick={() => handleUpdateStatus(po, "Pending")}>
-                              Submit
-                            </Button>
-                          )}
-                          {po.status === "Pending" && (
-                            <Button variant="ghost" size="sm" onClick={() => handleUpdateStatus(po, "In Transit")}>
-                              Ship
-                            </Button>
-                          )}
-                          {po.status === "In Transit" && (
-                            <Button variant="ghost" size="sm" onClick={() => handleUpdateStatus(po, "Delivered")}>
-                              Deliver
-                            </Button>
-                          )}
+                          <Button variant="ghost" size="sm" onClick={() => handleExportPO(po)} title="Export PO">
+                            <Download className="w-4 h-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -337,7 +485,17 @@ export default function PurchaseOrders() {
       <Dialog open={isViewPOOpen} onOpenChange={setIsViewPOOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Purchase Order Details - {selectedPO?.po_number}</DialogTitle>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle>Purchase Order Details - {selectedPO?.po_number}</DialogTitle>
+              </div>
+              {selectedPO && (
+                <Button variant="outline" size="sm" onClick={() => handleExportPO(selectedPO)}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </Button>
+              )}
+            </div>
           </DialogHeader>
           {selectedPO && (
             <div className="space-y-4">
@@ -376,19 +534,31 @@ export default function PurchaseOrders() {
                       <TableHead>Product</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Unit Cost</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Shipping/Unit</TableHead>
+                      <TableHead className="text-right">Total Unit Cost</TableHead>
+                      <TableHead className="text-right">Line Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {selectedPO.items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                        <TableCell>{item.product_name}</TableCell>
-                        <TableCell className="text-right">{item.quantity}</TableCell>
-                        <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">${item.total_cost.toFixed(2)}</TableCell>
-                      </TableRow>
-                    ))}
+                    {selectedPO.items.map((item) => {
+                      // Calculate shipping cost per line item (equal distribution)
+                      const shippingCostPerLineItem =
+                        selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
+                      const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
+                      const totalUnitCost = item.unit_cost + shippingCostPerUnit
+
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                          <TableCell>{item.product_name}</TableCell>
+                          <TableCell className="text-right">{item.quantity}</TableCell>
+                          <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">${shippingCostPerUnit.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-medium">${totalUnitCost.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">${item.total_cost.toFixed(2)}</TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -553,6 +723,166 @@ export default function PurchaseOrders() {
               Cancel
             </Button>
             <Button onClick={handleCreatePO}>Create PO</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit PO Dialog */}
+      <Dialog open={isEditPOOpen} onOpenChange={setIsEditPOOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Purchase Order - {editingPO?.po_number}</DialogTitle>
+            <DialogDescription>Modify purchase order details and items</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label htmlFor="edit-supplier">Supplier *</label>
+                <Input
+                  id="edit-supplier"
+                  placeholder="Supplier name"
+                  value={formData.supplier}
+                  onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="edit-po-date">PO Date *</label>
+                <Input
+                  id="edit-po-date"
+                  type="date"
+                  value={formData.poDate}
+                  onChange={(e) => setFormData({ ...formData, poDate: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="edit-delivery-cost">Delivery Cost</label>
+              <Input
+                id="edit-delivery-cost"
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={formData.deliveryCost}
+                onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
+              />
+            </div>
+
+            {/* PO Items Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-base font-medium">Purchase Order Items</label>
+                <Button type="button" variant="outline" size="sm" onClick={addPoItem}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Item
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {poItems.map((item, index) => (
+                  <div key={index} className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-3">
+                      <label className="text-xs">SKU</label>
+                      <Input
+                        placeholder="SKU"
+                        value={item.sku}
+                        onChange={(e) => updatePoItem(index, "sku", e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-4">
+                      <label className="text-xs">Product Name</label>
+                      <Input
+                        placeholder="Product name"
+                        value={item.productName}
+                        onChange={(e) => updatePoItem(index, "productName", e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-xs">Quantity</label>
+                      <Input
+                        type="number"
+                        placeholder="Qty"
+                        value={item.quantity}
+                        onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-xs">Unit Cost</label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={item.unitCost}
+                        onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removePoItem(index)}
+                        disabled={poItems.length === 1}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Total Preview */}
+              <div className="bg-muted p-3 rounded-lg">
+                <div className="flex justify-between text-sm">
+                  <span>Items Total:</span>
+                  <span>
+                    $
+                    {poItems
+                      .reduce((sum, item) => {
+                        const qty = Number.parseFloat(item.quantity) || 0
+                        const cost = Number.parseFloat(item.unitCost) || 0
+                        return sum + qty * cost
+                      }, 0)
+                      .toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Delivery Cost:</span>
+                  <span>${Number.parseFloat(formData.deliveryCost || "0").toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-medium border-t pt-2 mt-2">
+                  <span>Total:</span>
+                  <span>
+                    $
+                    {(
+                      poItems.reduce((sum, item) => {
+                        const qty = Number.parseFloat(item.quantity) || 0
+                        const cost = Number.parseFloat(item.unitCost) || 0
+                        return sum + qty * cost
+                      }, 0) + Number.parseFloat(formData.deliveryCost || "0")
+                    ).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="edit-notes">Notes</label>
+              <Input
+                id="edit-notes"
+                placeholder="Additional notes..."
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => setIsEditPOOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditPO}>Update PO</Button>
           </div>
         </DialogContent>
       </Dialog>
