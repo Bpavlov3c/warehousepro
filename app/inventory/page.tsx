@@ -1,11 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import type React from "react"
+
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
@@ -17,13 +15,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Package, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Package, TrendingUp, TrendingDown, AlertTriangle, Plus, Edit, Download, Search, Filter } from "lucide-react"
 import { supabaseStore, type InventoryItem } from "@/lib/supabase-store"
 
 export default function Inventory() {
+  /* ------------------------------------------------------------------ */
+  /*                            state / refs                            */
+  /* ------------------------------------------------------------------ */
+
   const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [filteredInventory, setFilteredInventory] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
+
+  const [searchTerm, setSearchTerm] = useState("")
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
+
   const [newItem, setNewItem] = useState({
     sku: "",
     name: "",
@@ -31,30 +45,58 @@ export default function Inventory() {
     unitCost: "",
   })
 
+  const [editItem, setEditItem] = useState({
+    sku: "",
+    name: "",
+    quantity: "",
+    unitCost: "",
+  })
+
+  /* ------------------------------------------------------------------ */
+  /*                         lifecycle / handlers                       */
+  /* ------------------------------------------------------------------ */
+
+  // initial load
   useEffect(() => {
     loadInventory()
   }, [])
 
-  const loadInventory = async () => {
+  // filter whenever inventory or search term changes
+  useEffect(() => {
+    const lower = searchTerm.toLowerCase()
+    setFilteredInventory(
+      inventory.filter((item) => item.sku.toLowerCase().includes(lower) || item.name.toLowerCase().includes(lower)),
+    )
+  }, [inventory, searchTerm])
+
+  async function loadInventory() {
     try {
       setLoading(true)
       const data = await supabaseStore.getInventory()
-      console.log("Loaded inventory data:", data)
       setInventory(data)
-    } catch (error) {
-      console.error("Error loading inventory:", error)
+    } catch (err) {
+      console.error("Error loading inventory", err)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleAddItem = async () => {
+  /* ------------------------- add / edit logic ----------------------- */
+
+  async function handleAddItem() {
     try {
       const quantity = Number.parseInt(newItem.quantity)
       const unitCost = Number.parseFloat(newItem.unitCost)
 
-      if (!newItem.sku || !newItem.name || isNaN(quantity) || isNaN(unitCost)) {
-        alert("Please fill in all fields with valid values")
+      if (
+        !newItem.sku ||
+        !newItem.name ||
+        Number.isNaN(quantity) ||
+        Number.isNaN(unitCost) ||
+        quantity <= 0 ||
+        unitCost <= 0
+      ) {
+        alert("Please enter valid values for all required fields")
         return
       }
 
@@ -67,190 +109,248 @@ export default function Inventory() {
 
       setNewItem({ sku: "", name: "", quantity: "", unitCost: "" })
       setIsAddDialogOpen(false)
-      loadInventory()
-    } catch (error) {
-      console.error("Error adding inventory item:", error)
-      alert("Error adding inventory item")
+      await loadInventory()
+      alert("Item added!")
+    } catch (err) {
+      console.error("Add item error", err)
+      alert("Unable to add inventory item")
     }
   }
 
-  const getStockStatus = (item: InventoryItem) => {
-    const totalStock = item.inStock + item.incoming
-    if (totalStock === 0) return { status: "Out of Stock", color: "destructive" }
-    if (item.inStock <= 10) return { status: "Low Stock", color: "warning" }
-    return { status: "In Stock", color: "default" }
+  async function handleEditItem() {
+    if (!selectedItem) return
+
+    try {
+      const quantity = Number.parseInt(editItem.quantity)
+      const unitCost = Number.parseFloat(editItem.unitCost)
+
+      if (!editItem.name || Number.isNaN(quantity) || Number.isNaN(unitCost) || quantity < 0 || unitCost <= 0) {
+        alert("Please enter valid values")
+        return
+      }
+
+      // difference to apply (positive or negative)
+      const deltaQty = quantity - selectedItem.inStock
+
+      // we treat edits as manual adjustments
+      await supabaseStore.addManualInventory({
+        sku: editItem.sku,
+        name: editItem.name,
+        quantity: deltaQty,
+        unitCost,
+      })
+
+      setIsEditDialogOpen(false)
+      setSelectedItem(null)
+      await loadInventory()
+      alert("Item updated!")
+    } catch (err) {
+      console.error("Edit item error", err)
+      alert("Unable to update inventory item")
+    }
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount)
+  function openEditDialog(item: InventoryItem) {
+    setSelectedItem(item)
+    setEditItem({
+      sku: item.sku,
+      name: item.name,
+      quantity: item.inStock.toString(),
+      unitCost: item.unitCost.toString(),
+    })
+    setIsEditDialogOpen(true)
   }
 
-  // Calculate summary stats
+  /* ---------------------------- export CSV -------------------------- */
+
+  function handleExport() {
+    try {
+      const headers = [
+        "SKU",
+        "Product Name",
+        "In Stock",
+        "Incoming",
+        "Reserved",
+        "Available",
+        "Unit Cost",
+        "Total Value",
+        "Status",
+      ]
+
+      const rows = filteredInventory.map((item) => {
+        const available = item.inStock - item.reserved
+        const status = getStockStatus(item).status
+        const totalValue = item.inStock * item.unitCost
+
+        return [
+          item.sku,
+          item.name,
+          item.inStock.toString(),
+          item.incoming.toString(),
+          item.reserved.toString(),
+          available.toString(),
+          item.unitCost.toFixed(2),
+          totalValue.toFixed(2),
+          status,
+        ]
+      })
+
+      const csv = [headers, ...rows].map((row) => row.map((f) => `"${f}"`).join(",")).join("\n") + "\n"
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+      const url = URL.createObjectURL(blob)
+
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `inventory_${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Export error", err)
+      alert("Could not export CSV")
+    }
+  }
+
+  /* -------------------------- helpers / utils ----------------------- */
+
+  function getStockStatus(item: InventoryItem) {
+    const available = item.inStock - item.reserved
+    const total = item.inStock + item.incoming
+
+    if (total === 0) return { status: "Out of Stock", badge: "destructive" }
+    if (item.inStock === 0) return { status: "Incoming Only", badge: "secondary" }
+    if (available <= 10) return { status: "Low Stock", badge: "secondary" }
+    return { status: "In Stock", badge: "default" }
+  }
+
+  const currency = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n)
+
+  /* --------------------------- aggregated data ---------------------- */
+
   const totalItems = inventory.length
-  const totalValue = inventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0)
-  const lowStockItems = inventory.filter((item) => item.inStock <= 10 && item.inStock > 0).length
-  const outOfStockItems = inventory.filter((item) => item.inStock === 0).length
+  const totalValue = inventory.reduce((sum, i) => sum + i.inStock * i.unitCost, 0)
+
+  const lowStockItems = inventory.filter((i) => i.inStock - i.reserved <= 10 && i.inStock > 0).length
+
+  const outOfStockItems = inventory.filter((i) => i.inStock === 0).length
+
+  /* ------------------------------------------------------------------ */
+  /*                                 UI                                 */
+  /* ------------------------------------------------------------------ */
 
   if (loading) {
     return (
       <>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+        <header className="flex h-16 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
-          <div className="flex items-center gap-2">
-            <Package className="h-5 w-5" />
-            <h1 className="text-lg font-semibold">Inventory</h1>
-          </div>
+          <h1 className="text-lg font-semibold">Inventory</h1>
         </header>
-        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-          <div className="text-center">Loading inventory...</div>
-        </div>
+        <div className="p-8 text-center">Loading…</div>
       </>
     )
   }
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      {/* --------------------------- header --------------------------- */}
+      <header className="flex h-16 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
-        <div className="flex items-center gap-2">
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
           <Package className="h-5 w-5" />
-          <h1 className="text-lg font-semibold">Inventory</h1>
-        </div>
+          Inventory
+        </h1>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        {/* Summary Cards */}
+      {/* ------------------------ main content ----------------------- */}
+      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        {/* summary cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Items</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalItems}</div>
-              <p className="text-xs text-muted-foreground">Unique SKUs in inventory</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
-              <p className="text-xs text-muted-foreground">Current inventory value</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
-              <TrendingDown className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{lowStockItems}</div>
-              <p className="text-xs text-muted-foreground">Items with ≤10 units</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Out of Stock</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{outOfStockItems}</div>
-              <p className="text-xs text-muted-foreground">Items with 0 units</p>
-            </CardContent>
-          </Card>
+          <SummaryCard
+            icon={<Package className="h-4 w-4 text-muted-foreground" />}
+            title="Total Items"
+            value={totalItems.toString()}
+            subtitle="Unique SKUs"
+          />
+          <SummaryCard
+            icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+            title="Total Value"
+            value={currency(totalValue)}
+            subtitle="Current stock value"
+          />
+          <SummaryCard
+            icon={<TrendingDown className="h-4 w-4 text-muted-foreground" />}
+            title="Low Stock"
+            value={lowStockItems.toString()}
+            subtitle="≤10 available"
+          />
+          <SummaryCard
+            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
+            title="Out of Stock"
+            value={outOfStockItems.toString()}
+            subtitle="0 units"
+          />
         </div>
 
-        {/* Inventory Table */}
+        {/* actions bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-8 w-[260px]"
+                placeholder="Search inventory…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <Button variant="outline" size="sm">
+              <Filter className="h-4 w-4 mr-2" />
+              Filter
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4 mr-2" /> Export CSV
+            </Button>
+
+            {/* add-item dialog */}
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Item
+                </Button>
+              </DialogTrigger>
+
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add Inventory Item</DialogTitle>
+                  <DialogDescription>Manually add new stock to your inventory.</DialogDescription>
+                </DialogHeader>
+
+                <ItemForm state={newItem} setState={setNewItem} disableSku={false} />
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAddItem}>Add</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        {/* inventory table */}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Inventory Items</CardTitle>
-                <CardDescription>Manage your product inventory and stock levels</CardDescription>
-              </div>
-              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Item
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add Inventory Item</DialogTitle>
-                    <DialogDescription>Add a new item to your inventory manually</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="sku" className="text-right">
-                        SKU
-                      </Label>
-                      <Input
-                        id="sku"
-                        value={newItem.sku}
-                        onChange={(e) => setNewItem({ ...newItem, sku: e.target.value })}
-                        className="col-span-3"
-                        placeholder="e.g., WH-001"
-                      />
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="name" className="text-right">
-                        Name
-                      </Label>
-                      <Input
-                        id="name"
-                        value={newItem.name}
-                        onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-                        className="col-span-3"
-                        placeholder="Product name"
-                      />
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="quantity" className="text-right">
-                        Quantity
-                      </Label>
-                      <Input
-                        id="quantity"
-                        type="number"
-                        value={newItem.quantity}
-                        onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
-                        className="col-span-3"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="unitCost" className="text-right">
-                        Unit Cost
-                      </Label>
-                      <Input
-                        id="unitCost"
-                        type="number"
-                        step="0.01"
-                        value={newItem.unitCost}
-                        onChange={(e) => setNewItem({ ...newItem, unitCost: e.target.value })}
-                        className="col-span-3"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button type="submit" onClick={handleAddItem}>
-                      Add Item
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
+            <CardTitle>Inventory Items</CardTitle>
+            <CardDescription>
+              Showing {filteredInventory.length} of {totalItems}
+            </CardDescription>
           </CardHeader>
+
           <CardContent>
             <Table>
               <TableHeader>
@@ -260,45 +360,48 @@ export default function Inventory() {
                   <TableHead className="text-right">In Stock</TableHead>
                   <TableHead className="text-right">Incoming</TableHead>
                   <TableHead className="text-right">Reserved</TableHead>
+                  <TableHead className="text-right">Available</TableHead>
                   <TableHead className="text-right">Unit Cost</TableHead>
                   <TableHead className="text-right">Total Value</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-center">Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-                {inventory.map((item) => {
-                  const stockStatus = getStockStatus(item)
-                  const totalValue = item.inStock * item.unitCost
+                {filteredInventory.map((item) => {
+                  const status = getStockStatus(item)
+                  const available = item.inStock - item.reserved
+                  const totalVal = item.inStock * item.unitCost
 
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.name}</TableCell>
-                      <TableCell className="text-right">{item.inStock}</TableCell>
-                      <TableCell className="text-right">{item.incoming}</TableCell>
-                      <TableCell className="text-right">{item.reserved}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(item.unitCost)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalValue)}</TableCell>
+                      <TableCell className="text-right">{item.inStock.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{item.incoming.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{item.reserved.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{available.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{currency(item.unitCost)}</TableCell>
+                      <TableCell className="text-right">{currency(totalVal)}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant={
-                            stockStatus.color === "destructive"
-                              ? "destructive"
-                              : stockStatus.color === "warning"
-                                ? "secondary"
-                                : "default"
-                          }
-                        >
-                          {stockStatus.status}
-                        </Badge>
+                        <Badge variant={status.badge}>{status.status}</Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   )
                 })}
-                {inventory.length === 0 && (
+
+                {filteredInventory.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground">
-                      No inventory items found. Add some items or import purchase orders to get started.
+                    <TableCell colSpan={10} className="text-center text-muted-foreground">
+                      {searchTerm
+                        ? "No items match your search."
+                        : "Inventory is empty. Add items or import purchase orders."}
                     </TableCell>
                   </TableRow>
                 )}
@@ -306,7 +409,129 @@ export default function Inventory() {
             </Table>
           </CardContent>
         </Card>
-      </div>
+
+        {/* edit dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Inventory Item</DialogTitle>
+              <DialogDescription>
+                Update details for <strong>{selectedItem?.sku}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+
+            <ItemForm state={editItem} setState={setEditItem} disableSku />
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleEditItem}>Update</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </main>
     </>
+  )
+}
+
+/* -------------------------------------------------------------------- */
+/*                      small reusable sub-components                   */
+/* -------------------------------------------------------------------- */
+
+function SummaryCard({
+  title,
+  value,
+  subtitle,
+  icon,
+}: {
+  title: string
+  value: string
+  subtitle: string
+  icon: React.ReactNode
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        {icon}
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ItemForm({
+  state,
+  setState,
+  disableSku = false,
+}: {
+  state: { sku: string; name: string; quantity: string; unitCost: string }
+  setState: React.Dispatch<
+    React.SetStateAction<{
+      sku: string
+      name: string
+      quantity: string
+      unitCost: string
+    }>
+  >
+  disableSku?: boolean
+}) {
+  return (
+    <div className="grid gap-4 py-4">
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor="sku" className="text-right">
+          SKU *
+        </Label>
+        <Input
+          id="sku"
+          disabled={disableSku}
+          value={state.sku}
+          onChange={(e) => setState({ ...state, sku: e.target.value })}
+          className="col-span-3"
+        />
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor="name" className="text-right">
+          Name *
+        </Label>
+        <Input
+          id="name"
+          value={state.name}
+          onChange={(e) => setState({ ...state, name: e.target.value })}
+          className="col-span-3"
+        />
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor="qty" className="text-right">
+          Quantity *
+        </Label>
+        <Input
+          id="qty"
+          type="number"
+          min="0"
+          value={state.quantity}
+          onChange={(e) => setState({ ...state, quantity: e.target.value })}
+          className="col-span-3"
+        />
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor="cost" className="text-right">
+          Unit Cost *
+        </Label>
+        <Input
+          id="cost"
+          type="number"
+          min="0"
+          step="0.01"
+          value={state.unitCost}
+          onChange={(e) => setState({ ...state, unitCost: e.target.value })}
+          className="col-span-3"
+        />
+      </div>
+    </div>
   )
 }
