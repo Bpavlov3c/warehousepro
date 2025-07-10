@@ -97,52 +97,37 @@ export interface ShopifyOrder {
 /*                               Inventory APIs                               */
 /* -------------------------------------------------------------------------- */
 
-/* ------------  Batched cost lookup & simple LRU cache  ------------------ */
-
 /**
- * In–memory LRU-style cache keyed by SKU → avg unit cost.
- * It resets when you refresh the page (good enough for the dashboard).
+ * Get the latest unit cost for each SKU from the most recent inventory record
  */
-const costCache = new Map<string, number>()
+async function getLatestUnitCosts(): Promise<Map<string, number>> {
+  try {
+    // Get the most recent inventory record for each SKU
+    const { data, error } = await supabase
+      .from("inventory")
+      .select("sku, unit_cost_with_delivery, purchase_date, created_at")
+      .order("created_at", { ascending: false })
 
-/**
- * Get weighted-average unit cost for a list of SKUs in one query.
- * Missing SKUs are given cost 0.
- */
-async function fetchCostsForSKUs(skus: string[]): Promise<Map<string, number>> {
-  const unknown = skus.filter((s) => !costCache.has(s))
-  if (unknown.length === 0) return costCache
+    if (error) {
+      console.error("Error fetching latest unit costs:", error)
+      return new Map()
+    }
 
-  const { data, error } = await supabase
-    .from("inventory")
-    .select("sku, unit_cost_with_delivery, quantity_available")
-    .in("sku", unknown)
+    const latestCosts = new Map<string, number>()
 
-  if (error) {
-    console.error("Inventory batch fetch failed:", error)
-    return costCache // return whatever we already have
+    // For each SKU, keep only the most recent cost (first occurrence due to ordering)
+    data?.forEach((record) => {
+      if (!latestCosts.has(record.sku)) {
+        latestCosts.set(record.sku, record.unit_cost_with_delivery || 0)
+      }
+    })
+
+    console.log("Latest unit costs:", Array.from(latestCosts.entries()))
+    return latestCosts
+  } catch (error) {
+    console.error("Error in getLatestUnitCosts:", error)
+    return new Map()
   }
-
-  /* Build weighted average per SKU */
-  const tmp = new Map<string, { costSum: number; qty: number }>()
-  data?.forEach((row) => {
-    const rec = tmp.get(row.sku) ?? { costSum: 0, qty: 0 }
-    rec.costSum += row.unit_cost_with_delivery * row.quantity_available
-    rec.qty += row.quantity_available
-    tmp.set(row.sku, rec)
-  })
-
-  tmp.forEach(({ costSum, qty }, sku) => {
-    const avg = qty > 0 ? Number((costSum / qty).toFixed(2)) : 0
-    costCache.set(sku, avg)
-  })
-
-  // Fill zeros for truly missing SKUs
-  unknown.forEach((sku) => {
-    if (!costCache.has(sku)) costCache.set(sku, 0)
-  })
-
-  return costCache
 }
 
 /**
@@ -150,12 +135,19 @@ async function fetchCostsForSKUs(skus: string[]): Promise<Map<string, number>> {
  */
 async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> {
   try {
+    console.log("Calculating inventory summary...")
+
     // Get all inventory records (delivered items)
     const { data: inventoryData, error: invError } = await supabase
       .from("inventory")
-      .select("sku, product_name, quantity_available, unit_cost_with_delivery")
+      .select("sku, product_name, quantity_available, unit_cost_with_delivery, purchase_date, created_at")
 
-    if (invError) throw invError
+    if (invError) {
+      console.error("Error fetching inventory data:", invError)
+      throw invError
+    }
+
+    console.log("Raw inventory data:", inventoryData)
 
     // Get all PO items with their status to calculate incoming stock
     const { data: poData, error: poError } = await supabase
@@ -170,30 +162,47 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       `)
       .in("status", ["Pending", "In Transit"])
 
-    if (poError) throw poError
+    if (poError) {
+      console.error("Error fetching PO data:", poError)
+      throw poError
+    }
+
+    // Get latest unit costs for all SKUs
+    const latestCosts = await getLatestUnitCosts()
 
     // Create inventory summary map
     const inventoryMap = new Map<string, InventoryItem>()
 
     // Process delivered inventory (in-stock items)
+    // Group quantities by SKU
+    const skuTotals = new Map<string, { totalQuantity: number; productName: string }>()
+
     inventoryData?.forEach((item) => {
-      const existing = inventoryMap.get(item.sku)
+      const existing = skuTotals.get(item.sku)
       if (existing) {
-        const totalQuantity = existing.inStock + item.quantity_available
-        const totalCost = existing.unitCost * existing.inStock + item.unit_cost_with_delivery * item.quantity_available
-        existing.inStock = totalQuantity
-        existing.unitCost = totalQuantity > 0 ? totalCost / totalQuantity : 0
+        existing.totalQuantity += item.quantity_available
       } else {
-        inventoryMap.set(item.sku, {
-          id: `summary-${item.sku}`,
-          sku: item.sku,
-          name: item.product_name,
-          inStock: item.quantity_available,
-          incoming: 0,
-          reserved: 0,
-          unitCost: item.unit_cost_with_delivery || 0,
+        skuTotals.set(item.sku, {
+          totalQuantity: item.quantity_available,
+          productName: item.product_name,
         })
       }
+    })
+
+    // Create inventory items with latest costs
+    skuTotals.forEach((totals, sku) => {
+      const latestCost = latestCosts.get(sku) || 0
+      console.log(`SKU ${sku}: quantity=${totals.totalQuantity}, latest_cost=${latestCost}`)
+
+      inventoryMap.set(sku, {
+        id: `summary-${sku}`,
+        sku: sku,
+        name: totals.productName,
+        inStock: totals.totalQuantity,
+        incoming: 0,
+        reserved: 0,
+        unitCost: latestCost,
+      })
     })
 
     // Process incoming stock from pending/in-transit POs
@@ -203,6 +212,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
         if (existing) {
           existing.incoming += item.quantity
         } else {
+          // Create new entry for items that are only incoming
           inventoryMap.set(item.sku, {
             id: `summary-${item.sku}`,
             sku: item.sku,
@@ -210,12 +220,13 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
             inStock: 0,
             incoming: item.quantity,
             reserved: 0,
-            unitCost: 0, // Will be set when delivered
+            unitCost: latestCosts.get(item.sku) || 0,
           })
         }
       })
     })
 
+    console.log("Final inventory summary:", Array.from(inventoryMap.values()))
     return inventoryMap
   } catch (error) {
     console.error("Error calculating inventory summary:", error)
@@ -315,18 +326,17 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
 }
 
 /**
- * Return order items with an extra `cost_price` field (weighted avg from inventory).
+ * Return order items with an extra `cost_price` field (latest cost from inventory).
  * Missing SKUs get cost_price 0.
  */
 async function getOrderItemsWithCosts(
   orderItems: ShopifyOrderItem[],
 ): Promise<(ShopifyOrderItem & { cost_price: number })[]> {
-  const skus = [...new Set(orderItems.map((i) => i.sku))]
-  const costMap = await fetchCostsForSKUs(skus)
+  const latestCosts = await getLatestUnitCosts()
 
   return orderItems.map((item) => ({
     ...item,
-    cost_price: costMap.get(item.sku) ?? 0,
+    cost_price: latestCosts.get(item.sku) ?? 0,
   }))
 }
 
