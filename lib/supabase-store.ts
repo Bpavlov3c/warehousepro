@@ -133,7 +133,7 @@ async function fetchCostsForSKUs(skus: string[]): Promise<Map<string, number>> {
   })
 
   tmp.forEach(({ costSum, qty }, sku) => {
-    const avg = qty > 0 ? costSum / qty : 0
+    const avg = qty > 0 ? Number((costSum / qty).toFixed(2)) : 0
     costCache.set(sku, avg)
   })
 
@@ -179,11 +179,10 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
     inventoryData?.forEach((item) => {
       const existing = inventoryMap.get(item.sku)
       if (existing) {
-        existing.inStock += item.quantity_available
-        // Use weighted average for unit cost
-        existing.unitCost =
-          (existing.unitCost * existing.inStock + item.unit_cost_with_delivery * item.quantity_available) /
-          (existing.inStock + item.quantity_available)
+        const totalQuantity = existing.inStock + item.quantity_available
+        const totalCost = existing.unitCost * existing.inStock + item.unit_cost_with_delivery * item.quantity_available
+        existing.inStock = totalQuantity
+        existing.unitCost = totalQuantity > 0 ? totalCost / totalQuantity : 0
       } else {
         inventoryMap.set(item.sku, {
           id: `summary-${item.sku}`,
@@ -191,8 +190,8 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
           name: item.product_name,
           inStock: item.quantity_available,
           incoming: 0,
-          reserved: 0, // TODO: Calculate from orders
-          unitCost: item.unit_cost_with_delivery,
+          reserved: 0,
+          unitCost: item.unit_cost_with_delivery || 0,
         })
       }
     })

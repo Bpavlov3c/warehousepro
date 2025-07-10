@@ -13,11 +13,55 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Upload, FileText, CheckCircle, AlertCircle, Download, Settings, Database } from "lucide-react"
+import { supabaseStore } from "@/lib/supabase-store"
+
+// Better CSV parser that handles quoted fields
+function parseCSV(text: string): string[][] {
+  const lines = text.split("\n").filter((line) => line.trim())
+  const result: string[][] = []
+
+  for (const line of lines) {
+    const row: string[] = []
+    let current = ""
+    let inQuotes = false
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+
+      if (char === '"') {
+        inQuotes = !inQuotes
+      } else if (char === "," && !inQuotes) {
+        row.push(current.trim())
+        current = ""
+      } else {
+        current += char
+      }
+    }
+
+    // Add the last field
+    row.push(current.trim())
+    result.push(row)
+  }
+
+  return result
+}
+
+// Function to find column index by multiple possible names
+function findColumnIndex(headers: string[], possibleNames: string[]): number {
+  for (const name of possibleNames) {
+    const index = headers.findIndex(
+      (h) => h.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(h.toLowerCase()),
+    )
+    if (index !== -1) return index
+  }
+  return -1
+}
 
 export default function ImportData() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadComplete, setUploadComplete] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState("")
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -25,28 +69,175 @@ export default function ImportData() {
 
     setIsUploading(true)
     setUploadProgress(0)
+    setUploadComplete(false)
+    setUploadMessage("")
 
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          setIsUploading(false)
-          setUploadComplete(true)
-          return 100
-        }
-        return prev + 10
+    try {
+      // Read the CSV file
+      const text = await file.text()
+      const parsedData = parseCSV(text)
+
+      if (parsedData.length < 2) {
+        alert("CSV file must have at least a header row and one data row")
+        setIsUploading(false)
+        return
+      }
+
+      const headers = parsedData[0]
+      const dataRows = parsedData.slice(1)
+
+      console.log("Headers:", headers)
+      console.log("First data row:", dataRows[0])
+
+      // Find column indices for different possible column names
+      const skuIndex = findColumnIndex(headers, ["Product ID", "SKU", "sku", "product_id", "id"])
+      const nameIndex = findColumnIndex(headers, ["Product Name", "product_name", "name", "title"])
+      const quantityIndex = findColumnIndex(headers, ["Quantity", "quantity", "qty", "Quantity Purchased"])
+      const priceIndex = findColumnIndex(headers, ["Price", "price", "unit_cost", "Purchase Price", "cost"])
+      const dateIndex = findColumnIndex(headers, ["Date", "date", "PO Date", "po_date", "purchase_date"])
+      const deliveryIndex = findColumnIndex(headers, ["Delivery Cost", "delivery_cost", "shipping", "delivery"])
+      const supplierIndex = findColumnIndex(headers, ["Supplier", "supplier", "vendor", "supplier_name"])
+
+      console.log("Column indices:", {
+        sku: skuIndex,
+        name: nameIndex,
+        quantity: quantityIndex,
+        price: priceIndex,
+        date: dateIndex,
+        delivery: deliveryIndex,
+        supplier: supplierIndex,
       })
-    }, 200)
+
+      // Validate required columns
+      if (skuIndex === -1 || nameIndex === -1 || quantityIndex === -1 || priceIndex === -1) {
+        alert("Missing required columns. Please ensure your CSV has: SKU, Product Name, Quantity, and Price columns")
+        setIsUploading(false)
+        return
+      }
+
+      // Parse rows and group by supplier/date
+      const poGroups = new Map<string, any[]>()
+
+      dataRows.forEach((row, index) => {
+        if (row.length === 0 || row.every((cell) => !cell.trim())) return // Skip empty rows
+
+        console.log(`Processing row ${index + 1}:`, row)
+
+        // Extract values with fallbacks
+        const sku = row[skuIndex]?.trim() || `ITEM-${Date.now()}-${index}`
+        const productName = row[nameIndex]?.trim() || "Unknown Product"
+        const quantityStr = row[quantityIndex]?.trim() || "1"
+        const priceStr = row[priceIndex]?.trim() || "0"
+        const supplier = supplierIndex !== -1 ? row[supplierIndex]?.trim() || "Unknown Supplier" : "Unknown Supplier"
+        const poDate =
+          dateIndex !== -1
+            ? row[dateIndex]?.trim() || new Date().toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0]
+        const deliveryCostStr = deliveryIndex !== -1 ? row[deliveryIndex]?.trim() || "0" : "0"
+
+        // Parse numbers more carefully
+        const quantity = Number.parseInt(quantityStr.replace(/[^\d.-]/g, "")) || 1
+        const unitCost = Number.parseFloat(priceStr.replace(/[^\d.-]/g, "")) || 0
+        const deliveryCost = Number.parseFloat(deliveryCostStr.replace(/[^\d.-]/g, "")) || 0
+
+        console.log(`Parsed values:`, {
+          sku,
+          productName,
+          quantity,
+          unitCost,
+          supplier,
+          poDate,
+          deliveryCost,
+        })
+
+        // Create a key based on supplier and date to group items
+        const key = `${supplier}-${poDate}`
+
+        if (!poGroups.has(key)) {
+          poGroups.set(key, [])
+        }
+
+        poGroups.get(key)!.push({
+          sku,
+          product_name: productName,
+          quantity,
+          unit_cost: unitCost,
+          supplier,
+          po_date: poDate,
+          delivery_cost: deliveryCost,
+        })
+      })
+
+      console.log("PO Groups:", Array.from(poGroups.entries()))
+
+      let processedCount = 0
+      const totalGroups = poGroups.size
+      let totalItems = 0
+
+      // Create POs for each group
+      for (const [key, items] of poGroups) {
+        const firstItem = items[0]
+        totalItems += items.length
+
+        const poData = {
+          supplier_name: firstItem.supplier,
+          po_date: firstItem.po_date,
+          status: "Delivered" as const, // Assuming imported POs are delivered
+          delivery_cost: firstItem.delivery_cost,
+          items: items.map((item) => ({
+            sku: item.sku,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            unit_cost: item.unit_cost,
+          })),
+          notes: `Imported from ${file.name} on ${new Date().toLocaleDateString()}`,
+        }
+
+        console.log("Creating PO with data:", poData)
+
+        try {
+          await supabaseStore.createPurchaseOrder(poData)
+          processedCount++
+
+          // Update progress
+          const progress = Math.round((processedCount / totalGroups) * 100)
+          setUploadProgress(progress)
+
+          // Small delay to show progress
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        } catch (error) {
+          console.error("Error creating PO:", error)
+          alert(`Error creating PO for ${firstItem.supplier}: ${error}`)
+        }
+      }
+
+      setUploadComplete(true)
+      setUploadMessage(`Successfully imported ${processedCount} purchase orders with ${totalItems} total items!`)
+    } catch (error) {
+      console.error("Error processing file:", error)
+      alert("Error processing file. Please check the format and try again.")
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   const handleDownloadTemplate = () => {
-    // Create CSV content with headers
+    // Create CSV content with headers that match the import logic
     const csvContent = [
-      ["Product ID / SKU", "Product Name", "Quantity Purchased", "Purchase Price", "PO Date", "Delivery Cost"],
-      ["WH-001", "Wireless Headphones", "50", "75.00", "2024-01-15", "250.00"],
-      ["SW-002", "Smart Watch", "25", "120.00", "2024-01-15", "250.00"],
-      ["PC-003", "Phone Case", "100", "15.00", "2024-01-15", "250.00"],
+      [
+        "Product ID / SKU",
+        "Product Name",
+        "Quantity Purchased",
+        "Purchase Price",
+        "PO Date",
+        "Delivery Cost",
+        "Supplier",
+      ],
+      ["WH-001", "Wireless Headphones", "50", "75.00", "2024-01-15", "250.00", "Tech Supplies Co."],
+      ["SW-002", "Smart Watch", "25", "120.00", "2024-01-15", "250.00", "Tech Supplies Co."],
+      ["PC-003", "Phone Case", "100", "15.00", "2024-01-15", "250.00", "Tech Supplies Co."],
+      ["BS-004", "Bluetooth Speaker", "30", "85.00", "2024-01-18", "150.00", "Electronics Hub"],
+      ["CB-005", "USB Cable", "200", "8.50", "2024-01-18", "150.00", "Electronics Hub"],
     ]
 
     // Convert to CSV string
@@ -128,7 +319,7 @@ export default function ImportData() {
                 {isUploading && (
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span>Uploading...</span>
+                      <span>Processing...</span>
                       <span>{uploadProgress}%</span>
                     </div>
                     <Progress value={uploadProgress} />
@@ -138,7 +329,7 @@ export default function ImportData() {
                 {uploadComplete && (
                   <Alert>
                     <CheckCircle className="h-4 w-4" />
-                    <AlertDescription>Purchase order file uploaded successfully! Processing 45 items.</AlertDescription>
+                    <AlertDescription>{uploadMessage}</AlertDescription>
                   </Alert>
                 )}
 
@@ -146,12 +337,13 @@ export default function ImportData() {
                   <div>
                     <h4 className="font-medium mb-2">Required CSV Format</h4>
                     <div className="text-sm text-muted-foreground space-y-1">
-                      <p>• Product ID / SKU</p>
-                      <p>• Product Name</p>
-                      <p>• Quantity Purchased</p>
-                      <p>• Purchase Price</p>
-                      <p>• PO Date</p>
-                      <p>• Delivery Cost</p>
+                      <p>• Product ID / SKU (required)</p>
+                      <p>• Product Name (required)</p>
+                      <p>• Quantity Purchased (required)</p>
+                      <p>• Purchase Price (required)</p>
+                      <p>• PO Date (optional)</p>
+                      <p>• Delivery Cost (optional)</p>
+                      <p>• Supplier (optional)</p>
                     </div>
                   </div>
                   <div>
@@ -160,6 +352,9 @@ export default function ImportData() {
                       <Download className="h-4 w-4 mr-2" />
                       Download Template
                     </Button>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      The system will automatically detect column names and handle various formats.
+                    </p>
                   </div>
                 </div>
               </CardContent>
