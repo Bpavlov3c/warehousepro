@@ -53,3 +53,6 @@ export function DatePickerWithRange({ className }: React.HTMLAttributes<HTMLDivE
     </div>
   )
 }
+
+// Alias so other modules can import { DateRangePicker }
+export { DatePickerWithRange as DateRangePicker }
