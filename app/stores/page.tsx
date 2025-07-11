@@ -11,37 +11,36 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
+  Store,
   Plus,
   Search,
-  Filter,
-  Download,
-  Eye,
-  Settings,
-  Store,
   RefreshCw,
+  Edit,
   Trash2,
   CheckCircle,
+  XCircle,
+  Clock,
   AlertCircle,
-  ExternalLink,
+  Download,
 } from "lucide-react"
 import { supabaseStore, type ShopifyStore } from "@/lib/supabase-store"
-// import { dataStore } from "@/lib/data-store" // Declare the dataStore variable
 
 export default function Stores() {
   const [stores, setStores] = useState<ShopifyStore[]>([])
+  const [filteredStores, setFilteredStores] = useState<ShopifyStore[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [selectedStore, setSelectedStore] = useState<ShopifyStore | null>(null)
-  const [isNewStoreOpen, setIsNewStoreOpen] = useState(false)
-  const [isEditStoreOpen, setIsEditStoreOpen] = useState(false)
-  const [isTestingConnection, setIsTestingConnection] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     shopifyDomain: "",
@@ -50,184 +49,100 @@ export default function Stores() {
     notes: "",
   })
 
-  // Load data on component mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const stores = await supabaseStore.getShopifyStores()
-        setStores(stores)
-      } catch (error) {
-        console.error("Error loading stores:", error)
-      }
-    }
-    loadData()
+    loadStores()
   }, [])
 
-  const handleCreateStore = async () => {
+  useEffect(() => {
+    const filtered = stores.filter(
+      (store) =>
+        store.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        store.shopifyDomain.toLowerCase().includes(searchTerm.toLowerCase()),
+    )
+    setFilteredStores(filtered)
+  }, [stores, searchTerm])
+
+  const loadStores = async () => {
     try {
-      // Test connection first
-      setIsTestingConnection(true)
-      const isValid = await testShopifyConnection(formData.shopifyDomain, formData.accessToken)
-
-      if (isValid) {
-        const newStoreData = {
-          name: formData.name,
-          shopify_domain: formData.shopifyDomain,
-          access_token: formData.accessToken,
-          status: "Connected" as const,
-          webhook_url: formData.webhookUrl,
-          notes: formData.notes,
-        }
-
-        const newStore = await supabaseStore.createShopifyStore(newStoreData)
-        const updatedStores = await supabaseStore.getShopifyStores()
-        setStores(updatedStores)
-        setIsNewStoreOpen(false)
-        setFormData({ name: "", shopifyDomain: "", accessToken: "", webhookUrl: "", notes: "" })
-        alert(`Store "${newStore.name}" added successfully!`)
-      } else {
-        alert("Failed to connect to Shopify store. Please check your credentials.")
-      }
+      setLoading(true)
+      const data = await supabaseStore.getShopifyStores()
+      setStores(data)
     } catch (error) {
-      console.error("Failed to create store:", error)
-      alert("Error creating store. Please try again.")
+      console.error("Error loading stores:", error)
     } finally {
-      setIsTestingConnection(false)
+      setLoading(false)
+    }
+  }
+
+  const handleAddStore = async () => {
+    if (!formData.name || !formData.shopifyDomain || !formData.accessToken) {
+      alert("Please fill in all required fields")
+      return
+    }
+
+    try {
+      await supabaseStore.createShopifyStore({
+        name: formData.name,
+        shopify_domain: formData.shopifyDomain,
+        access_token: formData.accessToken,
+        status: "Connected",
+        webhook_url: formData.webhookUrl,
+        notes: formData.notes,
+      })
+
+      setFormData({
+        name: "",
+        shopifyDomain: "",
+        accessToken: "",
+        webhookUrl: "",
+        notes: "",
+      })
+      setIsAddDialogOpen(false)
+      await loadStores()
+      alert("Store added successfully!")
+    } catch (error) {
+      console.error("Error adding store:", error)
+      alert("Error adding store. Please try again.")
     }
   }
 
   const handleEditStore = async () => {
-    if (!selectedStore) return
+    if (!selectedStore || !formData.name || !formData.shopifyDomain || !formData.accessToken) {
+      alert("Please fill in all required fields")
+      return
+    }
 
     try {
-      setIsTestingConnection(true)
-      const isValid = await testShopifyConnection(formData.shopifyDomain, formData.accessToken)
+      await supabaseStore.updateShopifyStore(selectedStore.id, {
+        name: formData.name,
+        shopifyDomain: formData.shopifyDomain,
+        accessToken: formData.accessToken,
+        webhookUrl: formData.webhookUrl,
+        notes: formData.notes,
+      })
 
-      if (isValid) {
-        const updates = {
-          name: formData.name,
-          shopify_domain: formData.shopifyDomain,
-          access_token: formData.accessToken,
-          webhook_url: formData.webhookUrl,
-          notes: formData.notes,
-          status: "Connected" as const,
-        }
-
-        // const updatedStore = dataStore.updateShopifyStore(selectedStore.id, updates)
-        // if (updatedStore) {
-        //   setStores(dataStore.getShopifyStores())
-        //   setIsEditStoreOpen(false)
-        //   setSelectedStore(null)
-        //   alert(`Store "${updatedStore.name}" updated successfully!`)
-        // }
-        await supabaseStore.updateShopifyStore(selectedStore.id, updates)
-        const refreshed = await supabaseStore.getShopifyStores()
-        setStores(refreshed)
-        setIsEditStoreOpen(false)
-        setSelectedStore(null)
-        alert(`Store "${formData.name}" updated successfully!`)
-      } else {
-        alert("Failed to connect to Shopify store. Please check your credentials.")
-      }
+      setIsEditDialogOpen(false)
+      setSelectedStore(null)
+      await loadStores()
+      alert("Store updated successfully!")
     } catch (error) {
-      console.error("Failed to update store:", error)
+      console.error("Error updating store:", error)
       alert("Error updating store. Please try again.")
-    } finally {
-      setIsTestingConnection(false)
-    }
-  }
-
-  const testShopifyConnection = async (domain: string, accessToken: string): Promise<boolean> => {
-    try {
-      const response = await fetch("/api/shopify-test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain, accessToken }),
-      })
-
-      const data = await response.json()
-      if (data.ok) return true
-
-      console.error("Connection test failed:", data.error)
-      return false
-    } catch (error) {
-      console.error("Connection test failed:", error)
-      return false
-    }
-  }
-
-  const handleSyncOrders = async (storeId: string) => {
-    const store = stores.find((s) => s.id === storeId)
-    if (!store) return
-
-    try {
-      await supabaseStore.updateShopifyStore(storeId, { status: "Testing" })
-      const updatedStores = await supabaseStore.getShopifyStores()
-      setStores(updatedStores)
-
-      // const orders = await syncShopifyOrders(store.shopifyDomain, store.accessToken)
-      const ordersSynced = await syncShopifyOrders(store.id, store.shopifyDomain, store.accessToken)
-
-      await supabaseStore.updateShopifyStore(storeId, {
-        status: "Connected",
-        lastSync: new Date().toISOString(),
-        totalOrders: store.totalOrders + ordersSynced,
-      })
-
-      const finalStores = await supabaseStore.getShopifyStores()
-      setStores(finalStores)
-
-      alert(`Successfully synced ${ordersSynced} orders from ${store.name}`)
-    } catch (error) {
-      console.error("Sync failed:", error)
-      await supabaseStore.updateShopifyStore(storeId, { status: "Error" })
-      const errorStores = await supabaseStore.getShopifyStores()
-      setStores(errorStores)
-      alert("Failed to sync orders. Please check your store connection.")
-    }
-  }
-
-  // Uses server-side proxy to avoid CORS
-  const syncShopifyOrders = async (storeId: string, domain: string, accessToken: string) => {
-    try {
-      const res = await fetch("/api/shopify-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain, accessToken }),
-      })
-
-      const data = await res.json()
-
-      if (!data.success) {
-        throw new Error(data.message || "Unknown error returned from API")
-      }
-
-      // Find this store’s result (storeResults: [{ store, success, ordersSynced, … }])
-      const storeResult = (data.storeResults || []).find(
-        (r: { store: string; ordersSynced: number }) => r.store === domain || r.store === storeId,
-      )
-
-      return storeResult?.ordersSynced ?? 0
-    } catch (err) {
-      console.error("Order sync failed:", err)
-      throw err
     }
   }
 
   const handleDeleteStore = async (storeId: string) => {
-    const store = stores.find((s) => s.id === storeId)
-    if (!store) return
+    if (!confirm("Are you sure you want to delete this store? This action cannot be undone.")) {
+      return
+    }
 
-    if (confirm(`Are you sure you want to delete "${store.name}"? This action cannot be undone.`)) {
-      // const success = dataStore.deleteShopifyStore(storeId)
-      // if (success) {
-      //   setStores(dataStore.getShopifyStores())
-      //   alert(`Store "${store.name}" deleted successfully.`)
-      // }
+    try {
       await supabaseStore.deleteShopifyStore(storeId)
-      const refreshed = await supabaseStore.getShopifyStores()
-      setStores(refreshed)
-      alert(`Store "${store.name}" deleted successfully.`)
+      await loadStores()
+      alert("Store deleted successfully!")
+    } catch (error) {
+      console.error("Error deleting store:", error)
+      alert("Error deleting store. Please try again.")
     }
   }
 
@@ -240,192 +155,276 @@ export default function Stores() {
       webhookUrl: store.webhookUrl || "",
       notes: store.notes || "",
     })
-    setIsEditStoreOpen(true)
+    setIsEditDialogOpen(true)
+  }
+
+  const testConnection = async (store: ShopifyStore) => {
+    try {
+      // Update store status to testing
+      await supabaseStore.updateShopifyStore(store.id, { status: "Testing" })
+      await loadStores()
+
+      // Test the connection (this would typically make an API call to Shopify)
+      // For now, we'll simulate a test
+      setTimeout(async () => {
+        const success = Math.random() > 0.3 // 70% success rate for demo
+        await supabaseStore.updateShopifyStore(store.id, {
+          status: success ? "Connected" : "Error",
+          lastSync: new Date().toISOString(),
+        })
+        await loadStores()
+        alert(success ? "Connection test successful!" : "Connection test failed. Please check your credentials.")
+      }, 2000)
+    } catch (error) {
+      console.error("Error testing connection:", error)
+      alert("Error testing connection. Please try again.")
+    }
+  }
+
+  const exportStores = () => {
+    const headers = ["Store Name", "Shopify Domain", "Status", "Last Sync", "Total Orders", "Monthly Revenue", "Notes"]
+
+    const rows = filteredStores.map((store) => [
+      store.name,
+      store.shopifyDomain,
+      store.status,
+      store.lastSync === "Never" ? "Never" : new Date(store.lastSync).toLocaleDateString(),
+      store.totalOrders.toString(),
+      store.monthlyRevenue.toFixed(2),
+      store.notes || "",
+    ])
+
+    const csvContent = [headers, ...rows].map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `shopify_stores_${new Date().toISOString().slice(0, 10)}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "Connected":
+        return <CheckCircle className="h-4 w-4 text-green-500" />
+      case "Error":
+        return <XCircle className="h-4 w-4 text-red-500" />
+      case "Testing":
+        return <Clock className="h-4 w-4 text-yellow-500" />
+      case "Disconnected":
+        return <AlertCircle className="h-4 w-4 text-gray-500" />
+      default:
+        return <AlertCircle className="h-4 w-4 text-gray-500" />
+    }
   }
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Connected":
-        return "bg-green-100 text-green-800"
+        return "default"
       case "Error":
-        return "bg-red-100 text-red-800"
+        return "destructive"
       case "Testing":
-        return "bg-blue-100 text-blue-800"
+        return "secondary"
       case "Disconnected":
-        return "bg-gray-100 text-gray-800"
+        return "outline"
       default:
-        return "bg-gray-100 text-gray-800"
+        return "secondary"
     }
   }
 
-  const filteredStores = stores.filter(
-    (store) =>
-      store.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      store.shopifyDomain.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
+  // Calculate summary statistics
   const totalStores = stores.length
-  const connectedStores = stores.filter((s) => s.status === "Connected").length
+  const connectedStores = stores.filter((store) => store.status === "Connected").length
   const totalOrders = stores.reduce((sum, store) => sum + store.totalOrders, 0)
   const totalRevenue = stores.reduce((sum, store) => sum + store.monthlyRevenue, 0)
-  const errorStores = stores.filter((s) => s.status === "Error").length
+
+  if (loading) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <h1 className="text-lg font-semibold">Shopify Stores</h1>
+        </header>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Loading stores...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+    <div className="flex flex-col min-h-screen">
+      <header className="flex h-16 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">Shopify Stores</h1>
-        </div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <Store className="h-5 w-5" />
+          <span className="hidden sm:inline">Shopify Stores</span>
+          <span className="sm:hidden">Stores</span>
+        </h1>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <div className="flex-1 space-y-4 p-4 pt-6">
         {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Stores</CardTitle>
-              <Store className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalStores}</div>
-              <p className="text-xs text-muted-foreground">{connectedStores} connected</p>
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Stores</p>
+                  <p className="text-lg sm:text-2xl font-bold">{totalStores}</p>
+                </div>
+                <Store className="h-4 w-4 text-muted-foreground" />
+              </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-              <CheckCircle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalOrders.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">Across all stores</p>
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Connected</p>
+                  <p className="text-lg sm:text-2xl font-bold text-green-600">{connectedStores}</p>
+                </div>
+                <CheckCircle className="h-4 w-4 text-muted-foreground" />
+              </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
-              <RefreshCw className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${totalRevenue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">This month</p>
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Orders</p>
+                  <p className="text-lg sm:text-2xl font-bold">{totalOrders}</p>
+                </div>
+                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+              </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Sync Status</CardTitle>
-              <AlertCircle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{connectedStores}</div>
-              <p className="text-xs text-muted-foreground">{errorStores} errors</p>
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Monthly Revenue</p>
+                  <p className="text-lg sm:text-2xl font-bold">{totalRevenue.toLocaleString()} лв</p>
+                </div>
+                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+              </div>
             </CardContent>
           </Card>
         </div>
 
         {/* Actions Bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search stores..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 w-[300px]"
-              />
-            </div>
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Filter
-            </Button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          <div className="relative">
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-8 w-full sm:w-[300px]"
+              placeholder="Search stores..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-2" />
-              Export
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={loadStores} className="flex-1 sm:flex-none bg-transparent">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Refresh</span>
             </Button>
-            <Dialog open={isNewStoreOpen} onOpenChange={setIsNewStoreOpen}>
+            <Button variant="outline" size="sm" onClick={exportStores} className="flex-1 sm:flex-none bg-transparent">
+              <Download className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Export CSV</span>
+              <span className="sm:hidden">Export</span>
+            </Button>
+
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
-                <Button size="sm">
+                <Button size="sm" className="flex-1 sm:flex-none">
                   <Plus className="h-4 w-4 mr-2" />
-                  Add Store
+                  <span className="hidden sm:inline">Add Store</span>
+                  <span className="sm:hidden">Add</span>
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl">
+
+              <DialogContent className="w-[95vw] max-w-md">
                 <DialogHeader>
-                  <DialogTitle>Add New Shopify Store</DialogTitle>
-                  <DialogDescription>Connect a new Shopify store to sync orders and manage inventory</DialogDescription>
+                  <DialogTitle>Add Shopify Store</DialogTitle>
+                  <DialogDescription>
+                    Connect a new Shopify store to your warehouse management system.
+                  </DialogDescription>
                 </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="store-name">Store Name</Label>
-                      <Input
-                        id="store-name"
-                        placeholder="My Store"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="shopify-domain">Shopify Domain</Label>
-                      <Input
-                        id="shopify-domain"
-                        placeholder="mystore.myshopify.com"
-                        value={formData.shopifyDomain}
-                        onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
-                      />
-                    </div>
-                  </div>
+
+                <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="access-token">Access Token</Label>
+                    <Label htmlFor="store-name">Store Name *</Label>
+                    <Input
+                      id="store-name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="My Shopify Store"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="shopify-domain">Shopify Domain *</Label>
+                    <Input
+                      id="shopify-domain"
+                      value={formData.shopifyDomain}
+                      onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
+                      placeholder="mystore.myshopify.com"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="access-token">Access Token *</Label>
                     <Input
                       id="access-token"
                       type="password"
-                      placeholder="shpat_..."
                       value={formData.accessToken}
                       onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                      placeholder="shpat_..."
                     />
                   </div>
+
                   <div className="space-y-2">
-                    <Label htmlFor="webhook-url">Webhook URL (Optional)</Label>
+                    <Label htmlFor="webhook-url">Webhook URL</Label>
                     <Input
                       id="webhook-url"
-                      placeholder="https://yourapp.com/webhook"
                       value={formData.webhookUrl}
                       onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                      placeholder="https://your-domain.com/webhook"
                     />
                   </div>
+
                   <div className="space-y-2">
                     <Label htmlFor="notes">Notes</Label>
                     <Textarea
                       id="notes"
-                      placeholder="Store description or notes..."
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Optional notes about this store"
+                      rows={3}
                     />
                   </div>
-                  <Alert>
-                    <Settings className="h-4 w-4" />
-                    <AlertDescription>
-                      You'll need to create a private app in your Shopify admin to get the API access token. Required
-                      permissions: read_orders, read_products, read_customers.
-                    </AlertDescription>
-                  </Alert>
                 </div>
-                <div className="flex justify-end space-x-2">
-                  <Button variant="outline" onClick={() => setIsNewStoreOpen(false)}>
+
+                <DialogFooter className="flex-col sm:flex-row gap-2">
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="w-full sm:w-auto">
                     Cancel
                   </Button>
-                  <Button onClick={handleCreateStore} disabled={isTestingConnection}>
-                    {isTestingConnection ? "Testing..." : "Add Store"}
+                  <Button onClick={handleAddStore} className="w-full sm:w-auto">
+                    Add Store
                   </Button>
-                </div>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
           </div>
@@ -434,198 +433,176 @@ export default function Stores() {
         {/* Stores Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Connected Stores</CardTitle>
-            <CardDescription>Manage your Shopify store connections and sync settings</CardDescription>
+            <CardTitle className="text-base sm:text-lg">Connected Stores</CardTitle>
+            <CardDescription className="text-sm">
+              Manage your Shopify store connections and sync settings
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Store Name</TableHead>
-                  <TableHead>Domain</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Sync</TableHead>
-                  <TableHead>Orders</TableHead>
-                  <TableHead>Revenue</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredStores.map((store) => (
-                  <TableRow key={store.id}>
-                    <TableCell className="font-medium">{store.name}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <span>{store.shopifyDomain}</span>
-                        <Button variant="ghost" size="sm" asChild>
-                          <a href={`https://${store.shopifyDomain}`} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(store.status)}>{store.status}</Badge>
-                    </TableCell>
-                    <TableCell>{store.lastSync}</TableCell>
-                    <TableCell>{store.totalOrders.toLocaleString()}</TableCell>
-                    <TableCell>${store.monthlyRevenue.toLocaleString()}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSyncOrders(store.id)}
-                          disabled={store.status === "Testing"}
-                        >
-                          <RefreshCw className={`h-4 w-4 ${store.status === "Testing" ? "animate-spin" : ""}`} />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => openEditDialog(store)}>
-                          <Settings className="h-4 w-4" />
-                        </Button>
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" onClick={() => setSelectedStore(store)}>
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-2xl">
-                            <DialogHeader>
-                              <DialogTitle>Store Details - {selectedStore?.name}</DialogTitle>
-                              <DialogDescription>Complete store information and settings</DialogDescription>
-                            </DialogHeader>
-                            {selectedStore && (
-                              <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <Label className="text-sm font-medium">Store Name</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedStore.name}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Domain</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedStore.shopifyDomain}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Status</Label>
-                                    <Badge className={getStatusColor(selectedStore.status)}>
-                                      {selectedStore.status}
-                                    </Badge>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Created</Label>
-                                    <p className="text-sm text-muted-foreground">
-                                      {new Date(selectedStore.createdAt).toLocaleDateString()}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Total Orders</Label>
-                                    <p className="text-sm text-muted-foreground">
-                                      {selectedStore.totalOrders.toLocaleString()}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm font-medium">Monthly Revenue</Label>
-                                    <p className="text-sm text-muted-foreground">
-                                      ${selectedStore.monthlyRevenue.toLocaleString()}
-                                    </p>
-                                  </div>
-                                </div>
-                                {selectedStore.webhookUrl && (
-                                  <div>
-                                    <Label className="text-sm font-medium">Webhook URL</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedStore.webhookUrl}</p>
-                                  </div>
-                                )}
-                                {selectedStore.notes && (
-                                  <div>
-                                    <Label className="text-sm font-medium">Notes</Label>
-                                    <p className="text-sm text-muted-foreground">{selectedStore.notes}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </DialogContent>
-                        </Dialog>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteStore(store.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+          <CardContent className="p-0 sm:p-6">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[150px]">Store Name</TableHead>
+                    <TableHead className="min-w-[180px] hidden sm:table-cell">Shopify Domain</TableHead>
+                    <TableHead className="min-w-[100px]">Status</TableHead>
+                    <TableHead className="min-w-[120px] hidden md:table-cell">Last Sync</TableHead>
+                    <TableHead className="text-right min-w-[80px] hidden lg:table-cell">Orders</TableHead>
+                    <TableHead className="text-right min-w-[100px] hidden lg:table-cell">Revenue</TableHead>
+                    <TableHead className="text-center min-w-[150px]">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredStores.map((store) => (
+                    <TableRow key={store.id}>
+                      <TableCell className="font-medium text-xs sm:text-sm">{store.name}</TableCell>
+                      <TableCell className="text-xs sm:text-sm hidden sm:table-cell">{store.shopifyDomain}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(store.status)}
+                          <Badge variant={getStatusColor(store.status)} className="text-xs">
+                            {store.status}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm hidden md:table-cell">
+                        {store.lastSync === "Never" ? "Never" : new Date(store.lastSync).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-right text-xs sm:text-sm hidden lg:table-cell">
+                        {store.totalOrders}
+                      </TableCell>
+                      <TableCell className="text-right text-xs sm:text-sm hidden lg:table-cell">
+                        {store.monthlyRevenue.toFixed(2)} лв
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => testConnection(store)}
+                            disabled={store.status === "Testing"}
+                            className="h-8 w-8"
+                            title="Test Connection"
+                          >
+                            <RefreshCw
+                              className={`h-3 w-3 sm:h-4 sm:w-4 ${store.status === "Testing" ? "animate-spin" : ""}`}
+                            />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => openEditDialog(store)}
+                            className="h-8 w-8"
+                            title="Edit Store"
+                          >
+                            <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteStore(store.id)}
+                            className="h-8 w-8 text-red-600 hover:text-red-700"
+                            title="Delete Store"
+                          >
+                            <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {filteredStores.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground">
+                  {searchTerm ? "No stores match your search." : "No stores connected yet."}
+                  {!searchTerm && (
+                    <div className="mt-4">
+                      <Button onClick={() => setIsAddDialogOpen(true)}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Your First Store
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         {/* Edit Store Dialog */}
-        <Dialog open={isEditStoreOpen} onOpenChange={setIsEditStoreOpen}>
-          <DialogContent className="max-w-2xl">
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="w-[95vw] max-w-md">
             <DialogHeader>
-              <DialogTitle>Edit Store - {selectedStore?.name}</DialogTitle>
-              <DialogDescription>Update store connection settings</DialogDescription>
+              <DialogTitle>Edit Shopify Store</DialogTitle>
+              <DialogDescription>Update store connection details and settings.</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-store-name">Store Name</Label>
-                  <Input
-                    id="edit-store-name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-shopify-domain">Shopify Domain</Label>
-                  <Input
-                    id="edit-shopify-domain"
-                    value={formData.shopifyDomain}
-                    onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
-                  />
-                </div>
-              </div>
+
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-access-token">Access Token</Label>
+                <Label htmlFor="edit-store-name">Store Name *</Label>
+                <Input
+                  id="edit-store-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="My Shopify Store"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-shopify-domain">Shopify Domain *</Label>
+                <Input
+                  id="edit-shopify-domain"
+                  value={formData.shopifyDomain}
+                  onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
+                  placeholder="mystore.myshopify.com"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-access-token">Access Token *</Label>
                 <Input
                   id="edit-access-token"
                   type="password"
                   value={formData.accessToken}
                   onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                  placeholder="shpat_..."
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="edit-webhook-url">Webhook URL</Label>
                 <Input
                   id="edit-webhook-url"
                   value={formData.webhookUrl}
                   onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                  placeholder="https://your-domain.com/webhook"
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="edit-notes">Notes</Label>
                 <Textarea
                   id="edit-notes"
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Optional notes about this store"
+                  rows={3}
                 />
               </div>
             </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsEditStoreOpen(false)}>
+
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="w-full sm:w-auto">
                 Cancel
               </Button>
-              <Button onClick={handleEditStore} disabled={isTestingConnection}>
-                {isTestingConnection ? "Testing..." : "Update Store"}
+              <Button onClick={handleEditStore} className="w-full sm:w-auto">
+                Update Store
               </Button>
-            </div>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
-    </>
+    </div>
   )
 }

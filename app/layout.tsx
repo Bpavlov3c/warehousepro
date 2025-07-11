@@ -2,15 +2,15 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
-import { AppSidebar } from "@/components/app-sidebar"
-import { Toaster } from "@/components/ui/toaster"
 import { SidebarProvider } from "@/components/ui/sidebar"
+import { AppSidebar } from "@/components/app-sidebar"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Warehouse Management & Profit Analytics",
-  description: "Complete inventory and profit tracking system",
+  title: "Warehouse Management System",
+  description:
+    "Complete warehouse management solution with inventory tracking, purchase orders, and Shopify integration",
     generator: 'v0.dev'
 }
 
@@ -23,12 +23,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <SidebarProvider>
-          <div className="flex h-screen">
-            <AppSidebar />
-            <main className="flex-1 overflow-auto">{children}</main>
-          </div>
+          <AppSidebar />
+          <main className="flex-1 overflow-auto">{children}</main>
         </SidebarProvider>
-        <Toaster />
       </body>
     </html>
   )

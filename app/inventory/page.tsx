@@ -254,31 +254,36 @@ export default function Inventory() {
 
   if (loading) {
     return (
-      <>
+      <div className="flex flex-col min-h-screen">
         <header className="flex h-16 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-lg font-semibold">Inventory</h1>
         </header>
-        <div className="p-8 text-center">Loading…</div>
-      </>
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Loading inventory...</p>
+          </div>
+        </div>
+      </div>
     )
   }
 
   return (
-    <>
+    <div className="flex flex-col min-h-screen">
       {/* --------------------------- header --------------------------- */}
       <header className="flex h-16 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
         <h1 className="flex items-center gap-2 text-lg font-semibold">
           <Package className="h-5 w-5" />
-          Inventory
+          <span className="hidden sm:inline">Inventory</span>
         </h1>
       </header>
 
       {/* ------------------------ main content ----------------------- */}
-      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <main className="flex-1 space-y-4 p-4 pt-6">
         {/* summary cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           <SummaryCard
             icon={<Package className="h-4 w-4 text-muted-foreground" />}
             title="Total Items"
@@ -306,42 +311,52 @@ export default function Inventory() {
         </div>
 
         {/* actions bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                className="pl-8 w-[260px]"
+                className="pl-8 w-full sm:w-[260px]"
                 placeholder="Search inventory…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Filter
-            </Button>
-            <Button variant="outline" size="sm" onClick={loadInventory}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 sm:flex-none bg-transparent">
+                <Filter className="h-4 w-4 mr-2" />
+                Filter
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadInventory}
+                className="flex-1 sm:flex-none bg-transparent"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" /> Export CSV
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport} className="flex-1 sm:flex-none bg-transparent">
+              <Download className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Export CSV</span>
+              <span className="sm:hidden">Export</span>
             </Button>
 
             {/* add-item dialog */}
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
-                <Button size="sm">
+                <Button size="sm" className="flex-1 sm:flex-none">
                   <Plus className="h-4 w-4 mr-2" />
-                  Add Item
+                  <span className="hidden sm:inline">Add Item</span>
+                  <span className="sm:hidden">Add</span>
                 </Button>
               </DialogTrigger>
 
-              <DialogContent>
+              <DialogContent className="w-[95vw] max-w-md">
                 <DialogHeader>
                   <DialogTitle>Add Inventory Item</DialogTitle>
                   <DialogDescription>Manually add new stock to your inventory.</DialogDescription>
@@ -349,11 +364,13 @@ export default function Inventory() {
 
                 <ItemForm state={newItem} setState={setNewItem} disableSku={false} />
 
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                <DialogFooter className="flex-col sm:flex-row gap-2">
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="w-full sm:w-auto">
                     Cancel
                   </Button>
-                  <Button onClick={handleAddItem}>Add</Button>
+                  <Button onClick={handleAddItem} className="w-full sm:w-auto">
+                    Add
+                  </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -363,80 +380,92 @@ export default function Inventory() {
         {/* inventory table */}
         <Card>
           <CardHeader>
-            <CardTitle>Inventory Items</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-base sm:text-lg">Inventory Items</CardTitle>
+            <CardDescription className="text-sm">
               Showing {filteredInventory.length} of {totalItems}
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead className="text-right">In Stock</TableHead>
-                  <TableHead className="text-right">Incoming</TableHead>
-                  <TableHead className="text-right">Reserved</TableHead>
-                  <TableHead className="text-right">Available</TableHead>
-                  <TableHead className="text-right">Unit Cost</TableHead>
-                  <TableHead className="text-right">Total Value</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-center">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+          <CardContent className="p-0 sm:p-6">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[80px]">SKU</TableHead>
+                    <TableHead className="min-w-[120px]">Product Name</TableHead>
+                    <TableHead className="text-right min-w-[70px]">In Stock</TableHead>
+                    <TableHead className="text-right min-w-[70px]">Incoming</TableHead>
+                    <TableHead className="text-right min-w-[70px]">Reserved</TableHead>
+                    <TableHead className="text-right min-w-[70px]">Available</TableHead>
+                    <TableHead className="text-right min-w-[80px] hidden sm:table-cell">Unit Cost</TableHead>
+                    <TableHead className="text-right min-w-[90px] hidden md:table-cell">Total Value</TableHead>
+                    <TableHead className="min-w-[80px] hidden sm:table-cell">Status</TableHead>
+                    <TableHead className="text-center min-w-[60px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
 
-              <TableBody>
-                {filteredInventory.map((item) => {
-                  const status = getStockStatus(item)
-                  const available = item.inStock - item.reserved
-                  const totalVal = item.inStock * item.unitCost
+                <TableBody>
+                  {filteredInventory.map((item) => {
+                    const status = getStockStatus(item)
+                    const available = item.inStock - item.reserved
+                    const totalVal = item.inStock * item.unitCost
 
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">{item.sku}</TableCell>
-                      <TableCell>{item.name}</TableCell>
-                      <TableCell className="text-right">{item.inStock.toLocaleString()}</TableCell>
-                      <TableCell className="text-right text-blue-600 font-medium">
-                        {item.incoming.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right text-red-600 font-medium">
-                        {item.reserved.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right text-green-600 font-medium">
-                        {available.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right">{currency(item.unitCost)}</TableCell>
-                      <TableCell className="text-right">{currency(totalVal)}</TableCell>
-                      <TableCell>
-                        <Badge variant={status.badge}>{status.status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
+                    return (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-medium text-xs sm:text-sm">{item.sku}</TableCell>
+                        <TableCell className="min-w-0">
+                          <div className="truncate text-xs sm:text-sm" title={item.name}>
+                            {item.name}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right text-xs sm:text-sm">{item.inStock.toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-blue-600 font-medium text-xs sm:text-sm">
+                          {item.incoming.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right text-red-600 font-medium text-xs sm:text-sm">
+                          {item.reserved.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right text-green-600 font-medium text-xs sm:text-sm">
+                          {available.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right text-xs sm:text-sm hidden sm:table-cell">
+                          {currency(item.unitCost)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs sm:text-sm hidden md:table-cell">
+                          {currency(totalVal)}
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          <Badge variant={status.badge} className="text-xs">
+                            {status.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8">
+                            <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+
+                  {filteredInventory.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                        {searchTerm
+                          ? "No items match your search."
+                          : "Inventory is empty. Add items or import purchase orders."}
                       </TableCell>
                     </TableRow>
-                  )
-                })}
-
-                {filteredInventory.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground">
-                      {searchTerm
-                        ? "No items match your search."
-                        : "Inventory is empty. Add items or import purchase orders."}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
 
         {/* edit dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent>
+          <DialogContent className="w-[95vw] max-w-md">
             <DialogHeader>
               <DialogTitle>Edit Inventory Item</DialogTitle>
               <DialogDescription>
@@ -446,16 +475,18 @@ export default function Inventory() {
 
             <ItemForm state={editItem} setState={setEditItem} disableSku />
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="w-full sm:w-auto">
                 Cancel
               </Button>
-              <Button onClick={handleEditItem}>Update</Button>
+              <Button onClick={handleEditItem} className="w-full sm:w-auto">
+                Update
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </main>
-    </>
+    </div>
   )
 }
 
@@ -477,11 +508,11 @@ function SummaryCard({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <CardTitle className="text-xs sm:text-sm font-medium">{title}</CardTitle>
         {icon}
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-lg sm:text-2xl font-bold">{value}</div>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </CardContent>
     </Card>
@@ -506,8 +537,8 @@ function ItemForm({
 }) {
   return (
     <div className="grid gap-4 py-4">
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="sku" className="text-right">
+      <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
+        <Label htmlFor="sku" className="sm:text-right">
           SKU *
         </Label>
         <Input
@@ -515,22 +546,22 @@ function ItemForm({
           disabled={disableSku}
           value={state.sku}
           onChange={(e) => setState({ ...state, sku: e.target.value })}
-          className="col-span-3"
+          className="sm:col-span-3"
         />
       </div>
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="name" className="text-right">
+      <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
+        <Label htmlFor="name" className="sm:text-right">
           Name *
         </Label>
         <Input
           id="name"
           value={state.name}
           onChange={(e) => setState({ ...state, name: e.target.value })}
-          className="col-span-3"
+          className="sm:col-span-3"
         />
       </div>
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="qty" className="text-right">
+      <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
+        <Label htmlFor="qty" className="sm:text-right">
           Quantity *
         </Label>
         <Input
@@ -539,11 +570,11 @@ function ItemForm({
           min="0"
           value={state.quantity}
           onChange={(e) => setState({ ...state, quantity: e.target.value })}
-          className="col-span-3"
+          className="sm:col-span-3"
         />
       </div>
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="cost" className="text-right">
+      <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
+        <Label htmlFor="cost" className="sm:text-right">
           Unit Cost *
         </Label>
         <Input
@@ -553,7 +584,7 @@ function ItemForm({
           step="0.01"
           value={state.unitCost}
           onChange={(e) => setState({ ...state, unitCost: e.target.value })}
-          className="col-span-3"
+          className="sm:col-span-3"
         />
       </div>
     </div>
