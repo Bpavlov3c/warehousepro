@@ -8,21 +8,12 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   RefreshCw,
   Search,
   Filter,
   Download,
-  Eye,
   ShoppingCart,
   DollarSign,
   TrendingUp,
@@ -31,6 +22,8 @@ import {
   User,
   MapPin,
   Mail,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react"
 import { supabaseStore, type ShopifyOrder, type ShopifyStore } from "@/lib/supabase-store"
 import { DateRangePicker } from "@/components/date-range-picker"
@@ -49,7 +42,7 @@ export default function ShopifyOrdersPage() {
   const [orders, setOrders] = useState<ShopifyOrder[]>([])
   const [stores, setStores] = useState<ShopifyStore[]>([])
   const [filteredOrders, setFilteredOrders] = useState<ShopifyOrder[]>([])
-  const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
+  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [filters, setFilters] = useState<OrderFilters>({
@@ -227,6 +220,16 @@ export default function ShopifyOrdersPage() {
     a.download = `shopify-orders-${new Date().toISOString().split("T")[0]}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
+  }
+
+  const toggleOrderExpansion = (orderId: string) => {
+    const newExpanded = new Set(expandedOrders)
+    if (newExpanded.has(orderId)) {
+      newExpanded.delete(orderId)
+    } else {
+      newExpanded.add(orderId)
+    }
+    setExpandedOrders(newExpanded)
   }
 
   const getStatusBadge = (status: string) => {
@@ -437,78 +440,178 @@ export default function ShopifyOrdersPage() {
         <Card>
           <CardHeader>
             <CardTitle>Orders ({filteredOrders.length})</CardTitle>
-            <CardDescription>Manage and view your Shopify orders</CardDescription>
+            <CardDescription>Manage and view your Shopify orders with detailed information</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Revenue</TableHead>
-                  <TableHead>Profit</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{order.orderNumber}</div>
-                        <div className="text-sm text-muted-foreground">{order.storeName}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{order.customerName}</div>
-                        <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-muted-foreground" />
-                        {new Date(order.orderDate).toLocaleDateString()}
-                      </div>
-                    </TableCell>
-                    <TableCell>{getStatusBadge(order.status)}</TableCell>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">
-                          {((order.total_amount || 0) - (order.tax_amount || 0)).toFixed(2)} лв
+            <div className="space-y-2">
+              {filteredOrders.map((order) => (
+                <div key={order.id} className="border rounded-lg">
+                  <Collapsible open={expandedOrders.has(order.id)} onOpenChange={() => toggleOrderExpansion(order.id)}>
+                    <CollapsibleTrigger asChild>
+                      <div className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer">
+                        <div className="flex items-center gap-4">
+                          {expandedOrders.has(order.id) ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                          <div>
+                            <div className="font-medium">{order.orderNumber}</div>
+                            <div className="text-sm text-muted-foreground">{order.storeName}</div>
+                          </div>
                         </div>
-                        <div className="text-sm text-muted-foreground">
-                          Total: {(order.total_amount || 0).toFixed(2)} лв
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <div className="font-medium">{order.customerName}</div>
+                            <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                            {new Date(order.orderDate).toLocaleDateString()}
+                          </div>
+                          {getStatusBadge(order.status)}
+                          <div className="text-right">
+                            <div className="font-medium">
+                              {((order.total_amount || 0) - (order.tax_amount || 0)).toFixed(2)} лв
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              Total: {(order.total_amount || 0).toFixed(2)} лв
+                            </div>
+                          </div>
+                          {getProfitBadge(order.profit || 0)}
+                          <Badge variant="outline">{order.items.length} items</Badge>
                         </div>
                       </div>
-                    </TableCell>
-                    <TableCell>{getProfitBadge(order.profit || 0)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{order.items.length} items</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button variant="ghost" size="sm" onClick={() => setSelectedOrder(order)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle>Order Details - {order.orderNumber}</DialogTitle>
-                            <DialogDescription>Complete order information and line items</DialogDescription>
-                          </DialogHeader>
-                          {selectedOrder && <OrderDetailsDialog order={selectedOrder} />}
-                        </DialogContent>
-                      </Dialog>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="px-4 pb-4 border-t bg-muted/20">
+                        <div className="grid gap-6 md:grid-cols-2 pt-4">
+                          {/* Order Information */}
+                          <div className="space-y-4">
+                            <h4 className="font-medium">Order Information</h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Order Number:</span>
+                                <span className="font-medium">{order.orderNumber}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Store:</span>
+                                <span className="font-medium">{order.storeName}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Date:</span>
+                                <span className="font-medium">{new Date(order.orderDate).toLocaleDateString()}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Status:</span>
+                                {getStatusBadge(order.status)}
+                              </div>
+                            </div>
+
+                            <h4 className="font-medium">Financial Summary</h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Total Amount:</span>
+                                <span className="font-medium">{(order.total_amount || 0).toFixed(2)} лв</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Tax:</span>
+                                <span className="font-medium">{(order.tax_amount || 0).toFixed(2)} лв</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Revenue (excl. tax):</span>
+                                <span className="font-medium">
+                                  {((order.total_amount || 0) - (order.tax_amount || 0)).toFixed(2)} лв
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Shipping:</span>
+                                <span className="font-medium">{(order.shipping_cost || 0).toFixed(2)} лв</span>
+                              </div>
+                              <div className="flex justify-between border-t pt-2">
+                                <span className="text-muted-foreground">Profit:</span>
+                                <span
+                                  className={`font-medium ${(order.profit || 0) >= 0 ? "text-green-600" : "text-red-600"}`}
+                                >
+                                  {(order.profit || 0).toFixed(2)} лв
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Customer Information */}
+                          <div className="space-y-4">
+                            <h4 className="font-medium">Customer Information</h4>
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2">
+                                <User className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium">{order.customerName}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Mail className="h-4 w-4 text-muted-foreground" />
+                                <span>{order.customerEmail}</span>
+                              </div>
+                              {order.shipping_address && (
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                                  <div>
+                                    <div className="font-medium">Shipping Address</div>
+                                    <div className="text-sm text-muted-foreground whitespace-pre-line">
+                                      {order.shipping_address}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Order Items */}
+                        <div className="mt-6">
+                          <h4 className="font-medium mb-3">Order Items</h4>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Product</TableHead>
+                                <TableHead>SKU</TableHead>
+                                <TableHead>Quantity</TableHead>
+                                <TableHead>Unit Price</TableHead>
+                                <TableHead>Unit Cost</TableHead>
+                                <TableHead>Total</TableHead>
+                                <TableHead>Item Profit</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {order.items.map((item, index) => {
+                                const itemWithCost = order.shopify_order_items?.find((i) => i.id === item.id) || item
+                                const costPrice = (itemWithCost as any)?.cost_price || 0
+                                const itemProfit = (item.unit_price - costPrice) * item.quantity
+
+                                return (
+                                  <TableRow key={index}>
+                                    <TableCell className="font-medium">{item.product_name}</TableCell>
+                                    <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                                    <TableCell>{item.quantity}</TableCell>
+                                    <TableCell>{(item.unit_price || 0).toFixed(2)} лв</TableCell>
+                                    <TableCell>{costPrice.toFixed(2)} лв</TableCell>
+                                    <TableCell>{(item.total_price || 0).toFixed(2)} лв</TableCell>
+                                    <TableCell>
+                                      <span className={itemProfit >= 0 ? "text-green-600" : "text-red-600"}>
+                                        {itemProfit.toFixed(2)} лв
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+              ))}
+            </div>
 
             {filteredOrders.length === 0 && (
               <div className="text-center py-8">
@@ -523,136 +626,5 @@ export default function ShopifyOrdersPage() {
         </Card>
       </div>
     </div>
-  )
-}
-
-function OrderDetailsDialog({ order }: { order: ShopifyOrder }) {
-  return (
-    <Tabs defaultValue="overview" className="w-full">
-      <TabsList className="grid w-full grid-cols-3">
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-        <TabsTrigger value="items">Items</TabsTrigger>
-        <TabsTrigger value="customer">Customer</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="overview" className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Order Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Order Number:</span>
-                <span className="font-medium">{order.orderNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Store:</span>
-                <span className="font-medium">{order.storeName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Date:</span>
-                <span className="font-medium">{new Date(order.orderDate).toLocaleDateString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Status:</span>
-                <Badge variant="outline">{order.status}</Badge>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Financial Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Amount:</span>
-                <span className="font-medium">{(order.total_amount || 0).toFixed(2)} лв</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Tax:</span>
-                <span className="font-medium">{(order.tax_amount || 0).toFixed(2)} лв</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Revenue (excl. tax):</span>
-                <span className="font-medium">
-                  {((order.total_amount || 0) - (order.tax_amount || 0)).toFixed(2)} лв
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Shipping:</span>
-                <span className="font-medium">{(order.shipping_cost || 0).toFixed(2)} лв</span>
-              </div>
-              <div className="flex justify-between border-t pt-2">
-                <span className="text-muted-foreground">Profit:</span>
-                <span className={`font-medium ${(order.profit || 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
-                  {(order.profit || 0).toFixed(2)} лв
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="items" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Order Items</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Unit Price</TableHead>
-                  <TableHead>Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {order.items.map((item, index) => (
-                  <TableRow key={index}>
-                    <TableCell className="font-medium">{item.product_name}</TableCell>
-                    <TableCell>{item.sku}</TableCell>
-                    <TableCell>{item.quantity}</TableCell>
-                    <TableCell>{(item.unit_price || 0).toFixed(2)} лв</TableCell>
-                    <TableCell>{(item.total_price || 0).toFixed(2)} лв</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="customer" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Customer Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <User className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{order.customerName}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-muted-foreground" />
-              <span>{order.customerEmail}</span>
-            </div>
-            {order.shipping_address && (
-              <div className="flex items-start gap-2">
-                <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div>
-                  <div className="font-medium">Shipping Address</div>
-                  <div className="text-sm text-muted-foreground whitespace-pre-line">{order.shipping_address}</div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </TabsContent>
-    </Tabs>
   )
 }

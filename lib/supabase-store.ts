@@ -113,16 +113,22 @@ async function getLatestUnitCosts(): Promise<Map<string, number>> {
       return new Map()
     }
 
+    if (!data || data.length === 0) {
+      console.log("No inventory data found for unit costs")
+      return new Map()
+    }
+
     const latestCosts = new Map<string, number>()
 
     // For each SKU, keep only the most recent cost (first occurrence due to ordering)
-    data?.forEach((record) => {
-      if (!latestCosts.has(record.sku)) {
-        latestCosts.set(record.sku, record.unit_cost_with_delivery || 0)
+    data.forEach((record) => {
+      if (record.sku && !latestCosts.has(record.sku)) {
+        const cost = record.unit_cost_with_delivery || 0
+        latestCosts.set(record.sku, cost)
       }
     })
 
-    console.log("Latest unit costs:", Array.from(latestCosts.entries()))
+    console.log("Latest unit costs calculated for", latestCosts.size, "SKUs")
     return latestCosts
   } catch (error) {
     console.error("Error in getLatestUnitCosts:", error)
@@ -137,7 +143,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
   try {
     console.log("Calculating inventory summary...")
 
-    // Get all inventory records (delivered items)
+    // Get all inventory records (delivered items) with better error handling
     const { data: inventoryData, error: invError } = await supabase
       .from("inventory")
       .select("sku, product_name, quantity_available, unit_cost_with_delivery, purchase_date, created_at")
@@ -147,7 +153,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       throw invError
     }
 
-    console.log("Raw inventory data:", inventoryData)
+    console.log("Raw inventory records from DB:", inventoryData?.length || 0)
 
     // Get all PO items with their status to calculate incoming stock
     const { data: poData, error: poError } = await supabase
@@ -164,11 +170,13 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
 
     if (poError) {
       console.error("Error fetching PO data:", poError)
-      throw poError
+      // Don't throw here, just log and continue without incoming stock
+      console.log("Continuing without incoming stock data")
     }
 
     // Get latest unit costs for all SKUs
     const latestCosts = await getLatestUnitCosts()
+    console.log("Latest costs map size:", latestCosts.size)
 
     // Create inventory summary map
     const inventoryMap = new Map<string, InventoryItem>()
@@ -178,16 +186,23 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
     const skuTotals = new Map<string, { totalQuantity: number; productName: string }>()
 
     inventoryData?.forEach((item) => {
+      if (!item.sku || !item.product_name) {
+        console.warn("Skipping inventory item with missing SKU or name:", item)
+        return
+      }
+
       const existing = skuTotals.get(item.sku)
       if (existing) {
-        existing.totalQuantity += item.quantity_available
+        existing.totalQuantity += item.quantity_available || 0
       } else {
         skuTotals.set(item.sku, {
-          totalQuantity: item.quantity_available,
+          totalQuantity: item.quantity_available || 0,
           productName: item.product_name,
         })
       }
     })
+
+    console.log("SKU totals calculated:", skuTotals.size, "unique SKUs")
 
     // Create inventory items with latest costs
     skuTotals.forEach((totals, sku) => {
@@ -205,28 +220,36 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       })
     })
 
-    // Process incoming stock from pending/in-transit POs
-    poData?.forEach((po) => {
-      po.po_items?.forEach((item) => {
-        const existing = inventoryMap.get(item.sku)
-        if (existing) {
-          existing.incoming += item.quantity
-        } else {
-          // Create new entry for items that are only incoming
-          inventoryMap.set(item.sku, {
-            id: `summary-${item.sku}`,
-            sku: item.sku,
-            name: item.product_name,
-            inStock: 0,
-            incoming: item.quantity,
-            reserved: 0,
-            unitCost: latestCosts.get(item.sku) || 0,
-          })
-        }
-      })
-    })
+    // Process incoming stock from pending/in-transit POs (only if PO data was fetched successfully)
+    if (poData && !poError) {
+      poData.forEach((po) => {
+        po.po_items?.forEach((item) => {
+          if (!item.sku || !item.product_name) {
+            console.warn("Skipping PO item with missing SKU or name:", item)
+            return
+          }
 
-    console.log("Final inventory summary:", Array.from(inventoryMap.values()))
+          const existing = inventoryMap.get(item.sku)
+          if (existing) {
+            existing.incoming += item.quantity || 0
+          } else {
+            // Create new entry for items that are only incoming
+            inventoryMap.set(item.sku, {
+              id: `summary-${item.sku}`,
+              sku: item.sku,
+              name: item.product_name,
+              inStock: 0,
+              incoming: item.quantity || 0,
+              reserved: 0,
+              unitCost: latestCosts.get(item.sku) || 0,
+            })
+          }
+        })
+      })
+    }
+
+    console.log("Final inventory summary:", inventoryMap.size, "items")
+    console.log("Sample items:", Array.from(inventoryMap.values()).slice(0, 3))
     return inventoryMap
   } catch (error) {
     console.error("Error calculating inventory summary:", error)
