@@ -247,6 +247,7 @@ export default function PurchaseOrders() {
       ["Notes", po.notes || ""],
       [""],
       // Items Header
+      ["Items"],
       ["SKU", "Product Name", "Quantity", "Unit Cost", "Shipping/Unit", "Total Unit Cost", "Line Total"],
       // Items Data
       ...po.items.map((item) => [
@@ -482,9 +483,7 @@ export default function PurchaseOrders() {
 
       {/* View PO Dialog */}
       <Dialog open={isViewPOOpen} onOpenChange={setIsViewPOOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {" "}
-          {/* Added max-h and overflow-y-auto */}
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <div className="flex items-center justify-between">
               <div>
