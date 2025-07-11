@@ -165,18 +165,19 @@ export default function Stores() {
       const updatedStores = await supabaseStore.getShopifyStores()
       setStores(updatedStores)
 
-      const orders = await syncShopifyOrders(store.shopifyDomain, store.accessToken)
+      // const orders = await syncShopifyOrders(store.shopifyDomain, store.accessToken)
+      const ordersSynced = await syncShopifyOrders(store.id, store.shopifyDomain, store.accessToken)
 
       await supabaseStore.updateShopifyStore(storeId, {
         status: "Connected",
         lastSync: new Date().toISOString(),
-        totalOrders: store.totalOrders + orders.length,
+        totalOrders: store.totalOrders + ordersSynced,
       })
 
       const finalStores = await supabaseStore.getShopifyStores()
       setStores(finalStores)
 
-      alert(`Successfully synced ${orders.length} orders from ${store.name}`)
+      alert(`Successfully synced ${ordersSynced} orders from ${store.name}`)
     } catch (error) {
       console.error("Sync failed:", error)
       await supabaseStore.updateShopifyStore(storeId, { status: "Error" })
@@ -187,7 +188,7 @@ export default function Stores() {
   }
 
   // Uses server-side proxy to avoid CORS
-  const syncShopifyOrders = async (domain: string, accessToken: string) => {
+  const syncShopifyOrders = async (storeId: string, domain: string, accessToken: string) => {
     try {
       const res = await fetch("/api/shopify-orders", {
         method: "POST",
@@ -196,11 +197,17 @@ export default function Stores() {
       })
 
       const data = await res.json()
-      if (!data.ok) throw new Error(data.error || "Unknown error")
 
-      console.log(`Synced ${data.orders.length} orders from ${domain}`)
-      // TODO: Persist in DB. For demo, just log.
-      return data.orders
+      if (!data.success) {
+        throw new Error(data.message || "Unknown error returned from API")
+      }
+
+      // Find this store’s result (storeResults: [{ store, success, ordersSynced, … }])
+      const storeResult = (data.storeResults || []).find(
+        (r: { store: string; ordersSynced: number }) => r.store === domain || r.store === storeId,
+      )
+
+      return storeResult?.ordersSynced ?? 0
     } catch (err) {
       console.error("Order sync failed:", err)
       throw err

@@ -10,6 +10,7 @@ import { supabaseStore, type PurchaseOrder } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
@@ -163,10 +164,19 @@ export default function PurchaseOrders() {
 
   const handleUpdateStatus = async (po: PurchaseOrder, newStatus: PurchaseOrder["status"]) => {
     try {
+      console.log(`Updating PO ${po.po_number} status from ${po.status} to ${newStatus}`)
+
       await supabaseStore.updatePurchaseOrder(po.id, { status: newStatus })
       const updatedPOs = await supabaseStore.getPurchaseOrders()
       setPurchaseOrders(updatedPOs)
-      alert(`Purchase Order ${po.po_number} status updated to ${newStatus}`)
+
+      if (newStatus === "Delivered" && po.status !== "Delivered") {
+        alert(
+          `Purchase Order ${po.po_number} marked as delivered! Inventory has been updated with ${po.items.reduce((sum, item) => sum + item.quantity, 0)} items.`,
+        )
+      } else {
+        alert(`Purchase Order ${po.po_number} status updated to ${newStatus}`)
+      }
     } catch (error) {
       console.error("Error updating purchase order:", error)
       alert("Error updating purchase order status. Please try again.")
@@ -481,13 +491,17 @@ export default function PurchaseOrders() {
         </CardContent>
       </Card>
 
-      {/* View PO Dialog */}
+      {/* View PO Dialog - Fixed with proper scrolling */}
       <Dialog open={isViewPOOpen} onOpenChange={setIsViewPOOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <div className="flex items-center justify-between">
               <div>
                 <DialogTitle>Purchase Order Details - {selectedPO?.po_number}</DialogTitle>
+                <DialogDescription className="mt-1">
+                  {selectedPO &&
+                    `${selectedPO.items.length} items • Total: $${calculateOrderStats(selectedPO).totalCost.toFixed(2)}`}
+                </DialogDescription>
               </div>
               {selectedPO && (
                 <Button variant="outline" size="sm" onClick={() => handleExportPO(selectedPO)}>
@@ -497,9 +511,11 @@ export default function PurchaseOrders() {
               )}
             </div>
           </DialogHeader>
+
           {selectedPO && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="flex-1 overflow-hidden flex flex-col space-y-4">
+              {/* Header Info - Fixed height */}
+              <div className="flex-shrink-0 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-gray-600">Supplier</p>
                   <p className="font-medium">{selectedPO.supplier_name}</p>
@@ -518,49 +534,83 @@ export default function PurchaseOrders() {
                 </div>
               </div>
 
+              {/* Notes - Fixed height if present */}
               {selectedPO.notes && (
-                <div>
+                <div className="flex-shrink-0">
                   <p className="text-gray-600 text-sm">Notes</p>
-                  <p className="text-sm bg-gray-50 p-2 rounded">{selectedPO.notes}</p>
+                  <p className="text-sm bg-gray-50 p-2 rounded max-h-20 overflow-y-auto">{selectedPO.notes}</p>
                 </div>
               )}
 
-              <div>
-                <p className="text-gray-600 text-sm mb-2">Items</p>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Unit Cost</TableHead>
-                      <TableHead className="text-right">Shipping/Unit</TableHead>
-                      <TableHead className="text-right">Total Unit Cost</TableHead>
-                      <TableHead className="text-right">Line Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedPO.items.map((item) => {
-                      // Calculate shipping cost per line item (equal distribution)
-                      const shippingCostPerLineItem =
-                        selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
-                      const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
-                      const totalUnitCost = item.unit_cost + shippingCostPerUnit
-
-                      return (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                          <TableCell>{item.product_name}</TableCell>
-                          <TableCell className="text-right">{item.quantity}</TableCell>
-                          <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">${shippingCostPerUnit.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-medium">${totalUnitCost.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">${item.total_cost.toFixed(2)}</TableCell>
+              {/* Items Table - Scrollable */}
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <p className="text-gray-600 text-sm mb-2 flex-shrink-0">Items ({selectedPO.items.length})</p>
+                <div className="flex-1 border rounded-lg">
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-white z-10 border-b">
+                        <TableRow>
+                          <TableHead className="w-[100px]">SKU</TableHead>
+                          <TableHead className="min-w-[200px]">Product</TableHead>
+                          <TableHead className="w-[80px] text-right">Qty</TableHead>
+                          <TableHead className="w-[100px] text-right">Unit Cost</TableHead>
+                          <TableHead className="w-[100px] text-right">Shipping/Unit</TableHead>
+                          <TableHead className="w-[120px] text-right">Total Unit Cost</TableHead>
+                          <TableHead className="w-[100px] text-right">Line Total</TableHead>
                         </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedPO.items.map((item, index) => {
+                          // Calculate shipping cost per line item (equal distribution)
+                          const shippingCostPerLineItem =
+                            selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
+                          const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
+                          const totalUnitCost = item.unit_cost + shippingCostPerUnit
+
+                          return (
+                            <TableRow key={item.id || index} className="hover:bg-gray-50">
+                              <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                              <TableCell className="max-w-[200px]">
+                                <div className="truncate" title={item.product_name}>
+                                  {item.product_name}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">{item.quantity}</TableCell>
+                              <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">${shippingCostPerUnit.toFixed(2)}</TableCell>
+                              <TableCell className="text-right font-medium">${totalUnitCost.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">${item.total_cost.toFixed(2)}</TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </div>
+              </div>
+
+              {/* Summary - Fixed at bottom */}
+              <div className="flex-shrink-0 bg-gray-50 p-3 rounded-lg">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-600">Total Items</p>
+                    <p className="font-medium">{selectedPO.items.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Total Quantity</p>
+                    <p className="font-medium">{selectedPO.items.reduce((sum, item) => sum + item.quantity, 0)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Subtotal</p>
+                    <p className="font-medium">
+                      ${selectedPO.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Grand Total</p>
+                    <p className="font-bold text-lg">${calculateOrderStats(selectedPO).totalCost.toFixed(2)}</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}

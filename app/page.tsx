@@ -67,7 +67,6 @@ interface TopProduct {
   profit: number
   quantity: number
   margin: number
-  cost: number
 }
 
 interface MonthlyTrend {
@@ -116,7 +115,7 @@ export default function Dashboard() {
         inventory: inventory.length,
       })
 
-      // Build cost map from delivered purchase orders with proper cost tracking
+      // Build cost map from delivered purchase orders
       const costMap = buildCostMap(purchaseOrders)
 
       // Calculate metrics
@@ -143,56 +142,20 @@ export default function Dashboard() {
 
   const buildCostMap = (purchaseOrders: PurchaseOrder[]): Map<string, number> => {
     const costMap = new Map<string, number>()
-    const skuCostHistory = new Map<string, Array<{ cost: number; date: string; poNumber: string }>>()
 
-    // Filter only delivered POs
     const deliveredPOs = purchaseOrders.filter((po) => po.status === "Delivered")
-    console.log(`Building cost map from ${deliveredPOs.length} delivered POs`)
 
     deliveredPOs.forEach((po) => {
       const totalItems = po.items.reduce((sum, item) => sum + item.quantity, 0)
       const deliveryCostPerUnit = totalItems > 0 ? po.delivery_cost / totalItems : 0
 
-      console.log(
-        `PO ${po.po_number}: ${po.items.length} items, delivery cost per unit: ${deliveryCostPerUnit.toFixed(2)}`,
-      )
-
       po.items.forEach((item) => {
         const totalUnitCost = item.unit_cost + deliveryCostPerUnit
-
-        // Track cost history for each SKU
-        if (!skuCostHistory.has(item.sku)) {
-          skuCostHistory.set(item.sku, [])
-        }
-
-        skuCostHistory.get(item.sku)!.push({
-          cost: totalUnitCost,
-          date: po.po_date,
-          poNumber: po.po_number,
-        })
-
-        console.log(
-          `SKU ${item.sku}: base cost ${item.unit_cost}, delivery ${deliveryCostPerUnit.toFixed(2)}, total ${totalUnitCost.toFixed(2)}`,
-        )
+        costMap.set(item.sku, totalUnitCost)
       })
     })
 
-    // For each SKU, use the most recent cost (latest PO date)
-    skuCostHistory.forEach((history, sku) => {
-      // Sort by date descending to get the most recent cost
-      const sortedHistory = history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      const latestCost = sortedHistory[0]
-
-      costMap.set(sku, latestCost.cost)
-      console.log(
-        `SKU ${sku}: Using latest cost ${latestCost.cost.toFixed(2)} from PO ${latestCost.poNumber} (${latestCost.date})`,
-      )
-    })
-
-    console.log(
-      "Final cost map:",
-      Array.from(costMap.entries()).map(([sku, cost]) => `${sku}: ${cost.toFixed(2)}`),
-    )
+    console.log("Cost map built:", Array.from(costMap.entries()).slice(0, 5))
     return costMap
   }
 
@@ -222,7 +185,7 @@ export default function Dashboard() {
       previousOrders: previousOrders.length,
     })
 
-    // Calculate current metrics (excluding tax)
+    // Calculate current metrics
     const totalRevenue = currentOrders.reduce((sum, order) => {
       const revenue = (order.total_amount || 0) - (order.tax_amount || 0)
       return sum + revenue
@@ -237,7 +200,7 @@ export default function Dashboard() {
       return sum + (orderRevenue - orderCost)
     }, 0)
 
-    // Calculate previous metrics for comparison (excluding tax)
+    // Calculate previous metrics for comparison
     const previousRevenue = previousOrders.reduce((sum, order) => {
       const revenue = (order.total_amount || 0) - (order.tax_amount || 0)
       return sum + revenue
@@ -287,13 +250,12 @@ export default function Dashboard() {
       .slice(0, 5)
 
     recentOrders.forEach((order) => {
-      const revenue = (order.total_amount || 0) - (order.tax_amount || 0)
       activities.push({
         id: `order-${order.id}`,
         type: "order",
         title: `Order ${order.orderNumber}`,
         description: `${order.customerName} - ${order.items.length} items`,
-        amount: revenue,
+        amount: order.total_amount || 0,
         timestamp: order.orderDate,
         status: order.status === "fulfilled" ? "success" : "info",
       })
@@ -337,62 +299,36 @@ export default function Dashboard() {
   const calculateTopProducts = (orders: ShopifyOrder[], costMap: Map<string, number>): TopProduct[] => {
     const productMap = new Map<string, TopProduct>()
 
-    console.log("Calculating top products with cost map:", Array.from(costMap.entries()).slice(0, 5))
-
     orders.forEach((order) => {
-      // Calculate tax ratio for this order to proportionally exclude tax from item prices
-      const orderTotal = order.total_amount || 0
-      const orderTax = order.tax_amount || 0
-      const taxRatio = orderTotal > 0 ? orderTax / orderTotal : 0
-
       order.items.forEach((item) => {
         const costPrice = costMap.get(item.sku) || 0
-
-        // Calculate revenue excluding proportional tax
-        const itemTotalPrice = item.total_price || 0
-        const itemTax = itemTotalPrice * taxRatio
-        const itemRevenue = itemTotalPrice - itemTax
-
-        const itemCost = costPrice * item.quantity
-        const itemProfit = itemRevenue - itemCost
-
-        console.log(
-          `Product ${item.sku}: revenue=${itemRevenue.toFixed(2)}, cost_per_unit=${costPrice.toFixed(2)}, quantity=${item.quantity}, total_cost=${itemCost.toFixed(2)}, profit=${itemProfit.toFixed(2)}`,
-        )
+        const revenue = item.total_price || 0
+        const cost = costPrice * item.quantity
+        const profit = revenue - cost
 
         if (productMap.has(item.sku)) {
           const existing = productMap.get(item.sku)!
-          existing.revenue += itemRevenue
-          existing.cost += itemCost
-          existing.profit += itemProfit
+          existing.revenue += revenue
+          existing.profit += profit
           existing.quantity += item.quantity
           existing.margin = existing.revenue > 0 ? (existing.profit / existing.revenue) * 100 : 0
         } else {
           productMap.set(item.sku, {
             sku: item.sku,
             name: item.product_name,
-            revenue: itemRevenue,
-            cost: itemCost,
-            profit: itemProfit,
+            revenue,
+            profit,
             quantity: item.quantity,
-            margin: itemRevenue > 0 ? (itemProfit / itemRevenue) * 100 : 0,
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
           })
         }
       })
     })
 
-    const products = Array.from(productMap.values())
-      .filter((product) => !isNaN(product.profit) && !isNaN(product.revenue) && product.quantity > 0)
+    return Array.from(productMap.values())
+      .filter((product) => !isNaN(product.profit) && !isNaN(product.revenue))
       .sort((a, b) => b.profit - a.profit)
       .slice(0, 5)
-
-    console.log(
-      "Top products calculated:",
-      products.map(
-        (p) => `${p.sku}: profit=${p.profit.toFixed(2)}, cost=${p.cost.toFixed(2)}, margin=${p.margin.toFixed(1)}%`,
-      ),
-    )
-    return products
   }
 
   const calculateMonthlyTrends = (orders: ShopifyOrder[], costMap: Map<string, number>): MonthlyTrend[] => {
@@ -695,7 +631,6 @@ export default function Dashboard() {
                     <TableRow>
                       <TableHead>Product</TableHead>
                       <TableHead>Revenue</TableHead>
-                      <TableHead>Cost</TableHead>
                       <TableHead>Profit</TableHead>
                       <TableHead>Margin</TableHead>
                     </TableRow>
@@ -710,7 +645,6 @@ export default function Dashboard() {
                           </div>
                         </TableCell>
                         <TableCell>{product.revenue.toFixed(2)} лв</TableCell>
-                        <TableCell className="text-red-600">{product.cost.toFixed(2)} лв</TableCell>
                         <TableCell className="text-green-600">{product.profit.toFixed(2)} лв</TableCell>
                         <TableCell>
                           <Badge

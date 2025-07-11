@@ -131,7 +131,50 @@ async function getLatestUnitCosts(): Promise<Map<string, number>> {
 }
 
 /**
- * Calculate inventory summary for each SKU including incoming stock from POs
+ * Calculate reserved quantities from pending/unshipped orders
+ */
+async function calculateReservedQuantities(): Promise<Map<string, number>> {
+  try {
+    console.log("Calculating reserved quantities from pending orders...")
+
+    // Get all orders that are not fulfilled (pending, processing, unfulfilled, etc.)
+    const { data: ordersData, error: ordersError } = await supabase
+      .from("shopify_orders")
+      .select(`
+        id,
+        status,
+        shopify_order_items (
+          sku,
+          quantity
+        )
+      `)
+      .not("status", "in", "(fulfilled,shipped,delivered,cancelled)")
+
+    if (ordersError) {
+      console.error("Error fetching pending orders:", ordersError)
+      return new Map()
+    }
+
+    const reservedMap = new Map<string, number>()
+
+    // Process each pending order
+    ordersData?.forEach((order) => {
+      order.shopify_order_items?.forEach((item) => {
+        const existing = reservedMap.get(item.sku) || 0
+        reservedMap.set(item.sku, existing + item.quantity)
+      })
+    })
+
+    console.log("Reserved quantities calculated:", Array.from(reservedMap.entries()))
+    return reservedMap
+  } catch (error) {
+    console.error("Error calculating reserved quantities:", error)
+    return new Map()
+  }
+}
+
+/**
+ * Calculate inventory summary for each SKU including incoming stock from POs and reserved from orders
  */
 async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> {
   try {
@@ -167,8 +210,8 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       throw poError
     }
 
-    // Get latest unit costs for all SKUs
-    const latestCosts = await getLatestUnitCosts()
+    // Get latest unit costs and reserved quantities
+    const [latestCosts, reservedQuantities] = await Promise.all([getLatestUnitCosts(), calculateReservedQuantities()])
 
     // Create inventory summary map
     const inventoryMap = new Map<string, InventoryItem>()
@@ -189,10 +232,11 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       }
     })
 
-    // Create inventory items with latest costs
+    // Create inventory items with latest costs and reserved quantities
     skuTotals.forEach((totals, sku) => {
       const latestCost = latestCosts.get(sku) || 0
-      console.log(`SKU ${sku}: quantity=${totals.totalQuantity}, latest_cost=${latestCost}`)
+      const reserved = reservedQuantities.get(sku) || 0
+      console.log(`SKU ${sku}: quantity=${totals.totalQuantity}, latest_cost=${latestCost}, reserved=${reserved}`)
 
       inventoryMap.set(sku, {
         id: `summary-${sku}`,
@@ -200,7 +244,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
         name: totals.productName,
         inStock: totals.totalQuantity,
         incoming: 0,
-        reserved: 0,
+        reserved: reserved,
         unitCost: latestCost,
       })
     })
@@ -213,17 +257,33 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
           existing.incoming += item.quantity
         } else {
           // Create new entry for items that are only incoming
+          const reserved = reservedQuantities.get(item.sku) || 0
           inventoryMap.set(item.sku, {
             id: `summary-${item.sku}`,
             sku: item.sku,
             name: item.product_name,
             inStock: 0,
             incoming: item.quantity,
-            reserved: 0,
+            reserved: reserved,
             unitCost: latestCosts.get(item.sku) || 0,
           })
         }
       })
+    })
+
+    // Add items that only have reserved quantities (no stock, no incoming)
+    reservedQuantities.forEach((reserved, sku) => {
+      if (!inventoryMap.has(sku)) {
+        inventoryMap.set(sku, {
+          id: `summary-${sku}`,
+          sku: sku,
+          name: `Product ${sku}`, // Default name for items only in orders
+          inStock: 0,
+          incoming: 0,
+          reserved: reserved,
+          unitCost: latestCosts.get(sku) || 0,
+        })
+      }
     })
 
     console.log("Final inventory summary:", Array.from(inventoryMap.values()))
@@ -235,7 +295,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
 }
 
 /**
- * Fetch all inventory rows with calculated incoming stock.
+ * Fetch all inventory rows with calculated incoming stock and reserved quantities.
  */
 async function getInventory(): Promise<InventoryItem[]> {
   try {
@@ -319,6 +379,15 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
     }
 
     console.log("Successfully added inventory records:", data)
+
+    // Log the total quantities being added for each SKU
+    const skuQuantities = new Map<string, number>()
+    inventoryRecords.forEach((record) => {
+      const existing = skuQuantities.get(record.sku) || 0
+      skuQuantities.set(record.sku, existing + record.quantity_available)
+    })
+
+    console.log("Total quantities added by SKU:", Array.from(skuQuantities.entries()))
   } catch (error) {
     console.error("Error in addInventoryFromPO:", error)
     throw error
@@ -851,7 +920,7 @@ async function updateShopifyStore(id: string, updates: Partial<ShopifyStore>): P
     if (updates.shopifyDomain) dbUpdates.shopify_domain = updates.shopifyDomain
     if (updates.accessToken) dbUpdates.access_token = updates.accessToken
     if (updates.status) dbUpdates.status = updates.status
-    if (updates.lastSync) dbUpdates.lastSync = updates.lastSync
+    if (updates.lastSync) dbUpdates.last_sync = updates.lastSync
     if (updates.totalOrders !== undefined) dbUpdates.total_orders = updates.totalOrders
     if (updates.monthlyRevenue !== undefined) dbUpdates.monthly_revenue = updates.monthlyRevenue
     if (updates.webhookUrl) dbUpdates.webhook_url = updates.webhookUrl

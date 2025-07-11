@@ -19,7 +19,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { Package, TrendingUp, TrendingDown, AlertTriangle, Plus, Edit, Download, Search, Filter } from "lucide-react"
+import {
+  Package,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  Plus,
+  Edit,
+  Download,
+  Search,
+  Filter,
+  RefreshCw,
+} from "lucide-react"
 import { supabaseStore, type InventoryItem } from "@/lib/supabase-store"
 
 export default function Inventory() {
@@ -72,7 +83,10 @@ export default function Inventory() {
   async function loadInventory() {
     try {
       setLoading(true)
+      console.log("Loading inventory data...")
       const data = await supabaseStore.getInventory()
+      console.log("Loaded inventory items:", data.length)
+      console.log("Sample inventory items:", data.slice(0, 3))
       setInventory(data)
     } catch (err) {
       console.error("Error loading inventory", err)
@@ -307,6 +321,10 @@ export default function Inventory() {
               <Filter className="h-4 w-4 mr-2" />
               Filter
             </Button>
+            <Button variant="outline" size="sm" onClick={loadInventory}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -379,9 +397,15 @@ export default function Inventory() {
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.name}</TableCell>
                       <TableCell className="text-right">{item.inStock.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{item.incoming.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{item.reserved.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{available.toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-blue-600 font-medium">
+                        {item.incoming.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right text-red-600 font-medium">
+                        {item.reserved.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right text-green-600 font-medium">
+                        {available.toLocaleString()}
+                      </TableCell>
                       <TableCell className="text-right">{currency(item.unitCost)}</TableCell>
                       <TableCell className="text-right">{currency(totalVal)}</TableCell>
                       <TableCell>

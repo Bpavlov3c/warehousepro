@@ -8,7 +8,8 @@ export async function POST(request: NextRequest) {
 
     // Get all connected stores
     const stores = await supabaseStore.getShopifyStores()
-    const connectedStores = stores.filter((store) => store.status === "Connected")
+    // Allow stores that are currently being tested as well
+    const connectedStores = stores.filter((store) => store.status === "Connected" || store.status === "Testing")
 
     if (connectedStores.length === 0) {
       return NextResponse.json({
