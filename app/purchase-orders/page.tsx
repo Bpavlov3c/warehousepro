@@ -5,13 +5,13 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Search, Plus, Package, DollarSign, TrendingUp, Calendar, Trash2, Eye, Download, Edit } from "lucide-react"
 import { supabaseStore, type PurchaseOrder } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
@@ -88,57 +88,49 @@ export default function PurchaseOrders() {
     }
   }
 
-  const handleUpdatePOStatus = async (poId: string, newStatus: string) => {
-    try {
-      await supabaseStore.updatePurchaseOrderStatus(poId, newStatus as any)
-      const updatedPOs = await supabaseStore.getPurchaseOrders()
-      setPurchaseOrders(updatedPOs)
-      alert("Purchase order status updated successfully!")
-    } catch (error) {
-      console.error("Error updating purchase order status:", error)
-      alert("Error updating purchase order status. Please try again.")
-    }
-  }
-
-  const handleDeletePO = async (poId: string) => {
-    if (!confirm("Are you sure you want to delete this purchase order?")) return
-
-    try {
-      await supabaseStore.deletePurchaseOrder(poId)
-      const updatedPOs = await supabaseStore.getPurchaseOrders()
-      setPurchaseOrders(updatedPOs)
-      alert("Purchase order deleted successfully!")
-    } catch (error) {
-      console.error("Error deleting purchase order:", error)
-      alert("Error deleting purchase order. Please try again.")
-    }
-  }
-
   const handleEditPO = async () => {
     if (!editingPO) return
 
+    // Validate form data
+    if (!formData.supplier || !formData.poDate) {
+      alert("Please fill in required fields (Supplier and PO Date)")
+      return
+    }
+
     try {
-      const updatedData = {
+      // Prepare items data - filter out empty items
+      const validItems = poItems
+        .filter((item) => item.sku.trim() && item.productName.trim())
+        .map((item) => ({
+          sku: item.sku.trim(),
+          product_name: item.productName.trim(),
+          quantity: Number.parseInt(item.quantity) || 0,
+          unit_cost: Number.parseFloat(item.unitCost) || 0,
+        }))
+
+      const updateData = {
         supplier_name: formData.supplier,
+        po_date: formData.poDate,
         delivery_cost: Number.parseFloat(formData.deliveryCost) || 0,
         notes: formData.notes,
-        items: poItems
-          .filter((item) => item.sku && item.productName)
-          .map((item) => ({
-            sku: item.sku,
-            product_name: item.productName,
-            quantity: Number.parseInt(item.quantity) || 0,
-            unit_cost: Number.parseFloat(item.unitCost) || 0,
-          })),
+        items: validItems,
       }
 
-      await supabaseStore.updatePurchaseOrder(editingPO.id, updatedData)
+      console.log("Updating PO with data:", updateData)
+
+      await supabaseStore.updatePurchaseOrderWithItems(editingPO.id, updateData)
+
+      // Refresh the purchase orders list
       const updatedPOs = await supabaseStore.getPurchaseOrders()
       setPurchaseOrders(updatedPOs)
 
+      // Reset form and close dialog
+      setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
+      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
       setIsEditPOOpen(false)
       setEditingPO(null)
-      alert("Purchase order updated successfully!")
+
+      alert(`Purchase Order ${editingPO.po_number} updated successfully!`)
     } catch (error) {
       console.error("Error updating purchase order:", error)
       alert("Error updating purchase order. Please try again.")
@@ -153,116 +145,181 @@ export default function PurchaseOrders() {
       deliveryCost: po.delivery_cost.toString(),
       notes: po.notes || "",
     })
-    setPoItems(
-      po.items.map((item) => ({
-        sku: item.sku,
-        productName: item.product_name,
-        quantity: item.quantity.toString(),
-        unitCost: item.unit_cost.toString(),
-      })),
-    )
+
+    // Populate items for editing
+    const editItems = po.items.map((item) => ({
+      sku: item.sku,
+      productName: item.product_name,
+      quantity: item.quantity.toString(),
+      unitCost: item.unit_cost.toString(),
+    }))
+
+    // Ensure at least one empty row
+    if (editItems.length === 0) {
+      editItems.push({ sku: "", productName: "", quantity: "", unitCost: "" })
+    }
+
+    setPoItems(editItems)
     setIsEditPOOpen(true)
   }
 
-  const addPOItem = () => {
+  const handleUpdateStatus = async (po: PurchaseOrder, newStatus: PurchaseOrder["status"]) => {
+    try {
+      console.log(`Updating PO ${po.po_number} status from ${po.status} to ${newStatus}`)
+
+      await supabaseStore.updatePurchaseOrder(po.id, { status: newStatus })
+      const updatedPOs = await supabaseStore.getPurchaseOrders()
+      setPurchaseOrders(updatedPOs)
+
+      if (newStatus === "Delivered" && po.status !== "Delivered") {
+        alert(
+          `Purchase Order ${po.po_number} marked as delivered! Inventory has been updated with ${po.items.reduce((sum, item) => sum + item.quantity, 0)} items.`,
+        )
+      } else {
+        alert(`Purchase Order ${po.po_number} status updated to ${newStatus}`)
+      }
+    } catch (error) {
+      console.error("Error updating purchase order:", error)
+      alert("Error updating purchase order status. Please try again.")
+    }
+  }
+
+  const addPoItem = () => {
     setPoItems([...poItems, { sku: "", productName: "", quantity: "", unitCost: "" }])
   }
 
-  const removePOItem = (index: number) => {
-    setPoItems(poItems.filter((_, i) => i !== index))
+  const removePoItem = (index: number) => {
+    if (poItems.length > 1) {
+      setPoItems(poItems.filter((_, i) => i !== index))
+    }
   }
 
-  const updatePOItem = (index: number, field: string, value: string) => {
-    const updated = [...poItems]
-    updated[index] = { ...updated[index], [field]: value }
-    setPoItems(updated)
+  const updatePoItem = (index: number, field: string, value: string) => {
+    const updatedItems = poItems.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    setPoItems(updatedItems)
   }
 
-  const exportToCSV = () => {
-    const headers = [
-      "PO Number",
-      "Supplier",
-      "Date",
-      "Status",
-      "Items Count",
-      "Total Cost",
-      "Delivery Cost",
-      "Grand Total",
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "draft":
+        return "bg-gray-100 text-gray-800"
+      case "pending":
+        return "bg-yellow-100 text-yellow-800"
+      case "in transit":
+        return "bg-blue-100 text-blue-800"
+      case "delivered":
+        return "bg-green-100 text-green-800"
+      default:
+        return "bg-gray-100 text-gray-800"
+    }
+  }
+
+  const filteredOrders = purchaseOrders.filter(
+    (po) =>
+      po.po_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      po.supplier_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      po.status.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
+
+  const calculateOrderStats = (po: PurchaseOrder) => {
+    const itemCount = po.items?.length || 0
+    const totalCost = (po.items?.reduce((sum, item) => sum + item.total_cost, 0) || 0) + po.delivery_cost
+    return { itemCount, totalCost }
+  }
+
+  const totalStats = filteredOrders.reduce(
+    (acc, po) => {
+      const { itemCount, totalCost } = calculateOrderStats(po)
+      return {
+        totalOrders: acc.totalOrders + 1,
+        totalItems: acc.totalItems + itemCount,
+        totalValue: acc.totalValue + totalCost,
+        deliveredOrders: acc.deliveredOrders + (po.status.toLowerCase() === "delivered" ? 1 : 0),
+      }
+    },
+    { totalOrders: 0, totalItems: 0, totalValue: 0, deliveredOrders: 0 },
+  )
+
+  const handleExportPO = (po: PurchaseOrder) => {
+    const { itemCount, totalCost } = calculateOrderStats(po)
+    const shippingCostPerLineItem = po.items.length > 0 ? po.delivery_cost / po.items.length : 0
+
+    // Create CSV content with headers
+    const csvContent = [
+      // PO Header Information
+      ["Purchase Order Export"],
+      [""],
+      ["PO Number", po.po_number],
+      ["Supplier", po.supplier_name],
+      ["Date", new Date(po.po_date).toLocaleDateString()],
+      ["Status", po.status],
+      ["Delivery Cost", `$${po.delivery_cost.toFixed(2)}`],
+      ["Total Cost", `$${totalCost.toFixed(2)}`],
+      ["Notes", po.notes || ""],
+      [""],
+      // Items Header
+      ["Items"],
+      ["SKU", "Product Name", "Quantity", "Unit Cost", "Shipping/Unit", "Total Unit Cost", "Line Total"],
+      // Items Data
+      ...po.items.map((item) => [
+        item.sku,
+        item.product_name,
+        item.quantity.toString(),
+        `$${item.unit_cost.toFixed(2)}`,
+        `$${(shippingCostPerLineItem / item.quantity).toFixed(2)}`,
+        `$${(item.unit_cost + shippingCostPerLineItem / item.quantity).toFixed(2)}`,
+        `$${item.total_cost.toFixed(2)}`,
+      ]),
+      [""],
+      // Summary
+      ["Summary"],
+      ["Total Items", itemCount.toString()],
+      ["Total Quantity", po.items.reduce((sum, item) => sum + item.quantity, 0).toString()],
+      ["Subtotal", `$${po.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)}`],
+      ["Delivery Cost", `$${po.delivery_cost.toFixed(2)}`],
+      [
+        "Shipping Cost Per Unit",
+        `$${(shippingCostPerLineItem / po.items.reduce((sum, item) => sum + item.quantity, 0)).toFixed(2)}`,
+      ],
+      ["Grand Total", `$${totalCost.toFixed(2)}`],
     ]
 
-    const rows = filteredPOs.map((po) => {
-      const itemsTotal = po.items.reduce((sum, item) => sum + item.total_cost, 0)
-      const grandTotal = itemsTotal + po.delivery_cost
+    // Convert to CSV string
+    const csvString = csvContent.map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
 
-      return [
-        po.po_number,
-        po.supplier_name,
-        new Date(po.po_date).toLocaleDateString(),
-        po.status,
-        po.items.length.toString(),
-        itemsTotal.toFixed(2),
-        po.delivery_cost.toFixed(2),
-        grandTotal.toFixed(2),
-      ]
-    })
-
-    const csvContent = [headers, ...rows].map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    // Create and download file
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" })
     const link = document.createElement("a")
     const url = URL.createObjectURL(blob)
     link.setAttribute("href", url)
-    link.setAttribute("download", `purchase_orders_${new Date().toISOString().slice(0, 10)}.csv`)
+    link.setAttribute("download", `PO_${po.po_number}_${new Date().toISOString().split("T")[0]}.csv`)
     link.style.visibility = "hidden"
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-  }
-
-  // Filter purchase orders based on search term
-  const filteredPOs = purchaseOrders.filter(
-    (po) =>
-      po.po_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      po.supplier_name.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  // Calculate summary statistics
-  const totalPOs = purchaseOrders.length
-  const totalValue = purchaseOrders.reduce((sum, po) => {
-    const itemsTotal = po.items.reduce((itemSum, item) => itemSum + item.total_cost, 0)
-    return sum + itemsTotal + po.delivery_cost
-  }, 0)
-  const pendingPOs = purchaseOrders.filter((po) => po.status === "Pending" || po.status === "In Transit").length
-  const deliveredPOs = purchaseOrders.filter((po) => po.status === "Delivered").length
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Draft":
-        return "secondary"
-      case "Pending":
-        return "default"
-      case "In Transit":
-        return "outline"
-      case "Delivered":
-        return "default"
-      case "Cancelled":
-        return "destructive"
-      default:
-        return "secondary"
-    }
+    URL.revokeObjectURL(url)
   }
 
   if (loading) {
     return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 items-center gap-2 border-b px-4">
+      <div className="flex flex-col">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
         </header>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p>Loading purchase orders...</p>
+        <div className="p-6">
+          <div className="animate-pulse">
+            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-24 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+            <div className="space-y-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-32 bg-gray-200 rounded"></div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -271,14 +328,18 @@ export default function PurchaseOrders() {
 
   if (error) {
     return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 items-center gap-2 border-b px-4">
+      <div className="flex flex-col">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
         </header>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center text-red-600">
-            <p>Error: {error}</p>
+        <div className="p-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h3 className="text-red-800 font-medium">Error loading purchase orders</h3>
+            <p className="text-red-600 mt-1">{error}</p>
+            <Button onClick={() => window.location.reload()} className="mt-3" variant="outline">
+              Try Again
+            </Button>
           </div>
         </div>
       </div>
@@ -286,349 +347,128 @@ export default function PurchaseOrders() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <header className="flex h-16 items-center gap-2 border-b px-4">
+    <div className="flex flex-col">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <Package className="h-5 w-5" />
-          <span className="hidden sm:inline">Purchase Orders</span>
-          <span className="sm:hidden">POs</span>
-        </h1>
+        <div className="flex items-center justify-between w-full">
+          <h1 className="text-lg font-semibold">Purchase Orders</h1>
+          <Button onClick={() => setIsNewPOOpen(true)} size="sm" className="lg:hidden">
+            <Plus className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 pt-6">
-        {/* Summary Cards */}
-        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total POs</p>
-                  <p className="text-lg sm:text-2xl font-bold">{totalPOs}</p>
-                </div>
-                <Package className="h-4 w-4 text-muted-foreground" />
+      <div className="p-4 space-y-4">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold hidden lg:block">Purchase Orders</h1>
+          <Button onClick={() => setIsNewPOOpen(true)} size="sm" className="hidden lg:flex">
+            <Plus className="w-4 h-4 mr-2" />
+            New PO
+          </Button>
+        </div>
+
+        {/* Compact Stats Cards - Mobile responsive */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600">Total Orders</p>
+                <p className="text-lg font-bold">{totalStats.totalOrders}</p>
               </div>
-            </CardContent>
+              <Package className="w-5 h-5 text-blue-600" />
+            </div>
           </Card>
 
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Value</p>
-                  <p className="text-lg sm:text-2xl font-bold">{totalValue.toLocaleString()} лв</p>
-                </div>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
+          <Card className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600">Total Items</p>
+                <p className="text-lg font-bold">{totalStats.totalItems}</p>
               </div>
-            </CardContent>
+              <TrendingUp className="w-5 h-5 text-green-600" />
+            </div>
           </Card>
 
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Pending</p>
-                  <p className="text-lg sm:text-2xl font-bold text-yellow-600">{pendingPOs}</p>
-                </div>
-                <Calendar className="h-4 w-4 text-muted-foreground" />
+          <Card className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600">Total Value</p>
+                <p className="text-lg font-bold">${totalStats.totalValue.toFixed(2)}</p>
               </div>
-            </CardContent>
+              <DollarSign className="w-5 h-5 text-purple-600" />
+            </div>
           </Card>
 
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Delivered</p>
-                  <p className="text-lg sm:text-2xl font-bold text-green-600">{deliveredPOs}</p>
-                </div>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          <Card className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600">Delivered</p>
+                <p className="text-lg font-bold">{totalStats.deliveredOrders}</p>
               </div>
-            </CardContent>
+              <Calendar className="w-5 h-5 text-orange-600" />
+            </div>
           </Card>
         </div>
 
-        {/* Actions Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-          <div className="relative">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-8 w-full sm:w-[300px]"
-              placeholder="Search purchase orders..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={exportToCSV} className="flex-1 sm:flex-none bg-transparent">
-              <Download className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Export CSV</span>
-              <span className="sm:hidden">Export</span>
-            </Button>
-
-            <Button size="sm" onClick={() => setIsNewPOOpen(true)} className="flex-1 sm:flex-none">
-              <Plus className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">New PO</span>
-              <span className="sm:hidden">New</span>
-            </Button>
-          </div>
+        {/* Compact Search */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Input
+            placeholder="Search purchase orders..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 h-9"
+          />
         </div>
 
-        {/* Purchase Orders Table */}
-        <Card>
-          <CardContent className="p-0 sm:p-6">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[100px]">PO Number</TableHead>
-                    <TableHead className="min-w-[120px]">Supplier</TableHead>
-                    <TableHead className="min-w-[100px] hidden sm:table-cell">Date</TableHead>
-                    <TableHead className="min-w-[80px]">Status</TableHead>
-                    <TableHead className="text-right min-w-[60px] hidden md:table-cell">Items</TableHead>
-                    <TableHead className="text-right min-w-[100px]">Total</TableHead>
-                    <TableHead className="text-center min-w-[120px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPOs.map((po) => {
-                    const itemsTotal = po.items.reduce((sum, item) => sum + item.total_cost, 0)
-                    const grandTotal = itemsTotal + po.delivery_cost
-
-                    return (
-                      <TableRow key={po.id}>
-                        <TableCell className="font-medium text-xs sm:text-sm">{po.po_number}</TableCell>
-                        <TableCell className="text-xs sm:text-sm">{po.supplier_name}</TableCell>
-                        <TableCell className="text-xs sm:text-sm hidden sm:table-cell">
-                          {new Date(po.po_date).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getStatusColor(po.status)} className="text-xs">
-                            {po.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right text-xs sm:text-sm hidden md:table-cell">
-                          {po.items.length}
-                        </TableCell>
-                        <TableCell className="text-right font-medium text-xs sm:text-sm">
-                          {grandTotal.toFixed(2)} лв
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setSelectedPO(po)
-                                setIsViewPOOpen(true)
-                              }}
-                              className="h-8 w-8"
-                            >
-                              <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(po)} className="h-8 w-8">
-                              <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeletePO(po.id)}
-                              className="h-8 w-8 text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-
-              {filteredPOs.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  {searchTerm ? "No purchase orders match your search." : "No purchase orders found."}
-                </div>
+        {/* Mobile Card View / Desktop Table View */}
+        <div className="lg:hidden space-y-3">
+          {filteredOrders.length === 0 ? (
+            <Card className="p-6 text-center">
+              <Package className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+              <p className="text-gray-500">{searchTerm ? "No purchase orders found." : "No purchase orders yet."}</p>
+              {!searchTerm && (
+                <Button onClick={() => setIsNewPOOpen(true)} className="mt-2" size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create First PO
+                </Button>
               )}
-            </div>
-          </CardContent>
-        </Card>
+            </Card>
+          ) : (
+            filteredOrders.map((po) => {
+              const { itemCount, totalCost } = calculateOrderStats(po)
+              const isEditable = po.status.toLowerCase() !== "delivered"
 
-        {/* New PO Dialog */}
-        <Dialog open={isNewPOOpen} onOpenChange={setIsNewPOOpen}>
-          <DialogContent className="w-[95vw] max-w-4xl max-h-[90vh]">
-            <DialogHeader>
-              <DialogTitle>Create New Purchase Order</DialogTitle>
-              <DialogDescription>Add a new purchase order to track incoming inventory.</DialogDescription>
-            </DialogHeader>
-
-            <ScrollArea className="max-h-[70vh] pr-4">
-              <div className="space-y-6">
-                {/* Basic Information */}
-                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Supplier Name *</label>
-                    <Input
-                      value={formData.supplier}
-                      onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                      placeholder="Enter supplier name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">PO Date *</label>
-                    <Input
-                      type="date"
-                      value={formData.poDate}
-                      onChange={(e) => setFormData({ ...formData, poDate: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Delivery Cost</label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.deliveryCost}
-                      onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Notes</label>
-                    <Input
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      placeholder="Optional notes"
-                    />
-                  </div>
-                </div>
-
-                {/* Items */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-medium">Items</h3>
-                    <Button type="button" variant="outline" size="sm" onClick={addPOItem}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Item
-                    </Button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {poItems.map((item, index) => (
-                      <div
-                        key={index}
-                        className="grid gap-2 grid-cols-1 sm:grid-cols-5 items-end p-3 border rounded-lg"
-                      >
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">SKU</label>
-                          <Input
-                            value={item.sku}
-                            onChange={(e) => updatePOItem(index, "sku", e.target.value)}
-                            placeholder="SKU"
-                            className="text-sm"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Product Name</label>
-                          <Input
-                            value={item.productName}
-                            onChange={(e) => updatePOItem(index, "productName", e.target.value)}
-                            placeholder="Product name"
-                            className="text-sm"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Quantity</label>
-                          <Input
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => updatePOItem(index, "quantity", e.target.value)}
-                            placeholder="0"
-                            className="text-sm"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Unit Cost</label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={item.unitCost}
-                            onChange={(e) => updatePOItem(index, "unitCost", e.target.value)}
-                            placeholder="0.00"
-                            className="text-sm"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removePOItem(index)}
-                          className="h-8 w-8 text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </ScrollArea>
-
-            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t">
-              <Button variant="outline" onClick={() => setIsNewPOOpen(false)} className="w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button onClick={handleCreatePO} className="w-full sm:w-auto">
-                Create Purchase Order
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* View PO Dialog */}
-        <Dialog open={isViewPOOpen} onOpenChange={setIsViewPOOpen}>
-          <DialogContent className="w-[95vw] max-w-4xl max-h-[90vh]">
-            <DialogHeader>
-              <DialogTitle>Purchase Order Details</DialogTitle>
-              <DialogDescription>
-                {selectedPO && `PO Number: ${selectedPO.po_number} - ${selectedPO.supplier_name}`}
-              </DialogDescription>
-            </DialogHeader>
-
-            {selectedPO && (
-              <ScrollArea className="max-h-[70vh] pr-4">
-                <div className="space-y-6">
-                  {/* Basic Info */}
-                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+              return (
+                <Card key={po.id} className="p-4">
+                  <div className="flex justify-between items-start mb-3">
                     <div>
-                      <label className="text-sm font-medium text-muted-foreground">Supplier</label>
-                      <p className="text-sm">{selectedPO.supplier_name}</p>
+                      <h3 className="font-medium">{po.po_number}</h3>
+                      <p className="text-sm text-gray-600 truncate">{po.supplier_name}</p>
+                    </div>
+                    <Badge className={`${getStatusColor(po.status)} text-xs`}>{po.status}</Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                    <div>
+                      <span className="text-gray-600">Date:</span>
+                      <p>{new Date(po.po_date).toLocaleDateString()}</p>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-muted-foreground">Date</label>
-                      <p className="text-sm">{new Date(selectedPO.po_date).toLocaleDateString()}</p>
+                      <span className="text-gray-600">Items:</span>
+                      <p>{itemCount}</p>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-muted-foreground">Status</label>
-                      <div className="mt-1">
-                        <Badge variant={getStatusColor(selectedPO.status)}>{selectedPO.status}</Badge>
-                      </div>
+                      <span className="text-gray-600">Total:</span>
+                      <p className="font-medium">${totalCost.toFixed(2)}</p>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-muted-foreground">Delivery Cost</label>
-                      <p className="text-sm">{selectedPO.delivery_cost.toFixed(2)} лв</p>
-                    </div>
-                  </div>
-
-                  {/* Status Update */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Update Status</label>
-                    <div className="flex gap-2">
+                      <span className="text-gray-600">Status:</span>
                       <Select
-                        value={selectedPO.status}
-                        onValueChange={(value) => handleUpdatePOStatus(selectedPO.id, value)}
+                        value={po.status}
+                        onValueChange={(newStatus) => handleUpdateStatus(po, newStatus as PurchaseOrder["status"])}
                       >
-                        <SelectTrigger className="w-[180px]">
+                        <SelectTrigger className="w-full h-8 text-xs mt-1">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -636,200 +476,738 @@ export default function PurchaseOrders() {
                           <SelectItem value="Pending">Pending</SelectItem>
                           <SelectItem value="In Transit">In Transit</SelectItem>
                           <SelectItem value="Delivered">Delivered</SelectItem>
-                          <SelectItem value="Cancelled">Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
 
-                  {/* Items */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">Items</h3>
-                    <div className="overflow-x-auto">
+                  <div className="flex gap-2">
+                    {isEditable && (
+                      <Button variant="outline" size="sm" onClick={() => openEditDialog(po)}>
+                        <Edit className="w-4 h-4 mr-1" />
+                        Edit
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedPO(po)
+                        setIsViewPOOpen(true)
+                      }}
+                    >
+                      <Eye className="w-4 h-4 mr-1" />
+                      View
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleExportPO(po)}>
+                      <Download className="w-4 h-4 mr-1" />
+                      Export
+                    </Button>
+                  </div>
+                </Card>
+              )
+            })
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        <Card className="hidden lg:block">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="h-10">
+                  <TableHead className="w-[120px]">PO Number</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead className="w-[100px]">Date</TableHead>
+                  <TableHead className="w-[80px]">Status</TableHead>
+                  <TableHead className="w-[60px] text-right">Items</TableHead>
+                  <TableHead className="w-[100px] text-right">Total</TableHead>
+                  <TableHead className="w-[160px] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredOrders.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8">
+                      <Package className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-500">
+                        {searchTerm ? "No purchase orders found." : "No purchase orders yet."}
+                      </p>
+                      {!searchTerm && (
+                        <Button onClick={() => setIsNewPOOpen(true)} className="mt-2" size="sm">
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create First PO
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredOrders.map((po) => {
+                    const { itemCount, totalCost } = calculateOrderStats(po)
+                    const isEditable = po.status.toLowerCase() !== "delivered"
+
+                    return (
+                      <TableRow key={po.id} className="h-12">
+                        <TableCell className="font-medium">{po.po_number}</TableCell>
+                        <TableCell className="max-w-[150px] truncate">{po.supplier_name}</TableCell>
+                        <TableCell className="text-sm">{new Date(po.po_date).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          <Badge className={`${getStatusColor(po.status)} text-xs px-2 py-1`}>{po.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{itemCount}</TableCell>
+                        <TableCell className="text-right font-medium">${totalCost.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1 items-center">
+                            <Select
+                              value={po.status}
+                              onValueChange={(newStatus) =>
+                                handleUpdateStatus(po, newStatus as PurchaseOrder["status"])
+                              }
+                            >
+                              <SelectTrigger className="w-[110px] h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Draft">Draft</SelectItem>
+                                <SelectItem value="Pending">Pending</SelectItem>
+                                <SelectItem value="In Transit">In Transit</SelectItem>
+                                <SelectItem value="Delivered">Delivered</SelectItem>
+                              </SelectContent>
+                            </Select>
+
+                            {isEditable && (
+                              <Button variant="ghost" size="sm" onClick={() => openEditDialog(po)} title="Edit PO">
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                            )}
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedPO(po)
+                                setIsViewPOOpen(true)
+                              }}
+                              title="View Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleExportPO(po)} title="Export PO">
+                              <Download className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* View PO Dialog - Mobile responsive */}
+        <Dialog open={isViewPOOpen} onOpenChange={setIsViewPOOpen}>
+          <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col w-[95vw] lg:w-full">
+            <DialogHeader className="flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle>Purchase Order Details - {selectedPO?.po_number}</DialogTitle>
+                  <DialogDescription className="mt-1">
+                    {selectedPO &&
+                      `${selectedPO.items.length} items • Total: $${calculateOrderStats(selectedPO).totalCost.toFixed(2)}`}
+                  </DialogDescription>
+                </div>
+                {selectedPO && (
+                  <Button variant="outline" size="sm" onClick={() => handleExportPO(selectedPO)}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Export
+                  </Button>
+                )}
+              </div>
+            </DialogHeader>
+
+            {selectedPO && (
+              <div className="flex-1 overflow-hidden flex flex-col space-y-4">
+                {/* Header Info - Mobile responsive grid */}
+                <div className="flex-shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-600">Supplier</p>
+                    <p className="font-medium">{selectedPO.supplier_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Date</p>
+                    <p className="font-medium">{new Date(selectedPO.po_date).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Status</p>
+                    <Badge className={getStatusColor(selectedPO.status)}>{selectedPO.status}</Badge>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Delivery Cost</p>
+                    <p className="font-medium">${selectedPO.delivery_cost.toFixed(2)}</p>
+                  </div>
+                </div>
+
+                {/* Notes - Fixed height if present */}
+                {selectedPO.notes && (
+                  <div className="flex-shrink-0">
+                    <p className="text-gray-600 text-sm">Notes</p>
+                    <p className="text-sm bg-gray-50 p-2 rounded max-h-20 overflow-y-auto">{selectedPO.notes}</p>
+                  </div>
+                )}
+
+                {/* Items Table - Mobile responsive */}
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  <p className="text-gray-600 text-sm mb-2 flex-shrink-0">Items ({selectedPO.items.length})</p>
+
+                  {/* Mobile Cards View */}
+                  <div className="lg:hidden flex-1 overflow-y-auto space-y-3">
+                    {selectedPO.items.map((item, index) => {
+                      const shippingCostPerLineItem =
+                        selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
+                      const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
+                      const totalUnitCost = item.unit_cost + shippingCostPerUnit
+
+                      return (
+                        <Card key={item.id || index} className="p-3">
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium text-sm">{item.product_name}</p>
+                                <p className="text-xs text-gray-600 font-mono">{item.sku}</p>
+                              </div>
+                              <Badge variant="outline">{item.quantity}</Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <span className="text-gray-600">Unit Cost:</span>
+                                <p>${item.unit_cost.toFixed(2)}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Shipping/Unit:</span>
+                                <p>${shippingCostPerUnit.toFixed(2)}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Total Unit:</span>
+                                <p className="font-medium">${totalUnitCost.toFixed(2)}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Line Total:</span>
+                                <p className="font-medium">${item.total_cost.toFixed(2)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      )
+                    })}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden lg:block flex-1 border rounded-lg">
+                    <ScrollArea className="h-[400px]">
                       <Table>
-                        <TableHeader>
+                        <TableHeader className="sticky top-0 bg-white z-10 border-b">
                           <TableRow>
-                            <TableHead>SKU</TableHead>
-                            <TableHead>Product Name</TableHead>
-                            <TableHead className="text-right">Quantity</TableHead>
-                            <TableHead className="text-right">Unit Cost</TableHead>
-                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead className="w-[100px]">SKU</TableHead>
+                            <TableHead className="min-w-[200px]">Product</TableHead>
+                            <TableHead className="w-[80px] text-right">Qty</TableHead>
+                            <TableHead className="w-[100px] text-right">Unit Cost</TableHead>
+                            <TableHead className="w-[100px] text-right">Shipping/Unit</TableHead>
+                            <TableHead className="w-[120px] text-right">Total Unit Cost</TableHead>
+                            <TableHead className="w-[100px] text-right">Line Total</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {selectedPO.items.map((item, index) => (
-                            <TableRow key={index}>
-                              <TableCell className="font-medium text-sm">{item.sku}</TableCell>
-                              <TableCell className="text-sm">{item.product_name}</TableCell>
-                              <TableCell className="text-right text-sm">{item.quantity}</TableCell>
-                              <TableCell className="text-right text-sm">{item.unit_cost.toFixed(2)} лв</TableCell>
-                              <TableCell className="text-right font-medium text-sm">
-                                {item.total_cost.toFixed(2)} лв
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {selectedPO.items.map((item, index) => {
+                            const shippingCostPerLineItem =
+                              selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
+                            const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
+                            const totalUnitCost = item.unit_cost + shippingCostPerUnit
+
+                            return (
+                              <TableRow key={item.id || index} className="hover:bg-gray-50">
+                                <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                                <TableCell className="max-w-[200px]">
+                                  <div className="truncate" title={item.product_name}>
+                                    {item.product_name}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">{item.quantity}</TableCell>
+                                <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${shippingCostPerUnit.toFixed(2)}</TableCell>
+                                <TableCell className="text-right font-medium">${totalUnitCost.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${item.total_cost.toFixed(2)}</TableCell>
+                              </TableRow>
+                            )
+                          })}
                         </TableBody>
                       </Table>
-                    </div>
+                    </ScrollArea>
+                  </div>
+                </div>
 
-                    {/* Totals */}
-                    <div className="space-y-2 pt-4 border-t">
-                      <div className="flex justify-between text-sm">
-                        <span>Items Total:</span>
-                        <span>{selectedPO.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)} лв</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Delivery Cost:</span>
-                        <span>{selectedPO.delivery_cost.toFixed(2)} лв</span>
-                      </div>
-                      <div className="flex justify-between font-medium">
-                        <span>Grand Total:</span>
-                        <span>
-                          {(
-                            selectedPO.items.reduce((sum, item) => sum + item.total_cost, 0) + selectedPO.delivery_cost
-                          ).toFixed(2)}{" "}
-                          лв
-                        </span>
-                      </div>
+                {/* Summary - Fixed at bottom, mobile responsive */}
+                <div className="flex-shrink-0 bg-gray-50 p-3 rounded-lg">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-gray-600">Total Items</p>
+                      <p className="font-medium">{selectedPO.items.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Total Quantity</p>
+                      <p className="font-medium">{selectedPO.items.reduce((sum, item) => sum + item.quantity, 0)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Subtotal</p>
+                      <p className="font-medium">
+                        ${selectedPO.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Grand Total</p>
+                      <p className="font-bold text-lg">${calculateOrderStats(selectedPO).totalCost.toFixed(2)}</p>
                     </div>
                   </div>
-
-                  {/* Notes */}
-                  {selectedPO.notes && (
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-muted-foreground">Notes</label>
-                      <p className="text-sm">{selectedPO.notes}</p>
-                    </div>
-                  )}
                 </div>
-              </ScrollArea>
+              </div>
             )}
+          </DialogContent>
+        </Dialog>
 
-            <div className="flex justify-end pt-4 border-t">
-              <Button onClick={() => setIsViewPOOpen(false)}>Close</Button>
+        {/* Create New PO Dialog - Mobile responsive */}
+        <Dialog open={isNewPOOpen} onOpenChange={setIsNewPOOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto w-[95vw] lg:w-full">
+            <DialogHeader>
+              <DialogTitle>Create New Purchase Order</DialogTitle>
+              <DialogDescription>Add a new purchase order to track inventory costs</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="supplier">Supplier *</label>
+                  <Input
+                    id="supplier"
+                    placeholder="Supplier name"
+                    value={formData.supplier}
+                    onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="po-date">PO Date *</label>
+                  <Input
+                    id="po-date"
+                    type="date"
+                    value={formData.poDate}
+                    onChange={(e) => setFormData({ ...formData, poDate: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="delivery-cost">Delivery Cost</label>
+                <Input
+                  id="delivery-cost"
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={formData.deliveryCost}
+                  onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
+                />
+              </div>
+
+              {/* PO Items Section - Mobile responsive */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-base font-medium">Purchase Order Items</label>
+                  <Button type="button" variant="outline" size="sm" onClick={addPoItem}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Item
+                  </Button>
+                </div>
+
+                <div className="space-y-3">
+                  {poItems.map((item, index) => (
+                    <div key={index} className="space-y-3 lg:space-y-0">
+                      {/* Mobile Layout */}
+                      <div className="lg:hidden space-y-3 p-3 border rounded-lg">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs">SKU</label>
+                            <Input
+                              placeholder="SKU"
+                              value={item.sku}
+                              onChange={(e) => updatePoItem(index, "sku", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs">Quantity</label>
+                            <Input
+                              type="number"
+                              placeholder="Qty"
+                              value={item.quantity}
+                              onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-xs">Product Name</label>
+                          <Input
+                            placeholder="Product name"
+                            value={item.productName}
+                            onChange={(e) => updatePoItem(index, "productName", e.target.value)}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <label className="text-xs">Unit Cost</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={item.unitCost}
+                              onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removePoItem(index)}
+                              disabled={poItems.length === 1}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Desktop Layout */}
+                      <div className="hidden lg:grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-3">
+                          <label className="text-xs">SKU</label>
+                          <Input
+                            placeholder="SKU"
+                            value={item.sku}
+                            onChange={(e) => updatePoItem(index, "sku", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-4">
+                          <label className="text-xs">Product Name</label>
+                          <Input
+                            placeholder="Product name"
+                            value={item.productName}
+                            onChange={(e) => updatePoItem(index, "productName", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs">Quantity</label>
+                          <Input
+                            type="number"
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs">Unit Cost</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={item.unitCost}
+                            onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removePoItem(index)}
+                            disabled={poItems.length === 1}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total Preview */}
+                <div className="bg-muted p-3 rounded-lg">
+                  <div className="flex justify-between text-sm">
+                    <span>Items Total:</span>
+                    <span>
+                      $
+                      {poItems
+                        .reduce((sum, item) => {
+                          const qty = Number.parseFloat(item.quantity) || 0
+                          const cost = Number.parseFloat(item.unitCost) || 0
+                          return sum + qty * cost
+                        }, 0)
+                        .toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Delivery Cost:</span>
+                    <span>${Number.parseFloat(formData.deliveryCost || "0").toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-medium border-t pt-2 mt-2">
+                    <span>Total:</span>
+                    <span>
+                      $
+                      {(
+                        poItems.reduce((sum, item) => {
+                          const qty = Number.parseFloat(item.quantity) || 0
+                          const cost = Number.parseFloat(item.unitCost) || 0
+                          return sum + qty * cost
+                        }, 0) + Number.parseFloat(formData.deliveryCost || "0")
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="notes">Notes</label>
+                <Input
+                  id="notes"
+                  placeholder="Additional notes..."
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col-reverse lg:flex-row justify-end space-y-2 space-y-reverse lg:space-y-0 lg:space-x-2">
+              <Button variant="outline" onClick={() => setIsNewPOOpen(false)} className="w-full lg:w-auto">
+                Cancel
+              </Button>
+              <Button onClick={handleCreatePO} className="w-full lg:w-auto">
+                Create PO
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
 
-        {/* Edit PO Dialog */}
+        {/* Edit PO Dialog - Mobile responsive */}
         <Dialog open={isEditPOOpen} onOpenChange={setIsEditPOOpen}>
-          <DialogContent className="w-[95vw] max-w-4xl max-h-[90vh]">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto w-[95vw] lg:w-full">
             <DialogHeader>
-              <DialogTitle>Edit Purchase Order</DialogTitle>
-              <DialogDescription>
-                {editingPO && `Editing PO: ${editingPO.po_number} - ${editingPO.supplier_name}`}
-              </DialogDescription>
+              <DialogTitle>Edit Purchase Order - {editingPO?.po_number}</DialogTitle>
+              <DialogDescription>Modify purchase order details and items</DialogDescription>
             </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="edit-supplier">Supplier *</label>
+                  <Input
+                    id="edit-supplier"
+                    placeholder="Supplier name"
+                    value={formData.supplier}
+                    onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="edit-po-date">PO Date *</label>
+                  <Input
+                    id="edit-po-date"
+                    type="date"
+                    value={formData.poDate}
+                    onChange={(e) => setFormData({ ...formData, poDate: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
 
-            <ScrollArea className="max-h-[70vh] pr-4">
-              <div className="space-y-6">
-                {/* Basic Information */}
-                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Supplier Name *</label>
-                    <Input
-                      value={formData.supplier}
-                      onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                      placeholder="Enter supplier name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Delivery Cost</label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.deliveryCost}
-                      onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="space-y-2 sm:col-span-2">
-                    <label className="text-sm font-medium">Notes</label>
-                    <Input
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      placeholder="Optional notes"
-                    />
-                  </div>
+              <div className="space-y-2">
+                <label htmlFor="edit-delivery-cost">Delivery Cost</label>
+                <Input
+                  id="edit-delivery-cost"
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={formData.deliveryCost}
+                  onChange={(e) => setFormData({ ...formData, deliveryCost: e.target.value })}
+                />
+              </div>
+
+              {/* PO Items Section - Mobile responsive */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-base font-medium">Purchase Order Items</label>
+                  <Button type="button" variant="outline" size="sm" onClick={addPoItem}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Item
+                  </Button>
                 </div>
 
-                {/* Items */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-medium">Items</h3>
-                    <Button type="button" variant="outline" size="sm" onClick={addPOItem}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Item
-                    </Button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {poItems.map((item, index) => (
-                      <div
-                        key={index}
-                        className="grid gap-2 grid-cols-1 sm:grid-cols-5 items-end p-3 border rounded-lg"
-                      >
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">SKU</label>
-                          <Input
-                            value={item.sku}
-                            onChange={(e) => updatePOItem(index, "sku", e.target.value)}
-                            placeholder="SKU"
-                            className="text-sm"
-                          />
+                <div className="space-y-3">
+                  {poItems.map((item, index) => (
+                    <div key={index} className="space-y-3 lg:space-y-0">
+                      {/* Mobile Layout */}
+                      <div className="lg:hidden space-y-3 p-3 border rounded-lg">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs">SKU</label>
+                            <Input
+                              placeholder="SKU"
+                              value={item.sku}
+                              onChange={(e) => updatePoItem(index, "sku", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs">Quantity</label>
+                            <Input
+                              type="number"
+                              placeholder="Qty"
+                              value={item.quantity}
+                              onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Product Name</label>
+                        <div>
+                          <label className="text-xs">Product Name</label>
                           <Input
-                            value={item.productName}
-                            onChange={(e) => updatePOItem(index, "productName", e.target.value)}
                             placeholder="Product name"
-                            className="text-sm"
+                            value={item.productName}
+                            onChange={(e) => updatePoItem(index, "productName", e.target.value)}
                           />
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Quantity</label>
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <label className="text-xs">Unit Cost</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={item.unitCost}
+                              onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removePoItem(index)}
+                              disabled={poItems.length === 1}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Desktop Layout */}
+                      <div className="hidden lg:grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-3">
+                          <label className="text-xs">SKU</label>
+                          <Input
+                            placeholder="SKU"
+                            value={item.sku}
+                            onChange={(e) => updatePoItem(index, "sku", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-4">
+                          <label className="text-xs">Product Name</label>
+                          <Input
+                            placeholder="Product name"
+                            value={item.productName}
+                            onChange={(e) => updatePoItem(index, "productName", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs">Quantity</label>
                           <Input
                             type="number"
+                            placeholder="Qty"
                             value={item.quantity}
-                            onChange={(e) => updatePOItem(index, "quantity", e.target.value)}
-                            placeholder="0"
-                            className="text-sm"
+                            onChange={(e) => updatePoItem(index, "quantity", e.target.value)}
                           />
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium">Unit Cost</label>
+                        <div className="col-span-2">
+                          <label className="text-xs">Unit Cost</label>
                           <Input
                             type="number"
                             step="0.01"
-                            value={item.unitCost}
-                            onChange={(e) => updatePOItem(index, "unitCost", e.target.value)}
                             placeholder="0.00"
-                            className="text-sm"
+                            value={item.unitCost}
+                            onChange={(e) => updatePoItem(index, "unitCost", e.target.value)}
                           />
                         </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removePOItem(index)}
-                          className="h-8 w-8 text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="col-span-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removePoItem(index)}
+                            disabled={poItems.length === 1}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                    ))}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total Preview */}
+                <div className="bg-muted p-3 rounded-lg">
+                  <div className="flex justify-between text-sm">
+                    <span>Items Total:</span>
+                    <span>
+                      $
+                      {poItems
+                        .reduce((sum, item) => {
+                          const qty = Number.parseFloat(item.quantity) || 0
+                          const cost = Number.parseFloat(item.unitCost) || 0
+                          return sum + qty * cost
+                        }, 0)
+                        .toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Delivery Cost:</span>
+                    <span>${Number.parseFloat(formData.deliveryCost || "0").toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-medium border-t pt-2 mt-2">
+                    <span>Total:</span>
+                    <span>
+                      $
+                      {(
+                        poItems.reduce((sum, item) => {
+                          const qty = Number.parseFloat(item.quantity) || 0
+                          const cost = Number.parseFloat(item.unitCost) || 0
+                          return sum + qty * cost
+                        }, 0) + Number.parseFloat(formData.deliveryCost || "0")
+                      ).toFixed(2)}
+                    </span>
                   </div>
                 </div>
               </div>
-            </ScrollArea>
 
-            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t">
-              <Button variant="outline" onClick={() => setIsEditPOOpen(false)} className="w-full sm:w-auto">
+              <div className="space-y-2">
+                <label htmlFor="edit-notes">Notes</label>
+                <Input
+                  id="edit-notes"
+                  placeholder="Additional notes..."
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col-reverse lg:flex-row justify-end space-y-2 space-y-reverse lg:space-y-0 lg:space-x-2">
+              <Button variant="outline" onClick={() => setIsEditPOOpen(false)} className="w-full lg:w-auto">
                 Cancel
               </Button>
-              <Button onClick={handleEditPO} className="w-full sm:w-auto">
-                Update Purchase Order
+              <Button onClick={handleEditPO} className="w-full lg:w-auto">
+                Update PO
               </Button>
             </div>
           </DialogContent>

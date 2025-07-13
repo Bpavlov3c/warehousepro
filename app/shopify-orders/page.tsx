@@ -7,265 +7,383 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { DateRangePicker } from "@/components/date-range-picker"
-import { ShoppingCart, DollarSign, TrendingUp, Package, Search, RefreshCw, Download, Eye, Users } from "lucide-react"
-import { supabaseStore, type ShopifyOrder } from "@/lib/supabase-store"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Progress } from "@/components/ui/progress"
+import {
+  Search,
+  Filter,
+  Download,
+  RefreshCw,
+  Store,
+  ShoppingCart,
+  DollarSign,
+  Eye,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react"
+import { supabaseStore, type ShopifyOrder, type ShopifyStore } from "@/lib/supabase-store"
 
 export default function ShopifyOrders() {
   const [orders, setOrders] = useState<ShopifyOrder[]>([])
-  const [filteredOrders, setFilteredOrders] = useState<ShopifyOrder[]>([])
-  const [loading, setLoading] = useState(true)
+  const [stores, setStores] = useState<ShopifyStore[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
-  const [isViewOrderOpen, setIsViewOrderOpen] = useState(false)
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({})
+  const [selectedStoreId, setSelectedStoreId] = useState<string>("all")
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, store: "" })
+  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
 
+  // Load data on component mount
   useEffect(() => {
-    loadOrders()
+    const loadData = async () => {
+      try {
+        const [ordersData, storesData] = await Promise.all([
+          supabaseStore.getShopifyOrders(),
+          supabaseStore.getShopifyStores(),
+        ])
+        setOrders(ordersData)
+        setStores(storesData)
+      } catch (error) {
+        console.error("Error loading data:", error)
+      }
+    }
+    loadData()
   }, [])
 
-  useEffect(() => {
-    filterOrders()
-  }, [orders, searchTerm, dateRange])
-
-  const loadOrders = async () => {
-    try {
-      setLoading(true)
-      const data = await supabaseStore.getShopifyOrders()
-      console.log("Loaded orders:", data.length)
-      setOrders(data)
-    } catch (error) {
-      console.error("Error loading orders:", error)
-    } finally {
-      setLoading(false)
+  const toggleOrderExpansion = (orderId: string) => {
+    const newExpanded = new Set(expandedOrders)
+    if (newExpanded.has(orderId)) {
+      newExpanded.delete(orderId)
+    } else {
+      newExpanded.add(orderId)
     }
+    setExpandedOrders(newExpanded)
   }
 
-  const filterOrders = () => {
-    let filtered = orders
-
-    // Filter by search term
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      filtered = filtered.filter(
-        (order) =>
-          order.orderNumber.toLowerCase().includes(term) ||
-          order.customerName.toLowerCase().includes(term) ||
-          order.customerEmail.toLowerCase().includes(term),
-      )
-    }
-
-    // Filter by date range
-    if (dateRange.from || dateRange.to) {
-      filtered = filtered.filter((order) => {
-        const orderDate = new Date(order.orderDate)
-        if (dateRange.from && orderDate < dateRange.from) return false
-        if (dateRange.to && orderDate > dateRange.to) return false
-        return true
-      })
-    }
-
-    setFilteredOrders(filtered)
-  }
-
-  const exportToCSV = () => {
-    const headers = [
-      "Order Number",
-      "Customer Name",
-      "Customer Email",
-      "Order Date",
-      "Status",
-      "Items Count",
-      "Total Amount",
-      "Tax Amount",
-      "Net Amount",
+  const handleExport = () => {
+    // Create CSV content with headers
+    const csvContent = [
+      [
+        "Order Number",
+        "Store",
+        "Shopify Order ID",
+        "Customer Name",
+        "Customer Email",
+        "Order Date",
+        "Status",
+        "Total Amount",
+        "Revenue (excl. tax)",
+        "Shipping Cost",
+        "Tax Amount",
+        "Profit",
+        "Items Count",
+        "Shipping Address",
+      ],
+      ...filteredOrders.map((order) => [
+        order.orderNumber,
+        order.storeName,
+        order.shopifyOrderId,
+        order.customerName,
+        order.customerEmail,
+        new Date(order.orderDate).toLocaleDateString(),
+        order.status,
+        order.totalAmount.toFixed(2),
+        (order.totalAmount - order.taxAmount).toFixed(2),
+        order.shippingCost.toFixed(2),
+        order.taxAmount.toFixed(2),
+        order.profit.toFixed(2),
+        order.items.length.toString(),
+        order.shippingAddress,
+      ]),
     ]
 
-    const rows = filteredOrders.map((order) => [
-      order.orderNumber,
-      order.customerName,
-      order.customerEmail,
-      new Date(order.orderDate).toLocaleDateString(),
-      order.status,
-      order.items.length.toString(),
-      (order.total_amount || 0).toFixed(2),
-      (order.tax_amount || 0).toFixed(2),
-      ((order.total_amount || 0) - (order.tax_amount || 0)).toFixed(2),
-    ])
+    // Convert to CSV string
+    const csvString = csvContent.map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
 
-    const csvContent = [headers, ...rows].map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    // Create and download file
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" })
     const link = document.createElement("a")
     const url = URL.createObjectURL(blob)
     link.setAttribute("href", url)
-    link.setAttribute("download", `shopify_orders_${new Date().toISOString().slice(0, 10)}.csv`)
+    link.setAttribute("download", `shopify_orders_${new Date().toISOString().split("T")[0]}.csv`)
     link.style.visibility = "hidden"
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const syncAllOrders = async () => {
+    setIsSyncing(true)
+    setSyncProgress({ current: 0, total: 0, store: "" })
+
+    try {
+      const storesData = await supabaseStore.getShopifyStores()
+      setStores(storesData)
+      const connectedStores = storesData.filter((store) => store.status === "Connected")
+      let totalNewOrders = 0
+
+      for (const store of connectedStores) {
+        try {
+          setSyncProgress({ current: 0, total: 0, store: store.name })
+
+          // Update store status to show syncing
+          await supabaseStore.updateShopifyStore(store.id, { status: "Testing" })
+          const freshStores1 = await supabaseStore.getShopifyStores()
+          setStores(freshStores1)
+
+          // Sync orders from this store with progress tracking
+          const newOrders = await syncStoreOrdersWithProgress(store)
+          totalNewOrders += newOrders.length
+
+          // Update store with successful sync
+          await supabaseStore.updateShopifyStore(store.id, {
+            status: "Connected",
+            lastSync: new Date().toISOString(),
+            totalOrders: store.totalOrders + newOrders.length,
+          })
+          const freshStores2 = await supabaseStore.getShopifyStores()
+          setStores(freshStores2)
+        } catch (error) {
+          console.error(`Failed to sync orders for ${store.name}:`, error)
+          await supabaseStore.updateShopifyStore(store.id, { status: "Error" })
+          const freshStores3 = await supabaseStore.getShopifyStores()
+          setStores(freshStores3)
+        }
+      }
+
+      // Refresh data
+      setOrders(await supabaseStore.getShopifyOrders())
+      setStores(await supabaseStore.getShopifyStores())
+
+      alert(`Successfully synced ${totalNewOrders} new orders from ${connectedStores.length} stores`)
+    } catch (error) {
+      console.error("Sync failed:", error)
+      alert("Failed to sync orders. Please try again.")
+    } finally {
+      setIsSyncing(false)
+      setSyncProgress({ current: 0, total: 0, store: "" })
+    }
+  }
+
+  const syncStoreOrdersWithProgress = async (store: ShopifyStore): Promise<ShopifyOrder[]> => {
+    try {
+      const res = await fetch("/api/shopify-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          domain: store.shopifyDomain,
+          accessToken: store.accessToken,
+        }),
+      })
+
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || "Unknown error")
+
+      // Transform Shopify orders to our format
+      const transformedOrders = data.orders.map((shopifyOrder: any) => ({
+        store_id: store.id,
+        shopify_order_id: shopifyOrder.id.toString(),
+        order_number: shopifyOrder.order_number || shopifyOrder.name,
+        customer_name: shopifyOrder.customer
+          ? `${shopifyOrder.customer.first_name || ""} ${shopifyOrder.customer.last_name || ""}`.trim()
+          : "Unknown Customer",
+        customer_email: shopifyOrder.email || shopifyOrder.customer?.email || "",
+        order_date: shopifyOrder.created_at,
+        status: shopifyOrder.fulfillment_status || "unfulfilled",
+        total_amount: Number.parseFloat(shopifyOrder.total_price || "0"),
+        shipping_cost: Number.parseFloat(shopifyOrder.shipping_lines?.[0]?.price || "0"),
+        tax_amount: Number.parseFloat(shopifyOrder.total_tax || "0"),
+        items:
+          shopifyOrder.line_items?.map((item: any, index: number) => ({
+            sku: item.sku || `unknown-${item.id}`,
+            product_name: item.title || item.name,
+            quantity: item.quantity,
+            unit_price: Number.parseFloat(item.price || "0"),
+            total_price: Number.parseFloat(item.price || "0") * item.quantity,
+          })) || [],
+        shipping_address: shopifyOrder.shipping_address
+          ? `${shopifyOrder.shipping_address.address1 || ""}, ${shopifyOrder.shipping_address.city || ""}, ${shopifyOrder.shipping_address.province || ""} ${shopifyOrder.shipping_address.zip || ""}`.trim()
+          : "No address provided",
+      }))
+
+      const newOrders = await supabaseStore.addShopifyOrders(transformedOrders)
+      console.log(`Added ${newOrders.length} new orders from ${store.name}`)
+      return newOrders
+    } catch (err) {
+      console.error("Order sync failed:", err)
+      throw err
+    }
   }
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case "fulfilled":
-        return "default"
-      case "pending":
-        return "secondary"
+        return "bg-green-100 text-green-800"
+      case "processing":
+        return "bg-blue-100 text-blue-800"
+      case "shipped":
+        return "bg-purple-100 text-purple-800"
       case "cancelled":
-        return "destructive"
-      case "refunded":
-        return "outline"
+        return "bg-red-100 text-red-800"
+      case "unfulfilled":
+        return "bg-yellow-100 text-yellow-800"
       default:
-        return "secondary"
+        return "bg-gray-100 text-gray-800"
     }
   }
 
-  // Calculate summary statistics
-  const totalOrders = filteredOrders.length
-  const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total_amount || 0), 0)
-  const totalTax = filteredOrders.reduce((sum, order) => sum + (order.tax_amount || 0), 0)
-  const netRevenue = totalRevenue - totalTax
-  const totalItems = filteredOrders.reduce((sum, order) => sum + order.items.length, 0)
-  const uniqueCustomers = new Set(filteredOrders.map((order) => order.customerEmail)).size
+  // Filter orders based on search term and selected store
+  const filteredOrders = orders.filter((order) => {
+    const matchesSearch =
+      String(order.orderNumber).toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerEmail.toLowerCase().includes(searchTerm.toLowerCase())
 
-  if (loading) {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <h1 className="text-lg font-semibold">Shopify Orders</h1>
-        </header>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p>Loading orders...</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
+    const matchesStore = selectedStoreId === "all" || order.storeId === selectedStoreId
+
+    return matchesSearch && matchesStore
+  })
+
+  const totalOrders = orders.length
+  // Revenue excluding tax (consistent with reports)
+  const totalRevenue = orders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
+  const totalProfit = orders.reduce((sum, order) => sum + order.profit, 0)
+  const connectedStores = stores.filter((s) => s.status === "Connected")
+
+  const getOrderItemsForDisplay = (order: ShopifyOrder) =>
+    // @ts-ignore – property added in QuickEdit above
+    (order as any).shopify_order_items ?? order.items
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <header className="flex h-16 items-center gap-2 border-b px-4">
+    <div className="flex flex-col">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <ShoppingCart className="h-5 w-5" />
-          <span className="hidden sm:inline">Shopify Orders</span>
-          <span className="sm:hidden">Orders</span>
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold">Shopify Orders</h1>
+        </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 pt-6">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         {/* Summary Cards */}
-        <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-4 md:grid-cols-4">
           <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Orders</p>
-                  <p className="text-lg sm:text-2xl font-bold">{totalOrders}</p>
-                </div>
-                <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-              </div>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalOrders}</div>
+              <p className="text-xs text-muted-foreground">From all stores</p>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Revenue</p>
-                  <p className="text-lg sm:text-2xl font-bold">{totalRevenue.toLocaleString()} лв</p>
-                </div>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </div>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Revenue (excl. tax)</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalRevenue.toLocaleString()} лв</div>
+              <p className="text-xs text-muted-foreground">Revenue without tax</p>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Net Revenue</p>
-                  <p className="text-lg sm:text-2xl font-bold text-green-600">{netRevenue.toLocaleString()} лв</p>
-                </div>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </div>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Profit</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalProfit.toLocaleString()} лв</div>
+              <p className="text-xs text-muted-foreground">Gross profit</p>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Items</p>
-                  <p className="text-lg sm:text-2xl font-bold">{totalItems}</p>
-                </div>
-                <Package className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Customers</p>
-                  <p className="text-lg sm:text-2xl font-bold">{uniqueCustomers}</p>
-                </div>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">Avg Order</p>
-                  <p className="text-lg sm:text-2xl font-bold">
-                    {totalOrders > 0 ? (totalRevenue / totalOrders).toFixed(0) : 0} лв
-                  </p>
-                </div>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </div>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Connected Stores</CardTitle>
+              <Store className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{connectedStores.length}</div>
+              <p className="text-xs text-muted-foreground">Active connections</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Filters and Actions */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+        {/* Sync Progress */}
+        {isSyncing && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Syncing Orders</CardTitle>
+              <CardDescription>{syncProgress.store && `Syncing from ${syncProgress.store}...`}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Progress</span>
+                  <span>
+                    {syncProgress.current}
+                    {syncProgress.total > 0 && `/${syncProgress.total}`} orders
+                  </span>
+                </div>
+                <Progress
+                  value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0}
+                  className="w-full"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Actions Bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                className="pl-8 w-full sm:w-[300px]"
-                placeholder="Search orders, customers..."
+                placeholder="Search orders..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 w-[300px]"
               />
             </div>
-            <DateRangePicker
-              value={dateRange}
-              onChange={setDateRange}
-              placeholder="Filter by date range"
-              className="w-full sm:w-auto"
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={loadOrders} className="flex-1 sm:flex-none bg-transparent">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Refresh</span>
+            <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Filter by store" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Stores</SelectItem>
+                {stores.map((store) => (
+                  <SelectItem key={store.id} value={store.id}>
+                    {store.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm">
+              <Filter className="h-4 w-4 mr-2" />
+              Filter
             </Button>
-            <Button variant="outline" size="sm" onClick={exportToCSV} className="flex-1 sm:flex-none bg-transparent">
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Export CSV</span>
-              <span className="sm:hidden">Export</span>
+              Export
+            </Button>
+            <Button size="sm" onClick={() => syncAllOrders()} disabled={isSyncing}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
+              {isSyncing ? "Syncing..." : "Sync All Orders"}
             </Button>
           </div>
         </div>
@@ -273,200 +391,342 @@ export default function ShopifyOrders() {
         {/* Orders Table */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base sm:text-lg">Orders</CardTitle>
-            <CardDescription className="text-sm">
-              Showing {filteredOrders.length} of {orders.length} orders
-            </CardDescription>
+            <CardTitle>Recent Orders</CardTitle>
+            <CardDescription>Orders synced from your Shopify stores - click to expand and view items</CardDescription>
           </CardHeader>
-          <CardContent className="p-0 sm:p-6">
-            <div className="overflow-x-auto">
+          <CardContent>
+            {filteredOrders.length === 0 ? (
+              <div className="text-center py-8">
+                <ShoppingCart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-medium mb-2">No Orders Found</h3>
+                <p className="text-muted-foreground mb-4">
+                  {orders.length === 0
+                    ? "Sync your first orders from connected stores"
+                    : "Try adjusting your search or filter criteria"}
+                </p>
+                {orders.length === 0 && (
+                  <Button onClick={() => syncAllOrders()} disabled={isSyncing}>
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
+                    Sync Orders Now
+                  </Button>
+                )}
+              </div>
+            ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[120px]">Order Number</TableHead>
-                    <TableHead className="min-w-[150px]">Customer</TableHead>
-                    <TableHead className="min-w-[100px] hidden sm:table-cell">Date</TableHead>
-                    <TableHead className="min-w-[80px]">Status</TableHead>
-                    <TableHead className="text-right min-w-[60px] hidden md:table-cell">Items</TableHead>
-                    <TableHead className="text-right min-w-[100px]">Total</TableHead>
-                    <TableHead className="text-center min-w-[80px]">Actions</TableHead>
+                    <TableHead className="w-[40px]"></TableHead>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Store</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>Revenue</TableHead>
+                    <TableHead>Profit</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium text-xs sm:text-sm">{order.orderNumber}</TableCell>
-                      <TableCell className="min-w-0">
-                        <div className="space-y-1">
-                          <div className="font-medium text-xs sm:text-sm truncate" title={order.customerName}>
-                            {order.customerName}
-                          </div>
-                          <div
-                            className="text-xs text-muted-foreground truncate hidden sm:block"
-                            title={order.customerEmail}
+                    <>
+                      {/* Main Order Row */}
+                      <TableRow key={order.id} className="cursor-pointer hover:bg-muted/50">
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleOrderExpansion(order.id)}
+                            className="p-0 h-6 w-6"
                           >
-                            {order.customerEmail}
+                            {expandedOrders.has(order.id) ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </TableCell>
+                        <TableCell className="font-medium" onClick={() => toggleOrderExpansion(order.id)}>
+                          {order.orderNumber}
+                        </TableCell>
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>{order.storeName}</TableCell>
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
+                          <div>
+                            <div className="font-medium">{order.customerName}</div>
+                            <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs sm:text-sm hidden sm:table-cell">
-                        {new Date(order.orderDate).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusColor(order.status)} className="text-xs">
-                          {order.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right text-xs sm:text-sm hidden md:table-cell">
-                        {order.items.length}
-                      </TableCell>
-                      <TableCell className="text-right font-medium text-xs sm:text-sm">
-                        {(order.total_amount || 0).toFixed(2)} лв
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setSelectedOrder(order)
-                            setIsViewOrderOpen(true)
-                          }}
-                          className="h-8 w-8"
+                        </TableCell>
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
+                          {new Date(order.orderDate).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
+                          <Badge className={getStatusColor(order.status)}>{order.status}</Badge>
+                        </TableCell>
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
+                          <Badge variant="secondary">{order.items.length} items</Badge>
+                        </TableCell>
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
+                          {(order.totalAmount - order.taxAmount).toFixed(2)} лв
+                          <div className="text-xs text-muted-foreground">Total: {order.totalAmount.toFixed(2)} лв</div>
+                        </TableCell>
+                        <TableCell
+                          className="text-green-600 font-medium"
+                          onClick={() => toggleOrderExpansion(order.id)}
                         >
-                          <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                          {order.profit.toFixed(2)} лв
+                        </TableCell>
+                        <TableCell>
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => setSelectedOrder(order)}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                              <DialogHeader>
+                                <DialogTitle>Order Details - {selectedOrder?.orderNumber}</DialogTitle>
+                                <DialogDescription>Complete order information and profit breakdown</DialogDescription>
+                              </DialogHeader>
+                              {selectedOrder && (
+                                <div className="space-y-4">
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <Label className="text-sm font-medium">Shopify Order ID</Label>
+                                      <p className="text-sm text-muted-foreground">{selectedOrder.shopifyOrderId}</p>
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-medium">Store</Label>
+                                      <p className="text-sm text-muted-foreground">{selectedOrder.storeName}</p>
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-medium">Customer</Label>
+                                      <p className="text-sm text-muted-foreground">{selectedOrder.customerName}</p>
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-medium">Email</Label>
+                                      <p className="text-sm text-muted-foreground">{selectedOrder.customerEmail}</p>
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-medium">Status</Label>
+                                      <Badge className={getStatusColor(selectedOrder.status)}>
+                                        {selectedOrder.status}
+                                      </Badge>
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-medium">Order Date</Label>
+                                      <p className="text-sm text-muted-foreground">
+                                        {new Date(selectedOrder.orderDate).toLocaleString()}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <Label className="text-sm font-medium">Items</Label>
+                                    <div className="max-h-60 overflow-y-auto">
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead>SKU</TableHead>
+                                            <TableHead>Product</TableHead>
+                                            <TableHead>Quantity</TableHead>
+                                            <TableHead>Sale Price</TableHead>
+                                            <TableHead>Cost Price</TableHead>
+                                            <TableHead>Total Sale</TableHead>
+                                            <TableHead>Item Profit</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {getOrderItemsForDisplay(selectedOrder).map((item, index) => {
+                                            const totalCost = item.cost_price * item.quantity
+                                            const itemProfit = item.total_price - totalCost
+
+                                            return (
+                                              <TableRow key={index}>
+                                                <TableCell>{item.sku}</TableCell>
+                                                <TableCell>{item.product_name}</TableCell>
+                                                <TableCell>{item.quantity}</TableCell>
+                                                <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
+                                                <TableCell>
+                                                  {item.cost_price > 0 ? `${item.cost_price.toFixed(2)} лв` : "N/A"}
+                                                </TableCell>
+                                                <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
+                                                <TableCell
+                                                  className={itemProfit >= 0 ? "text-green-600" : "text-red-600"}
+                                                >
+                                                  {item.cost_price > 0 ? `${itemProfit.toFixed(2)} лв` : "N/A"}
+                                                </TableCell>
+                                              </TableRow>
+                                            )
+                                          })}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <Label className="text-sm font-medium">Shipping Address</Label>
+                                      <p className="text-sm text-muted-foreground">{selectedOrder.shipping_address}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <div className="flex justify-between">
+                                        <span>Subtotal:</span>
+                                        <span>
+                                          {(
+                                            selectedOrder.total_amount -
+                                            selectedOrder.shipping_cost -
+                                            selectedOrder.tax_amount
+                                          ).toFixed(2)}{" "}
+                                          лв
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>Shipping:</span>
+                                        <span>{selectedOrder.shipping_cost.toFixed(2)} лв</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>Tax:</span>
+                                        <span>{selectedOrder.tax_amount.toFixed(2)} лв</span>
+                                      </div>
+                                      <div className="flex justify-between font-medium">
+                                        <span>Total:</span>
+                                        <span>{selectedOrder.total_amount.toFixed(2)} лв</span>
+                                      </div>
+                                      <div className="flex justify-between text-blue-600 font-medium">
+                                        <span>Revenue (excl. tax):</span>
+                                        <span>
+                                          {(selectedOrder.total_amount - selectedOrder.tax_amount).toFixed(2)} лв
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between text-green-600 font-medium">
+                                        <span>Profit:</span>
+                                        <span>{selectedOrder.profit.toFixed(2)} лв</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </DialogContent>
+                          </Dialog>
+                        </TableCell>
+                      </TableRow>
+
+                      {/* Expanded Items Row */}
+                      {expandedOrders.has(order.id) && (
+                        <TableRow>
+                          <TableCell colSpan={10} className="p-0">
+                            <div className="bg-muted/30 p-4 border-t">
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="font-medium text-sm">Order Items ({order.items.length})</h4>
+                                  <div className="text-sm text-muted-foreground">
+                                    Revenue: {(order.totalAmount - order.taxAmount).toFixed(2)} лв | Shipping:{" "}
+                                    {order.shippingCost.toFixed(2)} лв | Tax: {order.taxAmount.toFixed(2)} лв
+                                  </div>
+                                </div>
+
+                                <div className="grid gap-2">
+                                  {getOrderItemsForDisplay(order).map((item, index) => {
+                                    const totalCost = item.cost_price * item.quantity
+                                    const itemProfit = item.total_price - totalCost
+
+                                    return (
+                                      <div
+                                        key={index}
+                                        className="flex items-center justify-between bg-background p-3 rounded-md border"
+                                      >
+                                        <div className="flex-1">
+                                          <div className="font-medium">{item.product_name}</div>
+                                          <div className="text-sm text-muted-foreground">SKU: {item.sku}</div>
+                                        </div>
+                                        <div className="flex items-center space-x-4 text-sm">
+                                          <div className="text-center">
+                                            <div className="font-medium">{item.quantity}</div>
+                                            <div className="text-muted-foreground">Qty</div>
+                                          </div>
+                                          <div className="text-center">
+                                            <div className="font-medium">{item.unit_price.toFixed(2)} лв</div>
+                                            <div className="text-muted-foreground">Sale Price</div>
+                                          </div>
+                                          <div className="text-center">
+                                            <div className="font-medium">
+                                              {item.cost_price > 0 ? `${item.cost_price.toFixed(2)} лв` : "N/A"}
+                                            </div>
+                                            <div className="text-muted-foreground">Cost Price</div>
+                                          </div>
+                                          <div className="text-center">
+                                            <div className="font-medium">{item.total_price.toFixed(2)} лв</div>
+                                            <div className="text-muted-foreground">Total Sale</div>
+                                          </div>
+                                          <div className="text-center">
+                                            <div
+                                              className={`font-medium ${itemProfit >= 0 ? "text-green-600" : "text-red-600"}`}
+                                            >
+                                              {item.cost_price > 0 ? `${itemProfit.toFixed(2)} лв` : "N/A"}
+                                            </div>
+                                            <div className="text-muted-foreground">Item Profit</div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+
+                                {/* Order Profit Summary */}
+                                <div className="mt-3 pt-3 border-t bg-background rounded-md p-3">
+                                  <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                      <div className="flex justify-between">
+                                        <span>Revenue (excl. tax):</span>
+                                        <span>{(order.totalAmount - order.taxAmount).toFixed(2)} лв</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>Total Cost of Items:</span>
+                                        <span>
+                                          {getOrderItemsForDisplay(order)
+                                            .reduce((sum, item) => sum + item.cost_price * item.quantity, 0)
+                                            .toFixed(2)}{" "}
+                                          лв
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="flex justify-between">
+                                        <span>Shipping:</span>
+                                        <span>{order.shippingCost.toFixed(2)} лв</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>Tax:</span>
+                                        <span>{order.taxAmount.toFixed(2)} лв</span>
+                                      </div>
+                                      <div className="flex justify-between font-medium text-green-600 border-t pt-2">
+                                        <span>Net Profit:</span>
+                                        <span>{order.profit.toFixed(2)} лв</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {order.shippingAddress && (
+                                  <div className="mt-3 pt-3 border-t">
+                                    <div className="text-sm">
+                                      <span className="font-medium">Shipping Address: </span>
+                                      <span className="text-muted-foreground">{order.shippingAddress}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
                   ))}
                 </TableBody>
               </Table>
-
-              {filteredOrders.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  {searchTerm || dateRange.from || dateRange.to
-                    ? "No orders match your filters."
-                    : "No orders found. Import orders from Shopify to get started."}
-                </div>
-              )}
-            </div>
+            )}
           </CardContent>
         </Card>
-
-        {/* View Order Dialog */}
-        <Dialog open={isViewOrderOpen} onOpenChange={setIsViewOrderOpen}>
-          <DialogContent className="w-[95vw] max-w-4xl max-h-[90vh]">
-            <DialogHeader>
-              <DialogTitle>Order Details</DialogTitle>
-              <DialogDescription>
-                {selectedOrder && `Order ${selectedOrder.orderNumber} - ${selectedOrder.customerName}`}
-              </DialogDescription>
-            </DialogHeader>
-
-            {selectedOrder && (
-              <ScrollArea className="max-h-[70vh] pr-4">
-                <div className="space-y-6">
-                  {/* Order Info */}
-                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Order Number</label>
-                      <p className="text-sm">{selectedOrder.orderNumber}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Date</label>
-                      <p className="text-sm">{new Date(selectedOrder.orderDate).toLocaleDateString()}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Status</label>
-                      <div className="mt-1">
-                        <Badge variant={getStatusColor(selectedOrder.status)}>{selectedOrder.status}</Badge>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Store</label>
-                      <p className="text-sm">{selectedOrder.storeName}</p>
-                    </div>
-                  </div>
-
-                  {/* Customer Info */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">Customer Information</h3>
-                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Name</label>
-                        <p className="text-sm">{selectedOrder.customerName}</p>
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Email</label>
-                        <p className="text-sm">{selectedOrder.customerEmail}</p>
-                      </div>
-                      {selectedOrder.shippingAddress && (
-                        <div className="sm:col-span-2">
-                          <label className="text-sm font-medium text-muted-foreground">Shipping Address</label>
-                          <p className="text-sm whitespace-pre-line">{selectedOrder.shippingAddress}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Order Items */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">Order Items</h3>
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>SKU</TableHead>
-                            <TableHead>Product Name</TableHead>
-                            <TableHead className="text-right">Quantity</TableHead>
-                            <TableHead className="text-right">Unit Price</TableHead>
-                            <TableHead className="text-right">Total</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {selectedOrder.items.map((item, index) => (
-                            <TableRow key={index}>
-                              <TableCell className="font-medium text-sm">{item.sku}</TableCell>
-                              <TableCell className="text-sm">{item.product_name}</TableCell>
-                              <TableCell className="text-right text-sm">{item.quantity}</TableCell>
-                              <TableCell className="text-right text-sm">
-                                {((item.total_price || 0) / item.quantity).toFixed(2)} лв
-                              </TableCell>
-                              <TableCell className="text-right font-medium text-sm">
-                                {(item.total_price || 0).toFixed(2)} лв
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-
-                    {/* Order Totals */}
-                    <div className="space-y-2 pt-4 border-t">
-                      <div className="flex justify-between text-sm">
-                        <span>Subtotal:</span>
-                        <span>
-                          {((selectedOrder.total_amount || 0) - (selectedOrder.tax_amount || 0)).toFixed(2)} лв
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Tax:</span>
-                        <span>{(selectedOrder.tax_amount || 0).toFixed(2)} лв</span>
-                      </div>
-                      <div className="flex justify-between font-medium">
-                        <span>Total:</span>
-                        <span>{(selectedOrder.total_amount || 0).toFixed(2)} лв</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </ScrollArea>
-            )}
-
-            <div className="flex justify-end pt-4 border-t">
-              <Button onClick={() => setIsViewOrderOpen(false)}>Close</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   )
