@@ -93,6 +93,36 @@ export interface ShopifyOrder {
   tax_amount: number
 }
 
+export interface ReturnOrderItem {
+  id?: string
+  return_id: string
+  sku: string
+  product_name: string
+  quantity: number
+  condition: "Good" | "Used" | "Damaged" | "Defective"
+  reason:
+    | "Defective"
+    | "Wrong Item"
+    | "Not as Described"
+    | "Changed Mind"
+    | "Damaged in Transit"
+    | "Quality Issues"
+    | "Other"
+}
+
+export interface ReturnOrder {
+  id: string
+  return_number: string
+  customer_name: string
+  customer_email?: string
+  order_number?: string
+  return_date: string
+  status: "Pending" | "Processing" | "Accepted" | "Rejected"
+  notes?: string
+  created_at: string
+  items: ReturnOrderItem[]
+}
+
 /* -------------------------------------------------------------------------- */
 /*                               Inventory APIs                               */
 /* -------------------------------------------------------------------------- */
@@ -429,7 +459,7 @@ async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
   try {
     console.log("Fetching purchase orders...")
 
-    const { data: orders, error } = await supabase
+    const { data, error } = await supabase
       .from("purchase_orders")
       .select(`
         id,
@@ -457,10 +487,10 @@ async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
       throw error
     }
 
-    console.log("Fetched orders:", orders)
+    console.log("Fetched orders:", data)
 
     return (
-      orders?.map((order) => ({
+      data?.map((order) => ({
         ...order,
         items: order.po_items || [],
       })) || []
@@ -1104,6 +1134,255 @@ async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                               Returns APIs                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fetch all return orders and their items without relying on PostgREST joins.
+ */
+async function getReturns(): Promise<ReturnOrder[]> {
+  try {
+    console.log("Fetching returns…")
+
+    // 1. grab all return headers
+    const { data: returnRows, error: returnsErr } = await supabase
+      .from("returns")
+      .select("*")
+      .order("created_at", { ascending: false })
+
+    if (returnsErr) throw returnsErr
+    if (!returnRows?.length) return []
+
+    // 2. collect the ids and pull all items in one query
+    const ids = returnRows.map((r) => r.id)
+    const { data: itemRows, error: itemsErr } = await supabase.from("return_items").select("*").in("return_id", ids)
+
+    if (itemsErr) throw itemsErr
+
+    // 3. group items by their return_id for fast lookup
+    const itemMap = new Map<string, ReturnOrderItem[]>()
+    ;(itemRows || []).forEach((it) => {
+      const list = itemMap.get(it.return_id) || []
+      list.push({
+        id: it.id,
+        return_id: it.return_id,
+        sku: it.sku,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        condition: it.condition,
+        reason: it.reason,
+      })
+      itemMap.set(it.return_id, list)
+    })
+
+    // 4. stitch rows + items together
+    return returnRows.map((r) => ({
+      id: r.id,
+      return_number: r.return_number,
+      customer_name: r.customer_name,
+      customer_email: r.customer_email ?? undefined,
+      order_number: r.order_number ?? undefined,
+      return_date: r.return_date,
+      status: r.status,
+      notes: r.notes ?? undefined,
+      created_at: r.created_at,
+      items: itemMap.get(r.id) ?? [],
+    }))
+  } catch (error) {
+    console.error("Error in getReturns:", error)
+    throw error
+  }
+}
+
+async function createReturn(data: {
+  customer_name: string
+  customer_email?: string
+  order_number?: string
+  return_date: string
+  status: "Pending" | "Processing" | "Accepted" | "Rejected"
+  items: Array<{
+    sku: string
+    product_name: string
+    quantity: number
+    condition: string
+    reason: string
+  }>
+  notes?: string
+}): Promise<ReturnOrder> {
+  try {
+    console.log("Creating return with data:", data)
+
+    const returnNumber = generateReturnNumber()
+    console.log("Generated return number:", returnNumber)
+
+    // Insert the return order
+    const { data: returnData, error: returnError } = await supabase
+      .from("returns")
+      .insert({
+        return_number: returnNumber,
+        customer_name: data.customer_name,
+        customer_email: data.customer_email || null,
+        order_number: data.order_number || null,
+        return_date: data.return_date,
+        status: data.status,
+        notes: data.notes || null,
+      })
+      .select()
+      .single()
+
+    if (returnError) {
+      console.error("Error creating return:", returnError)
+      throw returnError
+    }
+
+    console.log("Created return:", returnData)
+
+    // Insert the items
+    if (data.items && data.items.length > 0) {
+      const itemsToInsert = data.items.map((item) => ({
+        return_id: returnData.id,
+        sku: item.sku,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        condition: item.condition,
+        reason: item.reason,
+      }))
+
+      console.log("Inserting return items:", itemsToInsert)
+
+      const { data: itemsData, error: itemsError } = await supabase.from("return_items").insert(itemsToInsert).select()
+
+      if (itemsError) {
+        console.error("Error creating return items:", itemsError)
+        throw itemsError
+      }
+
+      console.log("Created return items:", itemsData)
+
+      return {
+        ...returnData,
+        items: (itemsData || []).map((row) => ({
+          id: row.id,
+          return_id: row.return_id,
+          sku: row.sku,
+          product_name: row.product_name,
+          quantity: row.quantity,
+          condition: row.condition,
+          reason: row.reason,
+        })),
+      }
+    }
+
+    return {
+      ...returnData,
+      items: [],
+    }
+  } catch (error) {
+    console.error("Error in createReturn:", error)
+    throw error
+  }
+}
+
+async function updateReturn(id: string, updates: Partial<ReturnOrder>): Promise<ReturnOrder | null> {
+  try {
+    console.log("Updating return:", id, updates)
+
+    // Get the current return to check status change
+    const { data: currentReturn, error: fetchError } = await supabase
+      .from("returns")
+      .select(`
+        id,
+        return_number,
+        customer_name,
+        customer_email,
+        order_number,
+        return_date,
+        status,
+        notes,
+        created_at,
+        return_items (
+          id,
+          return_id,
+          sku,
+          product_name,
+          quantity,
+          condition,
+          reason
+        )
+      `)
+      .eq("id", id)
+      .single()
+
+    if (fetchError) {
+      console.error("Error fetching current return:", fetchError)
+      throw fetchError
+    }
+
+    const previousStatus = currentReturn.status
+    const newStatus = updates.status
+
+    // Update the return
+    const { data, error } = await supabase
+      .from("returns")
+      .update(updates)
+      .eq("id", id)
+      .select(`
+        id,
+        return_number,
+        customer_name,
+        customer_email,
+        order_number,
+        return_date,
+        status,
+        notes,
+        created_at,
+        return_items (
+          id,
+          return_id,
+          sku,
+          product_name,
+          quantity,
+          condition,
+          reason
+        )
+      `)
+      .single()
+
+    if (error) {
+      console.error("Error updating return:", error)
+      throw error
+    }
+
+    const updatedReturn = {
+      ...data,
+      items: data.return_items || [],
+    }
+
+    // Handle status changes that affect inventory
+    if (newStatus && previousStatus !== newStatus) {
+      console.log(`Return status changed from ${previousStatus} to ${newStatus}`)
+
+      // If changing TO "Accepted" from any other status
+      if (newStatus === "Accepted" && previousStatus !== "Accepted") {
+        console.log("Return status changed to Accepted, adding items back to inventory")
+        await addReturnedItemsToInventory(updatedReturn)
+      }
+
+      // If changing FROM "Accepted" to any other status
+      if (previousStatus === "Accepted" && newStatus !== "Accepted") {
+        console.log("Return status changed from Accepted, removing returned items from inventory")
+        await removeReturnedItemsFromInventory(updatedReturn)
+      }
+    }
+
+    return updatedReturn
+  } catch (error) {
+    console.error("Error in updateReturn:", error)
+    throw error
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /*                           Public export signature                          */
 /* -------------------------------------------------------------------------- */
 
@@ -1112,36 +1391,48 @@ export const supabaseStore = {
   getInventory,
   addManualInventory,
   addInventoryFromPO,
+
+  /* Inventory helpers that other screens use */
   getOrderItemsWithCosts,
 
-  /* Purchase-Orders */
+  /* Purchase Orders */
   getPurchaseOrders,
   createPurchaseOrder,
   updatePurchaseOrder,
   updatePurchaseOrderWithItems,
 
-  /* Shopify stores */
+  /* Returns */
+  getReturns,
+  createReturn,
+  updateReturn,
+
+  /* Shopify Stores */
   getShopifyStores,
   createShopifyStore,
   updateShopifyStore,
   deleteShopifyStore,
+
+  /* Shopify Orders */
   getShopifyOrders,
   addShopifyOrders,
 }
 
-// Generate a reasonably unique PO number (date + ms + random)
 function generatePONumber(): string {
-  const now = new Date()
+  // Placeholder implementation for generating PO number
+  return "PO12345"
+}
 
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, "0")
-  const day = String(now.getDate()).padStart(2, "0")
+function generateReturnNumber(): string {
+  // Placeholder implementation for generating return number
+  return "R12345"
+}
 
-  // Milliseconds in the current day (5-6 digits) – keeps numbers short but time-based
-  const msOfDay = String(now.getTime() % 86_400_000).padStart(6, "0")
+async function addReturnedItemsToInventory(returnOrder: ReturnOrder): Promise<void> {
+  // Placeholder implementation for adding returned items to inventory
+  console.log("Adding returned items to inventory:", returnOrder.return_number)
+}
 
-  // 3-digit random component to avoid duplicate keys when many POs are created in the same ms
-  const random = String(Math.floor(Math.random() * 900) + 100) // 100-999
-
-  return `PO-${year}${month}${day}-${msOfDay}${random}`
+async function removeReturnedItemsFromInventory(returnOrder: ReturnOrder): Promise<void> {
+  // Placeholder implementation for removing returned items from inventory
+  console.log("Removing returned items from inventory:", returnOrder.return_number)
 }

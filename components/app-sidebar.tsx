@@ -1,6 +1,18 @@
 "use client"
 
-import { BarChart3, FileText, Package, ShoppingCart, Store, TrendingUp, Upload, Users, Menu, X } from "lucide-react"
+import {
+  BarChart3,
+  FileText,
+  Package,
+  ShoppingCart,
+  Store,
+  TrendingUp,
+  Upload,
+  Users,
+  Menu,
+  X,
+  RotateCcw,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
@@ -18,6 +30,11 @@ const menuItems = [
     title: "Purchase Orders",
     url: "/purchase-orders",
     icon: FileText,
+  },
+  {
+    title: "Returns",
+    url: "/returns",
+    icon: RotateCcw,
   },
   {
     title: "Inventory",

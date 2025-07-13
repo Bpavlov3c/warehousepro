@@ -11,7 +11,17 @@ import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Textarea } from "@/components/ui/textarea"
-import { Upload, Download, FileText, CheckCircle, XCircle, AlertTriangle, Package, ShoppingCart } from "lucide-react"
+import {
+  Upload,
+  Download,
+  FileText,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Package,
+  ShoppingCart,
+  RotateCcw,
+} from "lucide-react"
 import { supabaseStore } from "@/lib/supabase-store"
 
 interface ImportResult {
@@ -153,7 +163,9 @@ async function processBatch<T>(
 }
 
 export default function ImportPage() {
-  const [importType, setImportType] = useState<"inventory" | "purchase-orders" | "shopify-orders">("inventory")
+  const [importType, setImportType] = useState<"inventory" | "purchase-orders" | "shopify-orders" | "returns">(
+    "inventory",
+  )
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<ImportProgress>({ current: 0, total: 0, status: "" })
@@ -215,6 +227,9 @@ export default function ImportPage() {
           break
         case "shopify-orders":
           importResult = await importShopifyOrders(rows)
+          break
+        case "returns":
+          importResult = await importReturns(rows)
           break
         default:
           throw new Error("Invalid import type")
@@ -533,6 +548,93 @@ export default function ImportPage() {
     }
   }
 
+  const importReturns = async (rows: any[]): Promise<ImportResult> => {
+    const errors: string[] = []
+    let successCount = 0
+
+    // Group rows by return number to handle multi-line returns
+    const returnGroups = new Map<string, any[]>()
+
+    rows.forEach((row, index) => {
+      if (!row.return_number) {
+        errors.push(`Row ${index + 1}: Missing return_number`)
+        return
+      }
+
+      if (!returnGroups.has(row.return_number)) {
+        returnGroups.set(row.return_number, [])
+      }
+      returnGroups.get(row.return_number)!.push({ ...row, rowIndex: index + 1 })
+    })
+
+    // Convert grouped returns to the format expected by createReturn
+    const returnsToImport: any[] = []
+
+    for (const [returnNumber, returnRows] of returnGroups) {
+      try {
+        // Use first row for return header data
+        const headerRow = returnRows[0]
+
+        // Validate required header fields
+        if (!headerRow.customer_name || !headerRow.return_date) {
+          errors.push(`Return ${returnNumber}: Missing required fields (customer_name, return_date)`)
+          continue
+        }
+
+        // Collect all items for this return
+        const items = []
+        let hasItemErrors = false
+
+        for (const row of returnRows) {
+          // Validate required item fields
+          if (!row.sku || !row.product_name || !row.quantity) {
+            errors.push(
+              `Return ${returnNumber}, Row ${row.rowIndex}: Missing required item fields (sku, product_name, quantity)`,
+            )
+            hasItemErrors = true
+            continue
+          }
+
+          items.push({
+            sku: row.sku,
+            product_name: row.product_name,
+            quantity: Number.parseInt(row.quantity) || 0,
+            condition: row.condition || "Good",
+            reason: row.reason || "Other",
+          })
+        }
+
+        // Skip this return if there were item errors
+        if (hasItemErrors || items.length === 0) {
+          continue
+        }
+
+        // Create return object
+        const returnData = {
+          customer_name: headerRow.customer_name,
+          customer_email: headerRow.customer_email || "",
+          order_number: headerRow.order_number || "",
+          return_date: normalizeDate(headerRow.return_date),
+          status: (headerRow.status as any) || "Pending",
+          notes: headerRow.notes || "",
+          items,
+        }
+
+        const createdReturn = await supabaseStore.createReturn(returnData)
+        successCount++
+      } catch (error) {
+        errors.push(`Return ${returnNumber}: ${error instanceof Error ? error.message : "Unknown error"}`)
+      }
+    }
+
+    return {
+      success: errors.length === 0,
+      message: `Imported ${successCount} returns${errors.length > 0 ? ` with ${errors.length} errors` : ""}`,
+      count: successCount,
+      errors: errors.length > 0 ? errors.slice(0, 100) : undefined, // Limit errors shown
+    }
+  }
+
   const downloadTemplate = () => {
     let csvContent = ""
     let filename = ""
@@ -564,6 +666,12 @@ PO-003,Supplier ABC,2024-01-17,0,Pending,Zero cost items,F-000001,Free Sample,10
 1002,2024-01-16,Jane Smith,jane@example.com,185.75,15.75,20.00,store1,Main Store,S-789012,Sample Shoes,1,35.00,35.00`
         filename = "shopify_orders_template.csv"
         break
+      case "returns":
+        csvContent = `return_number,customer_name,customer_email,order_number,return_date,status,notes,sku,product_name,quantity,condition,reason
+RET-001,John Doe,john@example.com,#1001,2024-01-15,Pending,Defective item,T-565762,Sample T-Shirt,1,Defective,Defective
+RET-002`
+        filename = "returns_template.csv"
+        break
     }
 
     const blob = new Blob([csvContent], { type: "text/csv" })
@@ -583,6 +691,8 @@ PO-003,Supplier ABC,2024-01-17,0,Pending,Zero cost items,F-000001,Free Sample,10
         return <FileText className="h-5 w-5" />
       case "shopify-orders":
         return <ShoppingCart className="h-5 w-5" />
+      case "returns":
+        return <RotateCcw className="h-5 w-5" />
       default:
         return <Upload className="h-5 w-5" />
     }
@@ -596,6 +706,8 @@ PO-003,Supplier ABC,2024-01-17,0,Pending,Zero cost items,F-000001,Free Sample,10
         return "Import purchase orders with supplier info and line items. Multiple rows with same PO number will be grouped into one PO with multiple items. Supports up to 100,000 items with 0 values allowed."
       case "shopify-orders":
         return "Import Shopify orders with customer info and line items. Multiple rows with same order number will be grouped into one order with multiple items. Supports up to 100,000 items."
+      case "returns":
+        return "Import return orders with customer info and returned items. Multiple rows with same return number will be grouped into one return with multiple items. Supports up to 100,000 items."
       default:
         return "Select an import type to get started"
     }
@@ -661,6 +773,20 @@ PO-003,Supplier ABC,2024-01-17,0,Pending,Zero cost items,F-000001,Free Sample,10
                   <div>
                     <h3 className="font-medium">Shopify Orders</h3>
                     <p className="text-sm text-muted-foreground">Import order data</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card
+                className={`cursor-pointer transition-colors ${
+                  importType === "returns" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                }`}
+                onClick={() => setImportType("returns")}
+              >
+                <CardContent className="flex items-center space-x-3 p-4">
+                  <RotateCcw className="h-8 w-8 text-primary" />
+                  <div>
+                    <h3 className="font-medium">Returns</h3>
+                    <p className="text-sm text-muted-foreground">Import return data</p>
                   </div>
                 </CardContent>
               </Card>
