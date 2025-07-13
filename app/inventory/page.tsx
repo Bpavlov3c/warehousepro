@@ -254,21 +254,21 @@ export default function Inventory() {
 
   if (loading) {
     return (
-      <>
-        <header className="flex h-16 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+          <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Inventory</h1>
         </header>
-        <div className="p-8 text-center">Loading…</div>
-      </>
+        <div className="p-8 text-center ml-16 lg:ml-64">Loading…</div>
+      </div>
     )
   }
 
   return (
-    <>
+    <div className="flex flex-col min-h-screen">
       {/* --------------------------- header --------------------------- */}
-      <header className="flex h-16 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+      <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <SidebarTrigger className="-ml-1 lg:hidden" />
         <h1 className="flex items-center gap-2 text-lg font-semibold">
           <Package className="h-5 w-5" />
           Inventory
@@ -276,7 +276,7 @@ export default function Inventory() {
       </header>
 
       {/* ------------------------ main content ----------------------- */}
-      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
         {/* summary cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <SummaryCard
@@ -449,7 +449,7 @@ export default function Inventory() {
           </DialogContent>
         </Dialog>
       </main>
-    </>
+    </div>
   )
 }
 

@@ -265,15 +265,15 @@ export default function ShopifyOrders() {
     (order as any).shopify_order_items ?? order.items
 
   return (
-    <div className="flex flex-col">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+    <div className="flex flex-col min-h-screen">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold">Shopify Orders</h1>
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
         {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
@@ -463,145 +463,95 @@ export default function ShopifyOrders() {
                           <Badge className={getStatusColor(order.status)}>{order.status}</Badge>
                         </TableCell>
                         <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          <Badge variant="secondary">{order.items.length} items</Badge>
+                          {getOrderItemsForDisplay(order).length}
                         </TableCell>
                         <TableCell onClick={() => toggleOrderExpansion(order.id)}>
                           {(order.totalAmount - order.taxAmount).toFixed(2)} лв
-                          <div className="text-xs text-muted-foreground">Total: {order.totalAmount.toFixed(2)} лв</div>
                         </TableCell>
-                        <TableCell
-                          className="text-green-600 font-medium"
-                          onClick={() => toggleOrderExpansion(order.id)}
-                        >
+                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
                           {order.profit.toFixed(2)} лв
                         </TableCell>
                         <TableCell>
                           <Dialog>
                             <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={() => setSelectedOrder(order)}>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedOrder(order)}
+                                className="h-8 w-8 p-0"
+                              >
                                 <Eye className="h-4 w-4" />
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                            <DialogContent className="max-w-4xl">
                               <DialogHeader>
-                                <DialogTitle>Order Details - {selectedOrder?.orderNumber}</DialogTitle>
-                                <DialogDescription>Complete order information and profit breakdown</DialogDescription>
+                                <DialogTitle>Order Details - {order.orderNumber}</DialogTitle>
+                                <DialogDescription>
+                                  Order from {order.storeName} on {new Date(order.orderDate).toLocaleDateString()}
+                                </DialogDescription>
                               </DialogHeader>
                               {selectedOrder && (
                                 <div className="space-y-4">
                                   <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                      <Label className="text-sm font-medium">Shopify Order ID</Label>
-                                      <p className="text-sm text-muted-foreground">{selectedOrder.shopifyOrderId}</p>
-                                    </div>
-                                    <div>
-                                      <Label className="text-sm font-medium">Store</Label>
-                                      <p className="text-sm text-muted-foreground">{selectedOrder.storeName}</p>
-                                    </div>
-                                    <div>
-                                      <Label className="text-sm font-medium">Customer</Label>
-                                      <p className="text-sm text-muted-foreground">{selectedOrder.customerName}</p>
-                                    </div>
-                                    <div>
-                                      <Label className="text-sm font-medium">Email</Label>
+                                      <Label>Customer</Label>
+                                      <p className="text-sm">{selectedOrder.customerName}</p>
                                       <p className="text-sm text-muted-foreground">{selectedOrder.customerEmail}</p>
                                     </div>
                                     <div>
-                                      <Label className="text-sm font-medium">Status</Label>
+                                      <Label>Status</Label>
                                       <Badge className={getStatusColor(selectedOrder.status)}>
                                         {selectedOrder.status}
                                       </Badge>
                                     </div>
+                                  </div>
+                                  <div>
+                                    <Label>Shipping Address</Label>
+                                    <p className="text-sm">{selectedOrder.shippingAddress}</p>
+                                  </div>
+                                  <div>
+                                    <Label>Order Items</Label>
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>SKU</TableHead>
+                                          <TableHead>Product</TableHead>
+                                          <TableHead>Quantity</TableHead>
+                                          <TableHead>Unit Price</TableHead>
+                                          <TableHead>Total</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {getOrderItemsForDisplay(selectedOrder).map((item: any, index: number) => (
+                                          <TableRow key={index}>
+                                            <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                                            <TableCell>{item.product_name}</TableCell>
+                                            <TableCell>{item.quantity}</TableCell>
+                                            <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
+                                            <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                                     <div>
-                                      <Label className="text-sm font-medium">Order Date</Label>
-                                      <p className="text-sm text-muted-foreground">
-                                        {new Date(selectedOrder.orderDate).toLocaleString()}
+                                      <Label>Subtotal</Label>
+                                      <p className="text-sm">
+                                        {(selectedOrder.totalAmount - selectedOrder.taxAmount).toFixed(2)} лв
                                       </p>
                                     </div>
-                                  </div>
-
-                                  <div>
-                                    <Label className="text-sm font-medium">Items</Label>
-                                    <div className="max-h-60 overflow-y-auto">
-                                      <Table>
-                                        <TableHeader>
-                                          <TableRow>
-                                            <TableHead>SKU</TableHead>
-                                            <TableHead>Product</TableHead>
-                                            <TableHead>Quantity</TableHead>
-                                            <TableHead>Sale Price</TableHead>
-                                            <TableHead>Cost Price</TableHead>
-                                            <TableHead>Total Sale</TableHead>
-                                            <TableHead>Item Profit</TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {getOrderItemsForDisplay(selectedOrder).map((item, index) => {
-                                            const totalCost = item.cost_price * item.quantity
-                                            const itemProfit = item.total_price - totalCost
-
-                                            return (
-                                              <TableRow key={index}>
-                                                <TableCell>{item.sku}</TableCell>
-                                                <TableCell>{item.product_name}</TableCell>
-                                                <TableCell>{item.quantity}</TableCell>
-                                                <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
-                                                <TableCell>
-                                                  {item.cost_price > 0 ? `${item.cost_price.toFixed(2)} лв` : "N/A"}
-                                                </TableCell>
-                                                <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
-                                                <TableCell
-                                                  className={itemProfit >= 0 ? "text-green-600" : "text-red-600"}
-                                                >
-                                                  {item.cost_price > 0 ? `${itemProfit.toFixed(2)} лв` : "N/A"}
-                                                </TableCell>
-                                              </TableRow>
-                                            )
-                                          })}
-                                        </TableBody>
-                                      </Table>
-                                    </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                      <Label className="text-sm font-medium">Shipping Address</Label>
-                                      <p className="text-sm text-muted-foreground">{selectedOrder.shipping_address}</p>
+                                      <Label>Shipping</Label>
+                                      <p className="text-sm">{selectedOrder.shippingCost.toFixed(2)} лв</p>
                                     </div>
-                                    <div className="space-y-2">
-                                      <div className="flex justify-between">
-                                        <span>Subtotal:</span>
-                                        <span>
-                                          {(
-                                            selectedOrder.total_amount -
-                                            selectedOrder.shipping_cost -
-                                            selectedOrder.tax_amount
-                                          ).toFixed(2)}{" "}
-                                          лв
-                                        </span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>Shipping:</span>
-                                        <span>{selectedOrder.shipping_cost.toFixed(2)} лв</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>Tax:</span>
-                                        <span>{selectedOrder.tax_amount.toFixed(2)} лв</span>
-                                      </div>
-                                      <div className="flex justify-between font-medium">
-                                        <span>Total:</span>
-                                        <span>{selectedOrder.total_amount.toFixed(2)} лв</span>
-                                      </div>
-                                      <div className="flex justify-between text-blue-600 font-medium">
-                                        <span>Revenue (excl. tax):</span>
-                                        <span>
-                                          {(selectedOrder.total_amount - selectedOrder.tax_amount).toFixed(2)} лв
-                                        </span>
-                                      </div>
-                                      <div className="flex justify-between text-green-600 font-medium">
-                                        <span>Profit:</span>
-                                        <span>{selectedOrder.profit.toFixed(2)} лв</span>
-                                      </div>
+                                    <div>
+                                      <Label>Tax</Label>
+                                      <p className="text-sm">{selectedOrder.taxAmount.toFixed(2)} лв</p>
+                                    </div>
+                                    <div>
+                                      <Label>Total</Label>
+                                      <p className="text-lg font-bold">{selectedOrder.totalAmount.toFixed(2)} лв</p>
                                     </div>
                                   </div>
                                 </div>
@@ -615,107 +565,30 @@ export default function ShopifyOrders() {
                       {expandedOrders.has(order.id) && (
                         <TableRow>
                           <TableCell colSpan={10} className="p-0">
-                            <div className="bg-muted/30 p-4 border-t">
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <h4 className="font-medium text-sm">Order Items ({order.items.length})</h4>
-                                  <div className="text-sm text-muted-foreground">
-                                    Revenue: {(order.totalAmount - order.taxAmount).toFixed(2)} лв | Shipping:{" "}
-                                    {order.shippingCost.toFixed(2)} лв | Tax: {order.taxAmount.toFixed(2)} лв
-                                  </div>
-                                </div>
-
-                                <div className="grid gap-2">
-                                  {getOrderItemsForDisplay(order).map((item, index) => {
-                                    const totalCost = item.cost_price * item.quantity
-                                    const itemProfit = item.total_price - totalCost
-
-                                    return (
-                                      <div
-                                        key={index}
-                                        className="flex items-center justify-between bg-background p-3 rounded-md border"
-                                      >
-                                        <div className="flex-1">
-                                          <div className="font-medium">{item.product_name}</div>
-                                          <div className="text-sm text-muted-foreground">SKU: {item.sku}</div>
-                                        </div>
-                                        <div className="flex items-center space-x-4 text-sm">
-                                          <div className="text-center">
-                                            <div className="font-medium">{item.quantity}</div>
-                                            <div className="text-muted-foreground">Qty</div>
-                                          </div>
-                                          <div className="text-center">
-                                            <div className="font-medium">{item.unit_price.toFixed(2)} лв</div>
-                                            <div className="text-muted-foreground">Sale Price</div>
-                                          </div>
-                                          <div className="text-center">
-                                            <div className="font-medium">
-                                              {item.cost_price > 0 ? `${item.cost_price.toFixed(2)} лв` : "N/A"}
-                                            </div>
-                                            <div className="text-muted-foreground">Cost Price</div>
-                                          </div>
-                                          <div className="text-center">
-                                            <div className="font-medium">{item.total_price.toFixed(2)} лв</div>
-                                            <div className="text-muted-foreground">Total Sale</div>
-                                          </div>
-                                          <div className="text-center">
-                                            <div
-                                              className={`font-medium ${itemProfit >= 0 ? "text-green-600" : "text-red-600"}`}
-                                            >
-                                              {item.cost_price > 0 ? `${itemProfit.toFixed(2)} лв` : "N/A"}
-                                            </div>
-                                            <div className="text-muted-foreground">Item Profit</div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-
-                                {/* Order Profit Summary */}
-                                <div className="mt-3 pt-3 border-t bg-background rounded-md p-3">
-                                  <div className="grid grid-cols-2 gap-4 text-sm">
-                                    <div>
-                                      <div className="flex justify-between">
-                                        <span>Revenue (excl. tax):</span>
-                                        <span>{(order.totalAmount - order.taxAmount).toFixed(2)} лв</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>Total Cost of Items:</span>
-                                        <span>
-                                          {getOrderItemsForDisplay(order)
-                                            .reduce((sum, item) => sum + item.cost_price * item.quantity, 0)
-                                            .toFixed(2)}{" "}
-                                          лв
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <div className="flex justify-between">
-                                        <span>Shipping:</span>
-                                        <span>{order.shippingCost.toFixed(2)} лв</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>Tax:</span>
-                                        <span>{order.taxAmount.toFixed(2)} лв</span>
-                                      </div>
-                                      <div className="flex justify-between font-medium text-green-600 border-t pt-2">
-                                        <span>Net Profit:</span>
-                                        <span>{order.profit.toFixed(2)} лв</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {order.shippingAddress && (
-                                  <div className="mt-3 pt-3 border-t">
-                                    <div className="text-sm">
-                                      <span className="font-medium">Shipping Address: </span>
-                                      <span className="text-muted-foreground">{order.shippingAddress}</span>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
+                            <div className="bg-muted/30 p-4">
+                              <h4 className="font-medium mb-2">Order Items</h4>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>SKU</TableHead>
+                                    <TableHead>Product Name</TableHead>
+                                    <TableHead>Quantity</TableHead>
+                                    <TableHead>Unit Price</TableHead>
+                                    <TableHead>Total</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {getOrderItemsForDisplay(order).map((item: any, index: number) => (
+                                    <TableRow key={index}>
+                                      <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                                      <TableCell>{item.product_name}</TableCell>
+                                      <TableCell>{item.quantity}</TableCell>
+                                      <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
+                                      <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
                             </div>
                           </TableCell>
                         </TableRow>

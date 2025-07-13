@@ -403,12 +403,12 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+          <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Dashboard</h1>
         </header>
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex items-center justify-center ml-16 lg:ml-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
             <p>Loading dashboard...</p>
@@ -419,15 +419,15 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex flex-col">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+    <div className="flex flex-col min-h-screen">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold">Dashboard</h1>
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
         {/* Key Metrics - Mobile responsive grid */}
         <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           <Card>

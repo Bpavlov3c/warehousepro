@@ -723,7 +723,7 @@ RET-002`
         </div>
       </header>
 
-      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
+      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
         {/* Import Type Selection */}
         <Card>
           <CardHeader>

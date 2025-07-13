@@ -302,12 +302,12 @@ export default function PurchaseOrders() {
 
   if (loading) {
     return (
-      <div className="flex flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+          <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
         </header>
-        <div className="p-6">
+        <div className="p-6 ml-16 lg:ml-64">
           <div className="animate-pulse">
             <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
@@ -328,12 +328,12 @@ export default function PurchaseOrders() {
 
   if (error) {
     return (
-      <div className="flex flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+          <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
         </header>
-        <div className="p-6">
+        <div className="p-6 ml-16 lg:ml-64">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <h3 className="text-red-800 font-medium">Error loading purchase orders</h3>
             <p className="text-red-600 mt-1">{error}</p>
@@ -347,9 +347,9 @@ export default function PurchaseOrders() {
   }
 
   return (
-    <div className="flex flex-col">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+    <div className="flex flex-col min-h-screen">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
           <Button onClick={() => setIsNewPOOpen(true)} size="sm" className="lg:hidden">
@@ -358,7 +358,7 @@ export default function PurchaseOrders() {
         </div>
       </header>
 
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4 ml-16 lg:ml-64">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Purchase Orders</h1>
           <Button onClick={() => setIsNewPOOpen(true)} size="sm" className="hidden lg:flex">
