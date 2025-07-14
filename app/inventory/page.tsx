@@ -85,9 +85,19 @@ export default function Inventory() {
       setLoading(true)
       console.log("Loading inventory data...")
       const data = await supabaseStore.getInventory()
-      console.log("Loaded inventory items:", data.length)
-      console.log("Sample inventory items:", data.slice(0, 3))
-      setInventory(data)
+
+      // 🔐 Ensure numeric fields are never undefined or null
+      const sanitized = data.map((i) => ({
+        ...i,
+        inStock: i.inStock ?? 0,
+        incoming: i.incoming ?? 0,
+        reserved: i.reserved ?? 0,
+        unitCost: i.unitCost ?? 0,
+      }))
+
+      console.log("Loaded inventory items:", sanitized.length)
+      console.log("Sample inventory items:", sanitized.slice(0, 3))
+      setInventory(sanitized)
     } catch (err) {
       console.error("Error loading inventory", err)
     } finally {
@@ -255,11 +265,11 @@ export default function Inventory() {
   if (loading) {
     return (
       <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
           <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Inventory</h1>
         </header>
-        <div className="p-8 text-center ml-16 lg:ml-64">Loading…</div>
+        <div className="p-8 text-center ml-16 lg:ml-0">Loading…</div>
       </div>
     )
   }
@@ -267,7 +277,7 @@ export default function Inventory() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* --------------------------- header --------------------------- */}
-      <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+      <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <h1 className="flex items-center gap-2 text-lg font-semibold">
           <Package className="h-5 w-5" />
@@ -276,7 +286,7 @@ export default function Inventory() {
       </header>
 
       {/* ------------------------ main content ----------------------- */}
-      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
+      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         {/* summary cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <SummaryCard

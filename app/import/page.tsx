@@ -669,7 +669,7 @@ PO-003,Supplier ABC,2024-01-17,0,Pending,Zero cost items,F-000001,Free Sample,10
       case "returns":
         csvContent = `return_number,customer_name,customer_email,order_number,return_date,status,notes,sku,product_name,quantity,condition,reason
 RET-001,John Doe,john@example.com,#1001,2024-01-15,Pending,Defective item,T-565762,Sample T-Shirt,1,Defective,Defective
-RET-002`
+RET-002,Jane Smith,jane@example.com,#1002,2024-01-16,Pending,Wrong size,J-123456,Sample Jeans,1,Good,Wrong Item`
         filename = "returns_template.csv"
         break
     }
@@ -715,15 +715,15 @@ RET-002`
 
   return (
     <div className="flex flex-col">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
+        <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center gap-2">
           {getImportIcon()}
           <h1 className="text-lg font-semibold">Data Import</h1>
         </div>
       </header>
 
-      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
+      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         {/* Import Type Selection */}
         <Card>
           <CardHeader>

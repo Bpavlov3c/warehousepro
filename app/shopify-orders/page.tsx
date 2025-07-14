@@ -1,606 +1,390 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Search, Package, DollarSign, TrendingUp, Calendar, Eye, RefreshCw } from "lucide-react"
+import { supabaseStore, type ShopifyOrder } from "@/lib/supabase-store"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Progress } from "@/components/ui/progress"
-import {
-  Search,
-  Filter,
-  Download,
-  RefreshCw,
-  Store,
-  ShoppingCart,
-  DollarSign,
-  Eye,
-  ChevronDown,
-  ChevronRight,
-} from "lucide-react"
-import { supabaseStore, type ShopifyOrder, type ShopifyStore } from "@/lib/supabase-store"
 
 export default function ShopifyOrders() {
   const [orders, setOrders] = useState<ShopifyOrder[]>([])
-  const [stores, setStores] = useState<ShopifyStore[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
-  const [selectedStoreId, setSelectedStoreId] = useState<string>("all")
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, store: "" })
-  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
+  const [isViewOrderOpen, setIsViewOrderOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
 
   // Load data on component mount
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, storesData] = await Promise.all([
-          supabaseStore.getShopifyOrders(),
-          supabaseStore.getShopifyStores(),
-        ])
+        setLoading(true)
+        const ordersData = await supabaseStore.getShopifyOrders()
         setOrders(ordersData)
-        setStores(storesData)
-      } catch (error) {
-        console.error("Error loading data:", error)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load orders")
+      } finally {
+        setLoading(false)
       }
     }
     loadData()
   }, [])
 
-  const toggleOrderExpansion = (orderId: string) => {
-    const newExpanded = new Set(expandedOrders)
-    if (newExpanded.has(orderId)) {
-      newExpanded.delete(orderId)
-    } else {
-      newExpanded.add(orderId)
-    }
-    setExpandedOrders(newExpanded)
-  }
-
-  const handleExport = () => {
-    // Create CSV content with headers
-    const csvContent = [
-      [
-        "Order Number",
-        "Store",
-        "Shopify Order ID",
-        "Customer Name",
-        "Customer Email",
-        "Order Date",
-        "Status",
-        "Total Amount",
-        "Revenue (excl. tax)",
-        "Shipping Cost",
-        "Tax Amount",
-        "Profit",
-        "Items Count",
-        "Shipping Address",
-      ],
-      ...filteredOrders.map((order) => [
-        order.orderNumber,
-        order.storeName,
-        order.shopifyOrderId,
-        order.customerName,
-        order.customerEmail,
-        new Date(order.orderDate).toLocaleDateString(),
-        order.status,
-        order.totalAmount.toFixed(2),
-        (order.totalAmount - order.taxAmount).toFixed(2),
-        order.shippingCost.toFixed(2),
-        order.taxAmount.toFixed(2),
-        order.profit.toFixed(2),
-        order.items.length.toString(),
-        order.shippingAddress,
-      ]),
-    ]
-
-    // Convert to CSV string
-    const csvString = csvContent.map((row) => row.map((field) => `"${field}"`).join(",")).join("\n")
-
-    // Create and download file
-    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" })
-    const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    link.setAttribute("href", url)
-    link.setAttribute("download", `shopify_orders_${new Date().toISOString().split("T")[0]}.csv`)
-    link.style.visibility = "hidden"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-  }
-
-  const syncAllOrders = async () => {
-    setIsSyncing(true)
-    setSyncProgress({ current: 0, total: 0, store: "" })
-
+  const handleSyncOrders = async () => {
     try {
-      const storesData = await supabaseStore.getShopifyStores()
-      setStores(storesData)
-      const connectedStores = storesData.filter((store) => store.status === "Connected")
-      let totalNewOrders = 0
-
-      for (const store of connectedStores) {
-        try {
-          setSyncProgress({ current: 0, total: 0, store: store.name })
-
-          // Update store status to show syncing
-          await supabaseStore.updateShopifyStore(store.id, { status: "Testing" })
-          const freshStores1 = await supabaseStore.getShopifyStores()
-          setStores(freshStores1)
-
-          // Sync orders from this store with progress tracking
-          const newOrders = await syncStoreOrdersWithProgress(store)
-          totalNewOrders += newOrders.length
-
-          // Update store with successful sync
-          await supabaseStore.updateShopifyStore(store.id, {
-            status: "Connected",
-            lastSync: new Date().toISOString(),
-            totalOrders: store.totalOrders + newOrders.length,
-          })
-          const freshStores2 = await supabaseStore.getShopifyStores()
-          setStores(freshStores2)
-        } catch (error) {
-          console.error(`Failed to sync orders for ${store.name}:`, error)
-          await supabaseStore.updateShopifyStore(store.id, { status: "Error" })
-          const freshStores3 = await supabaseStore.getShopifyStores()
-          setStores(freshStores3)
-        }
-      }
-
-      // Refresh data
-      setOrders(await supabaseStore.getShopifyOrders())
-      setStores(await supabaseStore.getShopifyStores())
-
-      alert(`Successfully synced ${totalNewOrders} new orders from ${connectedStores.length} stores`)
-    } catch (error) {
-      console.error("Sync failed:", error)
-      alert("Failed to sync orders. Please try again.")
-    } finally {
-      setIsSyncing(false)
-      setSyncProgress({ current: 0, total: 0, store: "" })
-    }
-  }
-
-  const syncStoreOrdersWithProgress = async (store: ShopifyStore): Promise<ShopifyOrder[]> => {
-    try {
-      const res = await fetch("/api/shopify-orders", {
+      setSyncing(true)
+      // This would typically call your Shopify API sync endpoint
+      const response = await fetch("/api/shopify-orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          domain: store.shopifyDomain,
-          accessToken: store.accessToken,
-        }),
       })
 
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.error || "Unknown error")
-
-      // Transform Shopify orders to our format
-      const transformedOrders = data.orders.map((shopifyOrder: any) => ({
-        store_id: store.id,
-        shopify_order_id: shopifyOrder.id.toString(),
-        order_number: shopifyOrder.order_number || shopifyOrder.name,
-        customer_name: shopifyOrder.customer
-          ? `${shopifyOrder.customer.first_name || ""} ${shopifyOrder.customer.last_name || ""}`.trim()
-          : "Unknown Customer",
-        customer_email: shopifyOrder.email || shopifyOrder.customer?.email || "",
-        order_date: shopifyOrder.created_at,
-        status: shopifyOrder.fulfillment_status || "unfulfilled",
-        total_amount: Number.parseFloat(shopifyOrder.total_price || "0"),
-        shipping_cost: Number.parseFloat(shopifyOrder.shipping_lines?.[0]?.price || "0"),
-        tax_amount: Number.parseFloat(shopifyOrder.total_tax || "0"),
-        items:
-          shopifyOrder.line_items?.map((item: any, index: number) => ({
-            sku: item.sku || `unknown-${item.id}`,
-            product_name: item.title || item.name,
-            quantity: item.quantity,
-            unit_price: Number.parseFloat(item.price || "0"),
-            total_price: Number.parseFloat(item.price || "0") * item.quantity,
-          })) || [],
-        shipping_address: shopifyOrder.shipping_address
-          ? `${shopifyOrder.shipping_address.address1 || ""}, ${shopifyOrder.shipping_address.city || ""}, ${shopifyOrder.shipping_address.province || ""} ${shopifyOrder.shipping_address.zip || ""}`.trim()
-          : "No address provided",
-      }))
-
-      const newOrders = await supabaseStore.addShopifyOrders(transformedOrders)
-      console.log(`Added ${newOrders.length} new orders from ${store.name}`)
-      return newOrders
-    } catch (err) {
-      console.error("Order sync failed:", err)
-      throw err
+      if (response.ok) {
+        // Refresh the orders list
+        const ordersData = await supabaseStore.getShopifyOrders()
+        setOrders(ordersData)
+        alert("Orders synced successfully!")
+      } else {
+        throw new Error("Failed to sync orders")
+      }
+    } catch (error) {
+      console.error("Error syncing orders:", error)
+      alert("Error syncing orders. Please try again.")
+    } finally {
+      setSyncing(false)
     }
   }
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
-      case "fulfilled":
-        return "bg-green-100 text-green-800"
+      case "pending":
+        return "bg-yellow-100 text-yellow-800"
       case "processing":
         return "bg-blue-100 text-blue-800"
+      case "fulfilled":
       case "shipped":
-        return "bg-purple-100 text-purple-800"
+      case "delivered":
+        return "bg-green-100 text-green-800"
       case "cancelled":
         return "bg-red-100 text-red-800"
-      case "unfulfilled":
-        return "bg-yellow-100 text-yellow-800"
+      case "refunded":
+        return "bg-purple-100 text-purple-800"
       default:
         return "bg-gray-100 text-gray-800"
     }
   }
 
-  // Filter orders based on search term and selected store
-  const filteredOrders = orders.filter((order) => {
-    const matchesSearch =
-      String(order.orderNumber).toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customerEmail.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredOrders = orders.filter(
+    (order) =>
+      order.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.storeName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.status?.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
 
-    const matchesStore = selectedStoreId === "all" || order.storeId === selectedStoreId
+  const calculateOrderStats = () => {
+    const totalRevenue = orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0)
+    const totalProfit = orders.reduce((sum, order) => sum + (order.profit || 0), 0)
+    const pendingOrders = orders.filter(
+      (order) =>
+        order.status && !["fulfilled", "shipped", "delivered", "cancelled"].includes(order.status.toLowerCase()),
+    ).length
 
-    return matchesSearch && matchesStore
-  })
+    return { totalRevenue, totalProfit, pendingOrders }
+  }
 
-  const totalOrders = orders.length
-  // Revenue excluding tax (consistent with reports)
-  const totalRevenue = orders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
-  const totalProfit = orders.reduce((sum, order) => sum + order.profit, 0)
-  const connectedStores = stores.filter((s) => s.status === "Connected")
+  const { totalRevenue, totalProfit, pendingOrders } = calculateOrderStats()
 
-  const getOrderItemsForDisplay = (order: ShopifyOrder) =>
-    // @ts-ignore – property added in QuickEdit above
-    (order as any).shopify_order_items ?? order.items
+  if (loading) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="flex items-center justify-between space-y-2">
+          <div className="flex items-center space-x-2">
+            <SidebarTrigger />
+            <h2 className="text-3xl font-bold tracking-tight">Shopify Orders</h2>
+          </div>
+        </div>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-lg">Loading orders...</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="flex items-center justify-between space-y-2">
+          <div className="flex items-center space-x-2">
+            <SidebarTrigger />
+            <h2 className="text-3xl font-bold tracking-tight">Shopify Orders</h2>
+          </div>
+        </div>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-lg text-red-600">Error: {error}</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
-        <SidebarTrigger className="-ml-1 lg:hidden" />
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">Shopify Orders</h1>
+    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <div className="flex items-center justify-between space-y-2">
+        <div className="flex items-center space-x-2">
+          <SidebarTrigger />
+          <h2 className="text-3xl font-bold tracking-tight">Shopify Orders</h2>
         </div>
-      </header>
-
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalOrders}</div>
-              <p className="text-xs text-muted-foreground">From all stores</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Revenue (excl. tax)</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalRevenue.toLocaleString()} лв</div>
-              <p className="text-xs text-muted-foreground">Revenue without tax</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Profit</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalProfit.toLocaleString()} лв</div>
-              <p className="text-xs text-muted-foreground">Gross profit</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Connected Stores</CardTitle>
-              <Store className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{connectedStores.length}</div>
-              <p className="text-xs text-muted-foreground">Active connections</p>
-            </CardContent>
-          </Card>
+        <div className="flex items-center space-x-2">
+          <Button onClick={handleSyncOrders} disabled={syncing}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing..." : "Sync Orders"}
+          </Button>
         </div>
+      </div>
 
-        {/* Sync Progress */}
-        {isSyncing && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Syncing Orders</CardTitle>
-              <CardDescription>{syncProgress.store && `Syncing from ${syncProgress.store}...`}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Progress</span>
-                  <span>
-                    {syncProgress.current}
-                    {syncProgress.total > 0 && `/${syncProgress.total}`} orders
-                  </span>
-                </div>
-                <Progress
-                  value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0}
-                  className="w-full"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Actions Bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search orders..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 w-[300px]"
-              />
-            </div>
-            <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by store" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Stores</SelectItem>
-                {stores.map((store) => (
-                  <SelectItem key={store.id} value={store.id}>
-                    {store.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Filter
-            </Button>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-            <Button size="sm" onClick={() => syncAllOrders()} disabled={isSyncing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
-              {isSyncing ? "Syncing..." : "Sync All Orders"}
-            </Button>
-          </div>
-        </div>
-
-        {/* Orders Table */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardHeader>
-            <CardTitle>Recent Orders</CardTitle>
-            <CardDescription>Orders synced from your Shopify stores - click to expand and view items</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {filteredOrders.length === 0 ? (
-              <div className="text-center py-8">
-                <ShoppingCart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">No Orders Found</h3>
-                <p className="text-muted-foreground mb-4">
-                  {orders.length === 0
-                    ? "Sync your first orders from connected stores"
-                    : "Try adjusting your search or filter criteria"}
-                </p>
-                {orders.length === 0 && (
-                  <Button onClick={() => syncAllOrders()} disabled={isSyncing}>
-                    <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
-                    Sync Orders Now
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[40px]"></TableHead>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Store</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Revenue</TableHead>
-                    <TableHead>Profit</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders.map((order) => (
-                    <>
-                      {/* Main Order Row */}
-                      <TableRow key={order.id} className="cursor-pointer hover:bg-muted/50">
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => toggleOrderExpansion(order.id)}
-                            className="p-0 h-6 w-6"
-                          >
-                            {expandedOrders.has(order.id) ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </TableCell>
-                        <TableCell className="font-medium" onClick={() => toggleOrderExpansion(order.id)}>
-                          {order.orderNumber}
-                        </TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>{order.storeName}</TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          <div>
-                            <div className="font-medium">{order.customerName}</div>
-                            <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          {new Date(order.orderDate).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          <Badge className={getStatusColor(order.status)}>{order.status}</Badge>
-                        </TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          {getOrderItemsForDisplay(order).length}
-                        </TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          {(order.totalAmount - order.taxAmount).toFixed(2)} лв
-                        </TableCell>
-                        <TableCell onClick={() => toggleOrderExpansion(order.id)}>
-                          {order.profit.toFixed(2)} лв
-                        </TableCell>
-                        <TableCell>
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedOrder(order)}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-4xl">
-                              <DialogHeader>
-                                <DialogTitle>Order Details - {order.orderNumber}</DialogTitle>
-                                <DialogDescription>
-                                  Order from {order.storeName} on {new Date(order.orderDate).toLocaleDateString()}
-                                </DialogDescription>
-                              </DialogHeader>
-                              {selectedOrder && (
-                                <div className="space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <Label>Customer</Label>
-                                      <p className="text-sm">{selectedOrder.customerName}</p>
-                                      <p className="text-sm text-muted-foreground">{selectedOrder.customerEmail}</p>
-                                    </div>
-                                    <div>
-                                      <Label>Status</Label>
-                                      <Badge className={getStatusColor(selectedOrder.status)}>
-                                        {selectedOrder.status}
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <Label>Shipping Address</Label>
-                                    <p className="text-sm">{selectedOrder.shippingAddress}</p>
-                                  </div>
-                                  <div>
-                                    <Label>Order Items</Label>
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>SKU</TableHead>
-                                          <TableHead>Product</TableHead>
-                                          <TableHead>Quantity</TableHead>
-                                          <TableHead>Unit Price</TableHead>
-                                          <TableHead>Total</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {getOrderItemsForDisplay(selectedOrder).map((item: any, index: number) => (
-                                          <TableRow key={index}>
-                                            <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                                            <TableCell>{item.product_name}</TableCell>
-                                            <TableCell>{item.quantity}</TableCell>
-                                            <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
-                                            <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                                    <div>
-                                      <Label>Subtotal</Label>
-                                      <p className="text-sm">
-                                        {(selectedOrder.totalAmount - selectedOrder.taxAmount).toFixed(2)} лв
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <Label>Shipping</Label>
-                                      <p className="text-sm">{selectedOrder.shippingCost.toFixed(2)} лв</p>
-                                    </div>
-                                    <div>
-                                      <Label>Tax</Label>
-                                      <p className="text-sm">{selectedOrder.taxAmount.toFixed(2)} лв</p>
-                                    </div>
-                                    <div>
-                                      <Label>Total</Label>
-                                      <p className="text-lg font-bold">{selectedOrder.totalAmount.toFixed(2)} лв</p>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </DialogContent>
-                          </Dialog>
-                        </TableCell>
-                      </TableRow>
-
-                      {/* Expanded Items Row */}
-                      {expandedOrders.has(order.id) && (
-                        <TableRow>
-                          <TableCell colSpan={10} className="p-0">
-                            <div className="bg-muted/30 p-4">
-                              <h4 className="font-medium mb-2">Order Items</h4>
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>SKU</TableHead>
-                                    <TableHead>Product Name</TableHead>
-                                    <TableHead>Quantity</TableHead>
-                                    <TableHead>Unit Price</TableHead>
-                                    <TableHead>Total</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {getOrderItemsForDisplay(order).map((item: any, index: number) => (
-                                    <TableRow key={index}>
-                                      <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                                      <TableCell>{item.product_name}</TableCell>
-                                      <TableCell>{item.quantity}</TableCell>
-                                      <TableCell>{item.unit_price.toFixed(2)} лв</TableCell>
-                                      <TableCell>{item.total_price.toFixed(2)} лв</TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+          <CardContent className="p-6">
+            <div className="flex items-center space-x-2">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              <div className="text-sm font-medium">Total Orders</div>
+            </div>
+            <div className="text-2xl font-bold">{orders.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center space-x-2">
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <div className="text-sm font-medium">Total Revenue</div>
+            </div>
+            <div className="text-2xl font-bold">${totalRevenue.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center space-x-2">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <div className="text-sm font-medium">Total Profit</div>
+            </div>
+            <div className="text-2xl font-bold">${totalProfit.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center space-x-2">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <div className="text-sm font-medium">Pending Orders</div>
+            </div>
+            <div className="text-2xl font-bold">{pendingOrders}</div>
           </CardContent>
         </Card>
       </div>
+
+      <div className="flex items-center space-x-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search orders..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-8"
+          />
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order #</TableHead>
+                <TableHead>Store</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Items</TableHead>
+                <TableHead>Total</TableHead>
+                <TableHead>Profit</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredOrders.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell className="font-medium">{order.orderNumber || "N/A"}</TableCell>
+                  <TableCell>{order.storeName || "N/A"}</TableCell>
+                  <TableCell>
+                    <div>
+                      <div className="font-medium">{order.customerName || "N/A"}</div>
+                      {order.customerEmail && (
+                        <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>{order.orderDate ? new Date(order.orderDate).toLocaleDateString() : "N/A"}</TableCell>
+                  <TableCell>
+                    <Badge className={getStatusColor(order.status || "unknown")}>{order.status || "Unknown"}</Badge>
+                  </TableCell>
+                  <TableCell>{order.items?.length || 0} items</TableCell>
+                  <TableCell>${(order.totalAmount || 0).toFixed(2)}</TableCell>
+                  <TableCell className={`font-medium ${(order.profit || 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    ${(order.profit || 0).toFixed(2)}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedOrder(order)
+                        setIsViewOrderOpen(true)
+                      }}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* View Order Dialog */}
+      <Dialog open={isViewOrderOpen} onOpenChange={setIsViewOrderOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Order Details</DialogTitle>
+            <DialogDescription>View the complete details of this Shopify order.</DialogDescription>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Order Number</h3>
+                  <p className="text-lg font-medium">{selectedOrder.orderNumber || "N/A"}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Status</h3>
+                  <Badge className={getStatusColor(selectedOrder.status || "unknown")}>
+                    {selectedOrder.status || "Unknown"}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Store</h3>
+                  <p className="font-medium">{selectedOrder.storeName || "N/A"}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Order Date</h3>
+                  <p>{selectedOrder.orderDate ? new Date(selectedOrder.orderDate).toLocaleDateString() : "N/A"}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Customer</h3>
+                  <p className="font-medium">{selectedOrder.customerName || "N/A"}</p>
+                  {selectedOrder.customerEmail && (
+                    <p className="text-sm text-muted-foreground">{selectedOrder.customerEmail}</p>
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Shipping Address</h3>
+                  <p className="text-sm">{selectedOrder.shippingAddress || "N/A"}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-4">
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Subtotal</h3>
+                  <p className="text-lg font-medium">
+                    $
+                    {(
+                      (selectedOrder.totalAmount || 0) -
+                      (selectedOrder.taxAmount || 0) -
+                      (selectedOrder.shippingCost || 0)
+                    ).toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Shipping</h3>
+                  <p className="text-lg font-medium">${(selectedOrder.shippingCost || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Tax</h3>
+                  <p className="text-lg font-medium">${(selectedOrder.taxAmount || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-muted-foreground">Total</h3>
+                  <p className="text-lg font-medium">${(selectedOrder.totalAmount || 0).toFixed(2)}</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-medium">Order Items</h3>
+                  <div className="text-sm text-muted-foreground">
+                    Profit:{" "}
+                    <span
+                      className={`font-medium ${(selectedOrder.profit || 0) >= 0 ? "text-green-600" : "text-red-600"}`}
+                    >
+                      ${(selectedOrder.profit || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>SKU</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>Unit Price</TableHead>
+                      <TableHead>Total Price</TableHead>
+                      <TableHead>Cost</TableHead>
+                      <TableHead>Item Profit</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedOrder.items?.map((item, index) => {
+                      const costPrice = (item as any).cost_price || 0
+                      const itemProfit = (item.total_price || 0) - costPrice * (item.quantity || 0)
+
+                      return (
+                        <TableRow key={index}>
+                          <TableCell className="font-medium">{item.sku || "N/A"}</TableCell>
+                          <TableCell>{item.product_name || "N/A"}</TableCell>
+                          <TableCell>{item.quantity || 0}</TableCell>
+                          <TableCell>${(item.unit_price || 0).toFixed(2)}</TableCell>
+                          <TableCell>${(item.total_price || 0).toFixed(2)}</TableCell>
+                          <TableCell>${costPrice.toFixed(2)}</TableCell>
+                          <TableCell className={`font-medium ${itemProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            ${itemProfit.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={() => setIsViewOrderOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

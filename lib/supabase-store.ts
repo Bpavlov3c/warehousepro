@@ -9,7 +9,7 @@ import type { PostgrestError } from "@supabase/supabase-js"
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-const client = createClient(supabaseUrl, supabaseKey)
+export const supabase = createClient(supabaseUrl, supabaseKey)
 
 /* -------------------------------------------------------------------------- */
 /*                                    Types                                   */
@@ -110,6 +110,8 @@ export interface ReturnItem {
     | "Quality Issues"
     | "Other"
   created_at: string
+  total_refund?: number
+  unit_price?: number
 }
 
 export interface Return {
@@ -124,6 +126,7 @@ export interface Return {
   created_at: string
   updated_at: string
   return_items: ReturnItem[]
+  total_refund?: number
 }
 
 /* -------------------------------------------------------------------------- */
@@ -136,7 +139,7 @@ export interface Return {
 async function getLatestUnitCosts(): Promise<Map<string, number>> {
   try {
     // Get the most recent inventory record for each SKU
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("inventory")
       .select("sku, unit_cost_with_delivery, purchase_date, created_at")
       .order("created_at", { ascending: false })
@@ -171,7 +174,7 @@ async function calculateReservedQuantities(): Promise<Map<string, number>> {
     console.log("Calculating reserved quantities from pending orders...")
 
     // Get all orders that are not fulfilled (pending, processing, unfulfilled, etc.)
-    const { data: ordersData, error: ordersError } = await client
+    const { data: ordersData, error: ordersError } = await supabase
       .from("shopify_orders")
       .select(`
         id,
@@ -214,7 +217,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
     console.log("Calculating inventory summary...")
 
     // Get all inventory records (delivered items)
-    const { data: inventoryData, error: invError } = await client
+    const { data: inventoryData, error: invError } = await supabase
       .from("inventory")
       .select("sku, product_name, quantity_available, unit_cost_with_delivery, purchase_date, created_at")
 
@@ -226,7 +229,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
     console.log("Raw inventory data:", inventoryData)
 
     // Get all PO items with their status to calculate incoming stock
-    const { data: poData, error: poError } = await client
+    const { data: poData, error: poError } = await supabase
       .from("purchase_orders")
       .select(`
         status,
@@ -256,10 +259,10 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
     inventoryData?.forEach((item) => {
       const existing = skuTotals.get(item.sku)
       if (existing) {
-        existing.totalQuantity += item.quantity_available
+        existing.totalQuantity += item.quantity_available || 0
       } else {
         skuTotals.set(item.sku, {
-          totalQuantity: item.quantity_available,
+          totalQuantity: item.quantity_available || 0,
           productName: item.product_name,
         })
       }
@@ -287,7 +290,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       po.po_items?.forEach((item) => {
         const existing = inventoryMap.get(item.sku)
         if (existing) {
-          existing.incoming += item.quantity
+          existing.incoming += item.quantity || 0
         } else {
           // Create new entry for items that are only incoming
           const reserved = reservedQuantities.get(item.sku) || 0
@@ -296,7 +299,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
             sku: item.sku,
             name: item.product_name,
             inStock: 0,
-            incoming: item.quantity,
+            incoming: item.quantity || 0,
             reserved: reserved,
             unitCost: latestCosts.get(item.sku) || 0,
           })
@@ -350,7 +353,7 @@ async function addManualInventory(item: {
   unitCost: number
 }): Promise<InventoryItem> {
   try {
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("inventory")
       .insert({
         sku: item.sku,
@@ -404,7 +407,7 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
     console.log("Inserting inventory records:", inventoryRecords)
 
     // Insert all inventory records
-    const { data, error } = await client.from("inventory").insert(inventoryRecords).select()
+    const { data, error } = await supabase.from("inventory").insert(inventoryRecords).select()
 
     if (error) {
       console.error("Error adding inventory from PO:", error)
@@ -450,7 +453,7 @@ async function calculateOrderProfit(order: ShopifyOrder): Promise<number> {
   const itemsCost = itemsWithCosts.reduce((sum, i) => sum + i.cost_price * i.quantity, 0)
 
   // Profit = revenue – tax – shipping – item costs
-  return order.total_amount - order.tax_amount - order.shipping_cost - itemsCost
+  return (order.total_amount || 0) - (order.tax_amount || 0) - (order.shipping_cost || 0) - itemsCost
 }
 
 /* -------------------------------------------------------------------------- */
@@ -462,7 +465,7 @@ async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
   try {
     console.log("Fetching purchase orders...")
 
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("purchase_orders")
       .select(`
         id,
@@ -527,7 +530,7 @@ async function createPurchaseOrder(data: {
     console.log("Generated PO number:", poNumber)
 
     // Insert the purchase order
-    const { data: poData, error: poError } = await client
+    const { data: poData, error: poError } = await supabase
       .from("purchase_orders")
       .insert({
         po_number: poNumber,
@@ -560,7 +563,7 @@ async function createPurchaseOrder(data: {
 
       console.log("Inserting items:", itemsToInsert)
 
-      const { data: itemsData, error: itemsError } = await client.from("po_items").insert(itemsToInsert).select()
+      const { data: itemsData, error: itemsError } = await supabase.from("po_items").insert(itemsToInsert).select()
 
       if (itemsError) {
         console.error("Error creating PO items:", itemsError)
@@ -608,7 +611,7 @@ async function updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>):
     console.log("Updating purchase order:", id, updates)
 
     // Get the current PO to check status change
-    const { data: currentPO, error: fetchError } = await client
+    const { data: currentPO, error: fetchError } = await supabase
       .from("purchase_orders")
       .select(`
         id,
@@ -641,7 +644,7 @@ async function updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>):
     const newStatus = updates.status
 
     // Update the PO
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("purchase_orders")
       .update(updates)
       .eq("id", id)
@@ -690,7 +693,7 @@ async function updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>):
       if (previousStatus === "Delivered" && newStatus !== "Delivered") {
         console.log("PO status changed from Delivered, removing items from inventory")
         // Remove inventory records for this PO
-        const { error: deleteError } = await client.from("inventory").delete().eq("po_id", id)
+        const { error: deleteError } = await supabase.from("inventory").delete().eq("po_id", id)
 
         if (deleteError) {
           console.error("Error removing inventory records:", deleteError)
@@ -728,7 +731,7 @@ async function updatePurchaseOrderWithItems(
     console.log("Updating purchase order with items:", id, data)
 
     // Get the current PO to check status
-    const { data: currentPO, error: fetchError } = await client
+    const { data: currentPO, error: fetchError } = await supabase
       .from("purchase_orders")
       .select("status")
       .eq("id", id)
@@ -749,7 +752,7 @@ async function updatePurchaseOrderWithItems(
     if (data.delivery_cost !== undefined) headerUpdates.delivery_cost = data.delivery_cost
     if (data.notes !== undefined) headerUpdates.notes = data.notes
 
-    const { data: poData, error: poError } = await client
+    const { data: poData, error: poError } = await supabase
       .from("purchase_orders")
       .update(headerUpdates)
       .eq("id", id)
@@ -767,7 +770,7 @@ async function updatePurchaseOrderWithItems(
     if (data.items) {
       // If PO is delivered, remove old inventory records first
       if (isDelivered) {
-        const { error: deleteInventoryError } = await client.from("inventory").delete().eq("po_id", id)
+        const { error: deleteInventoryError } = await supabase.from("inventory").delete().eq("po_id", id)
 
         if (deleteInventoryError) {
           console.error("Error deleting old inventory records:", deleteInventoryError)
@@ -776,7 +779,7 @@ async function updatePurchaseOrderWithItems(
       }
 
       // Delete existing items
-      const { error: deleteError } = await client.from("po_items").delete().eq("po_id", id)
+      const { error: deleteError } = await supabase.from("po_items").delete().eq("po_id", id)
 
       if (deleteError) {
         console.error("Error deleting existing PO items:", deleteError)
@@ -798,7 +801,7 @@ async function updatePurchaseOrderWithItems(
 
         console.log("Inserting new items:", itemsToInsert)
 
-        const { data: itemsData, error: itemsError } = await client.from("po_items").insert(itemsToInsert).select()
+        const { data: itemsData, error: itemsError } = await supabase.from("po_items").insert(itemsToInsert).select()
 
         if (itemsError) {
           console.error("Error creating new PO items:", itemsError)
@@ -831,7 +834,7 @@ async function updatePurchaseOrderWithItems(
     }
 
     // If no items provided, just return the updated PO with existing items
-    const { data: fullPO, error: fullPOError } = await client
+    const { data: fullPO, error: fullPOError } = await supabase
       .from("purchase_orders")
       .select(`
         id,
@@ -876,7 +879,7 @@ async function updatePurchaseOrderWithItems(
 
 async function getShopifyStores(): Promise<ShopifyStore[]> {
   try {
-    const { data, error } = await client.from("shopify_stores").select("*").order("created_at", { ascending: false })
+    const { data, error } = await supabase.from("shopify_stores").select("*").order("created_at", { ascending: false })
 
     if (error) throw error
 
@@ -909,7 +912,7 @@ async function createShopifyStore(storeData: {
   notes?: string
 }): Promise<ShopifyStore> {
   try {
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("shopify_stores")
       .insert({
         store_name: storeData.name,
@@ -959,7 +962,7 @@ async function updateShopifyStore(id: string, updates: Partial<ShopifyStore>): P
     if (updates.webhookUrl) dbUpdates.webhook_url = updates.webhookUrl
     if (updates.notes) dbUpdates.notes = updates.notes
 
-    const { data, error } = await client.from("shopify_stores").update(dbUpdates).eq("id", id).select().single()
+    const { data, error } = await supabase.from("shopify_stores").update(dbUpdates).eq("id", id).select().single()
 
     if (error) throw error
 
@@ -985,7 +988,7 @@ async function updateShopifyStore(id: string, updates: Partial<ShopifyStore>): P
 
 async function deleteShopifyStore(id: string): Promise<void> {
   try {
-    const { error } = await client.from("shopify_stores").delete().eq("id", id)
+    const { error } = await supabase.from("shopify_stores").delete().eq("id", id)
     if (error) throw error
   } catch (error) {
     console.error("Error deleting Shopify store:", error)
@@ -999,7 +1002,7 @@ async function deleteShopifyStore(id: string): Promise<void> {
 
 async function getShopifyOrders(): Promise<ShopifyOrder[]> {
   try {
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("shopify_orders")
       .select(`
         *,
@@ -1030,17 +1033,17 @@ async function getShopifyOrders(): Promise<ShopifyOrder[]> {
           customerEmail: order.customer_email,
           orderDate: order.order_date,
           status: order.status,
-          totalAmount: order.total_amount,
-          shippingCost: order.shipping_cost,
-          taxAmount: order.tax_amount,
+          totalAmount: order.total_amount || 0,
+          shippingCost: order.shipping_cost || 0,
+          taxAmount: order.tax_amount || 0,
           items: order.shopify_order_items || [],
           shippingAddress: order.shipping_address,
           profit: 0, // Will be calculated
           createdAt: order.created_at,
           shipping_address: order.shipping_address,
-          total_amount: order.total_amount,
-          shipping_cost: order.shipping_cost,
-          tax_amount: order.tax_amount,
+          total_amount: order.total_amount || 0,
+          shipping_cost: order.shipping_cost || 0,
+          tax_amount: order.tax_amount || 0,
         }
 
         // Calculate actual profit using inventory costs
@@ -1085,7 +1088,7 @@ async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
       profit: header.profit ?? 0, // default profit
     }))
 
-    const { data: upserted, error: upsertErr } = await client
+    const { data: upserted, error: upsertErr } = await supabase
       .from("shopify_orders")
       /* match the UNIQUE(store_id, shopify_order_id) constraint in the schema */
       .upsert(orderHeaders, { onConflict: "store_id,shopify_order_id" })
@@ -1119,10 +1122,10 @@ async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
     if (itemRows.length) {
       // Delete any existing items for the affected orders (simple approach)
       const affectedOrderIds = Array.from(idMap.values())
-      await client.from("shopify_order_items").delete().in("order_id", affectedOrderIds)
+      await supabase.from("shopify_order_items").delete().in("order_id", affectedOrderIds)
 
       // Insert fresh items
-      const { error: itemErr } = await client.from("shopify_order_items").insert(itemRows)
+      const { error: itemErr } = await supabase.from("shopify_order_items").insert(itemRows)
       if (itemErr) throw itemErr
     }
 
@@ -1148,7 +1151,7 @@ async function getReturns(): Promise<Return[]> {
     console.log("Fetching returns…")
 
     // 1. grab all return headers
-    const { data: returnRows, error: returnsErr } = await client
+    const { data: returnRows, error: returnsErr } = await supabase
       .from("returns")
       .select("*")
       .order("created_at", { ascending: false })
@@ -1158,7 +1161,7 @@ async function getReturns(): Promise<Return[]> {
 
     // 2. collect the ids and pull all items in one query
     const ids = returnRows.map((r) => r.id)
-    const { data: itemRows, error: itemsErr } = await client.from("return_items").select("*").in("return_id", ids)
+    const { data: itemRows, error: itemsErr } = await supabase.from("return_items").select("*").in("return_id", ids)
 
     if (itemsErr) throw itemsErr
 
@@ -1175,6 +1178,8 @@ async function getReturns(): Promise<Return[]> {
         condition: it.condition,
         reason: it.reason,
         created_at: it.created_at,
+        total_refund: it.total_refund ?? 0,
+        unit_price: it.unit_price ?? 0,
       })
       itemMap.set(it.return_id, list)
     })
@@ -1189,9 +1194,10 @@ async function getReturns(): Promise<Return[]> {
       return_date: r.return_date,
       status: r.status,
       notes: r.notes ?? undefined,
+      total_refund: r.total_refund ?? 0,
       created_at: r.created_at,
       updated_at: r.updated_at,
-      items: itemMap.get(r.id) ?? [],
+      return_items: itemMap.get(r.id) ?? [],
     }))
   } catch (error) {
     console.error("Error in getReturns:", error)
@@ -1211,7 +1217,10 @@ async function createReturn(data: {
     quantity: number
     condition: string
     reason: string
+    total_refund: number
+    unit_price?: number
   }>
+  total_refund: number
   notes?: string
 }): Promise<Return> {
   try {
@@ -1221,7 +1230,7 @@ async function createReturn(data: {
     console.log("Generated return number:", returnNumber)
 
     // Insert the return order
-    const { data: returnData, error: returnError } = await client
+    const { data: returnData, error: returnError } = await supabase
       .from("returns")
       .insert({
         return_number: returnNumber,
@@ -1231,6 +1240,7 @@ async function createReturn(data: {
         return_date: data.return_date,
         status: data.status,
         notes: data.notes || null,
+        total_refund: data.total_refund,
       })
       .select()
       .single()
@@ -1251,11 +1261,13 @@ async function createReturn(data: {
         quantity: item.quantity,
         condition: item.condition,
         reason: item.reason,
+        total_refund: item.total_refund,
+        unit_price: item.unit_price ?? null,
       }))
 
       console.log("Inserting return items:", itemsToInsert)
 
-      const { data: itemsData, error: itemsError } = await client.from("return_items").insert(itemsToInsert).select()
+      const { data: itemsData, error: itemsError } = await supabase.from("return_items").insert(itemsToInsert).select()
 
       if (itemsError) {
         console.error("Error creating return items:", itemsError)
@@ -1266,7 +1278,8 @@ async function createReturn(data: {
 
       return {
         ...returnData,
-        items: (itemsData || []).map((row) => ({
+        total_refund: returnData.total_refund ?? data.total_refund,
+        return_items: (itemsData || []).map((row) => ({
           id: row.id,
           return_id: row.return_id,
           sku: row.sku,
@@ -1274,13 +1287,16 @@ async function createReturn(data: {
           quantity: row.quantity,
           condition: row.condition,
           reason: row.reason,
+          total_refund: row.total_refund ?? 0,
+          unit_price: row.unit_price ?? 0,
+          created_at: row.created_at,
         })),
       }
     }
 
     return {
       ...returnData,
-      items: [],
+      return_items: [],
     }
   } catch (error) {
     console.error("Error in createReturn:", error)
@@ -1293,7 +1309,7 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
     console.log("Updating return:", id, updates)
 
     // Get the current return to check status change
-    const { data: currentReturn, error: fetchError } = await client
+    const { data: currentReturn, error: fetchError } = await supabase
       .from("returns")
       .select(`
         id,
@@ -1327,7 +1343,7 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
     const newStatus = updates.status
 
     // Update the return
-    const { data, error } = await client
+    const { data, error } = await supabase
       .from("returns")
       .update(updates)
       .eq("id", id)
@@ -1362,7 +1378,8 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
 
     const updatedReturn = {
       ...data,
-      items: data.return_items || [],
+      total_refund: data.total_refund ?? 0,
+      return_items: data.return_items || [],
     }
 
     // Handle status changes that affect inventory
@@ -1389,6 +1406,115 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
   }
 }
 
+/** Permanently remove a return header + its items */
+async function deleteReturn(id: string): Promise<void> {
+  try {
+    // delete items first (FK constraint safety)
+    const { error: itemsErr } = await supabase.from("return_items").delete().eq("return_id", id)
+    if (itemsErr) throw itemsErr
+
+    const { error } = await supabase.from("returns").delete().eq("id", id)
+    if (error) throw error
+  } catch (e) {
+    console.error("Error deleting return:", e)
+    throw e
+  }
+}
+
+/**
+ * Add returned items back to inventory when a return is accepted.
+ *   • If a SKU already exists → increment its quantity_available.
+ *   • If a SKU does not exist  → create a brand-new inventory record.
+ */
+async function addReturnedItemsToInventory(returnOrder: Return): Promise<void> {
+  try {
+    if (!returnOrder.return_items?.length) return
+
+    const latestCosts = await getLatestUnitCosts()
+
+    for (const item of returnOrder.return_items) {
+      // Get the newest inventory row for this SKU (if any)
+      const { data: existingRows, error: selErr } = await supabase
+        .from("inventory")
+        .select("id, quantity_available")
+        .eq("sku", item.sku)
+        .order("created_at", { ascending: false })
+        .limit(1)
+
+      if (selErr) {
+        console.error("Inventory lookup failed:", selErr)
+        continue
+      }
+
+      if (existingRows && existingRows.length) {
+        // Update quantity on the existing row
+        const row = existingRows[0]
+        const { error: upErr } = await supabase
+          .from("inventory")
+          .update({ quantity_available: row.quantity_available + item.quantity })
+          .eq("id", row.id)
+
+        if (upErr) console.error(`Qty update failed for ${item.sku}:`, upErr)
+      } else {
+        // Create a fresh inventory row
+        const { error: insErr } = await supabase.from("inventory").insert({
+          sku: item.sku,
+          product_name: item.product_name,
+          quantity_available: item.quantity,
+          unit_cost_with_delivery: latestCosts.get(item.sku) ?? 0,
+          po_id: null,
+          purchase_date: new Date().toISOString().split("T")[0],
+        })
+        if (insErr) console.error(`Insert failed for ${item.sku}:`, insErr)
+      }
+    }
+  } catch (e) {
+    console.error("addReturnedItemsToInventory failed:", e)
+    throw e
+  }
+}
+
+/**
+ * Subtract previously-added quantities if an accepted return is reverted.
+ */
+async function removeReturnedItemsFromInventory(returnOrder: Return): Promise<void> {
+  try {
+    if (!returnOrder.return_items?.length) return
+
+    for (const item of returnOrder.return_items) {
+      // Always work against the newest row for the SKU
+      const { data: existingRows, error: selErr } = await supabase
+        .from("inventory")
+        .select("id, quantity_available")
+        .eq("sku", item.sku)
+        .order("created_at", { ascending: false })
+        .limit(1)
+
+      if (selErr) {
+        console.error("Inventory lookup failed:", selErr)
+        continue
+      }
+
+      if (existingRows && existingRows.length) {
+        const row = existingRows[0]
+        const newQty = Math.max(row.quantity_available - item.quantity, 0)
+
+        const { error: upErr } = await supabase
+          .from("inventory")
+          .update({ quantity_available: newQty })
+          .eq("id", row.id)
+
+        if (upErr) console.error(`Qty decrease failed for ${item.sku}:`, upErr)
+      } else {
+        console.warn(`No inventory row found for SKU ${item.sku} while reverting return.`)
+      }
+    }
+  } catch (e) {
+    console.error("removeReturnedItemsFromInventory failed:", e)
+    throw e
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                           Public export signature                          */
 /* -------------------------------------------------------------------------- */
@@ -1412,6 +1538,7 @@ export const supabaseStore = {
   getReturns,
   createReturn,
   updateReturn,
+  deleteReturn,
 
   /* Shopify Stores */
   getShopifyStores,
@@ -1429,26 +1556,43 @@ export const supabaseStore = {
 }
 
 function generatePONumber(): string {
-  // Placeholder implementation for generating PO number
-  return "PO12345"
+  const now = new Date()
+  const pad = (n: number, len = 2) => n.toString().padStart(len, "0")
+  const ts =
+    now.getFullYear().toString() +
+    pad(now.getMonth() + 1) +
+    pad(now.getDate()) +
+    pad(now.getHours()) +
+    pad(now.getMinutes()) +
+    pad(now.getSeconds())
+  return `PO${ts}`
 }
 
+/**
+ * Generate a unique, chronologically sortable Return number.
+ * Format: RYYYYMMDDHHMMSSmmmRR  (R = random 00-99 suffix)
+ *
+ * Example: R2025071410153012345
+ */
 function generateReturnNumber(): string {
-  // Placeholder implementation for generating return number
-  return "R12345"
-}
+  const now = new Date()
+  const pad = (n: number, len = 2) => n.toString().padStart(len, "0")
 
-async function addReturnedItemsToInventory(returnOrder: Return): Promise<void> {
-  // Placeholder implementation for adding returned items to inventory
-  console.log("Adding returned items to inventory:", returnOrder.return_number)
-}
+  const timestamp =
+    now.getFullYear().toString() +
+    pad(now.getMonth() + 1) +
+    pad(now.getDate()) +
+    pad(now.getHours()) +
+    pad(now.getMinutes()) +
+    pad(now.getSeconds()) +
+    pad(now.getMilliseconds(), 3) // millisecond precision
 
-async function removeReturnedItemsFromInventory(returnOrder: Return): Promise<void> {
-  // Placeholder implementation for removing returned items from inventory
-  console.log("Removing returned items from inventory:", returnOrder.return_number)
+  const randomSuffix = pad(Math.floor(Math.random() * 100)) // 00-99
+
+  return `R${timestamp}${randomSuffix}`
 }
 
 function isMissingRelation(err: PostgrestError | null) {
-  // 42P01 == "relation does not exist" (Postgres) [^4]
+  // 42P01 == "relation does not exist" (Postgres) [^3]
   return err?.code === "42P01" || err?.message.includes("relation") // fallback
 }
