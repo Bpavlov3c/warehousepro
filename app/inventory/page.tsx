@@ -1,39 +1,17 @@
 "use client"
 
-import type React from "react"
-
 import { useEffect, useState, useMemo, useCallback } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import {
-  Package,
-  TrendingUp,
-  TrendingDown,
-  AlertTriangle,
-  Plus,
-  Edit,
-  Download,
-  Search,
-  Filter,
-  RefreshCw,
-} from "lucide-react"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Search, Plus, Package, TrendingUp, AlertTriangle, DollarSign } from "lucide-react"
 import { supabaseStore, type InventoryItem } from "@/lib/supabase-store"
 
-// Debounce hook for search optimization
+// Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
 
@@ -50,573 +28,482 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
-// Skeleton components for loading states
-const TableRowSkeleton = () => (
-  <TableRow>
-    {[...Array(10)].map((_, i) => (
-      <TableCell key={i}>
-        <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
-      </TableCell>
-    ))}
-  </TableRow>
+// Skeleton components
+const StatCardSkeleton = () => (
+  <Card className="p-3">
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="h-3 bg-gray-200 rounded w-16 mb-1 animate-pulse"></div>
+        <div className="h-6 bg-gray-200 rounded w-12 animate-pulse"></div>
+      </div>
+      <div className="h-5 w-5 bg-gray-200 rounded animate-pulse"></div>
+    </div>
+  </Card>
 )
 
-const SummaryCardSkeleton = () => (
+const TableSkeleton = () => (
   <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
-      <div className="h-4 w-4 bg-gray-200 rounded animate-pulse"></div>
-    </CardHeader>
-    <CardContent>
-      <div className="h-8 bg-gray-200 rounded w-20 mb-2 animate-pulse"></div>
-      <div className="h-3 bg-gray-200 rounded w-16 animate-pulse"></div>
+    <CardContent className="p-0">
+      <Table>
+        <TableHeader>
+          <TableRow className="h-10">
+            <TableHead>SKU</TableHead>
+            <TableHead>Product Name</TableHead>
+            <TableHead className="w-[80px]">In Stock</TableHead>
+            <TableHead className="w-[80px]">Incoming</TableHead>
+            <TableHead className="w-[80px]">Reserved</TableHead>
+            <TableHead className="w-[100px]">Unit Cost</TableHead>
+            <TableHead className="w-[100px]">Total Value</TableHead>
+            <TableHead className="w-[80px]">Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {[...Array(10)].map((_, i) => (
+            <TableRow key={i} className="h-12">
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-32 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-8 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-8 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-8 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-12 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-6 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </CardContent>
   </Card>
 )
 
 export default function Inventory() {
-  /* ------------------------------------------------------------------ */
-  /*                            state / refs                            */
-  /* ------------------------------------------------------------------ */
-
   const [inventory, setInventory] = useState<InventoryItem[]>([])
-  const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const [isAddItemOpen, setIsAddItemOpen] = useState(false)
+  const [formData, setFormData] = useState({
+    sku: "",
+    name: "",
+    quantity: "",
+    unitCost: "",
+  })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Debounced search term
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
-
-  const [newItem, setNewItem] = useState({
-    sku: "",
-    name: "",
-    quantity: "",
-    unitCost: "",
-  })
-
-  const [editItem, setEditItem] = useState({
-    sku: "",
-    name: "",
-    quantity: "",
-    unitCost: "",
-  })
-
-  /* ------------------------------------------------------------------ */
-  /*                         memoized calculations                      */
-  /* ------------------------------------------------------------------ */
-
-  // Memoized filtered inventory to avoid recalculating on every render
-  const filteredInventory = useMemo(() => {
-    if (!debouncedSearchTerm) return inventory
-
-    const lower = debouncedSearchTerm.toLowerCase()
-    return inventory.filter((item) => item.sku.toLowerCase().includes(lower) || item.name.toLowerCase().includes(lower))
-  }, [inventory, debouncedSearchTerm])
-
-  // Memoized aggregated data
-  const aggregatedData = useMemo(() => {
-    const totalItems = inventory.length
-    const totalValue = inventory.reduce((sum, i) => sum + i.inStock * i.unitCost, 0)
-    const lowStockItems = inventory.filter((i) => i.inStock - i.reserved <= 10 && i.inStock > 0).length
-    const outOfStockItems = inventory.filter((i) => i.inStock === 0).length
-
-    return { totalItems, totalValue, lowStockItems, outOfStockItems }
-  }, [inventory])
-
-  /* ------------------------------------------------------------------ */
-  /*                         lifecycle / handlers                       */
-  /* ------------------------------------------------------------------ */
-
-  // initial load
-  useEffect(() => {
-    loadInventory()
-  }, [])
-
-  const loadInventory = useCallback(async () => {
+  // Load data on component mount
+  const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      console.log("Loading inventory data...")
-      const data = await supabaseStore.getInventory()
-
-      // 🔐 Ensure numeric fields are never undefined or null
-      const sanitized = data.map((i) => ({
-        ...i,
-        inStock: i.inStock ?? 0,
-        incoming: i.incoming ?? 0,
-        reserved: i.reserved ?? 0,
-        unitCost: i.unitCost ?? 0,
-      }))
-
-      console.log("Loaded inventory items:", sanitized.length)
-      setInventory(sanitized)
+      const inventoryData = await supabaseStore.getInventory()
+      setInventory(inventoryData)
     } catch (err) {
-      console.error("Error loading inventory", err)
+      setError(err instanceof Error ? err.message : "Failed to load inventory")
     } finally {
       setLoading(false)
     }
   }, [])
 
-  /* ------------------------- add / edit logic ----------------------- */
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // Memoized filtered inventory
+  const filteredInventory = useMemo(() => {
+    if (!debouncedSearchTerm) return inventory
+
+    return inventory.filter(
+      (item) =>
+        item.sku.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        item.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
+    )
+  }, [inventory, debouncedSearchTerm])
+
+  // Memoized metrics
+  const metrics = useMemo(() => {
+    const totalItems = filteredInventory.length
+    const totalStock = filteredInventory.reduce((sum, item) => sum + item.inStock, 0)
+    const lowStockItems = filteredInventory.filter((item) => item.inStock <= 10).length
+    const totalValue = filteredInventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0)
+
+    return {
+      totalItems,
+      totalStock,
+      lowStockItems,
+      totalValue,
+    }
+  }, [filteredInventory])
 
   const handleAddItem = useCallback(async () => {
+    // Validate form data
+    if (!formData.sku || !formData.name || !formData.quantity || !formData.unitCost) {
+      alert("Please fill in all fields")
+      return
+    }
+
+    const quantity = Number.parseInt(formData.quantity)
+    const unitCost = Number.parseFloat(formData.unitCost)
+
+    if (isNaN(quantity) || quantity <= 0) {
+      alert("Please enter a valid quantity")
+      return
+    }
+
+    if (isNaN(unitCost) || unitCost < 0) {
+      alert("Please enter a valid unit cost")
+      return
+    }
+
     try {
-      const quantity = Number.parseInt(newItem.quantity)
-      const unitCost = Number.parseFloat(newItem.unitCost)
-
-      if (
-        !newItem.sku ||
-        !newItem.name ||
-        Number.isNaN(quantity) ||
-        Number.isNaN(unitCost) ||
-        quantity <= 0 ||
-        unitCost <= 0
-      ) {
-        alert("Please enter valid values for all required fields")
-        return
-      }
-
       await supabaseStore.addManualInventory({
-        sku: newItem.sku,
-        name: newItem.name,
+        sku: formData.sku,
+        name: formData.name,
         quantity,
         unitCost,
       })
 
-      setNewItem({ sku: "", name: "", quantity: "", unitCost: "" })
-      setIsAddDialogOpen(false)
-      await loadInventory()
-      alert("Item added!")
-    } catch (err) {
-      console.error("Add item error", err)
-      alert("Unable to add inventory item")
+      // Refresh inventory data
+      await loadData()
+
+      // Reset form
+      setFormData({ sku: "", name: "", quantity: "", unitCost: "" })
+      setIsAddItemOpen(false)
+
+      alert(`Item ${formData.sku} added successfully!`)
+    } catch (error) {
+      console.error("Error adding inventory item:", error)
+      alert("Error adding item. Please try again.")
     }
-  }, [newItem, loadInventory])
-
-  const handleEditItem = useCallback(async () => {
-    if (!selectedItem) return
-
-    try {
-      const quantity = Number.parseInt(editItem.quantity)
-      const unitCost = Number.parseFloat(editItem.unitCost)
-
-      if (!editItem.name || Number.isNaN(quantity) || Number.isNaN(unitCost) || quantity < 0 || unitCost <= 0) {
-        alert("Please enter valid values")
-        return
-      }
-
-      // difference to apply (positive or negative)
-      const deltaQty = quantity - selectedItem.inStock
-
-      // we treat edits as manual adjustments
-      await supabaseStore.addManualInventory({
-        sku: editItem.sku,
-        name: editItem.name,
-        quantity: deltaQty,
-        unitCost,
-      })
-
-      setIsEditDialogOpen(false)
-      setSelectedItem(null)
-      await loadInventory()
-      alert("Item updated!")
-    } catch (err) {
-      console.error("Edit item error", err)
-      alert("Unable to update inventory item")
-    }
-  }, [selectedItem, editItem, loadInventory])
-
-  const openEditDialog = useCallback((item: InventoryItem) => {
-    setSelectedItem(item)
-    setEditItem({
-      sku: item.sku,
-      name: item.name,
-      quantity: item.inStock.toString(),
-      unitCost: item.unitCost.toString(),
-    })
-    setIsEditDialogOpen(true)
-  }, [])
-
-  /* ---------------------------- export CSV -------------------------- */
-
-  const handleExport = useCallback(() => {
-    try {
-      const headers = [
-        "SKU",
-        "Product Name",
-        "In Stock",
-        "Incoming",
-        "Reserved",
-        "Available",
-        "Unit Cost",
-        "Total Value",
-        "Status",
-      ]
-
-      const rows = filteredInventory.map((item) => {
-        const available = item.inStock - item.reserved
-        const status = getStockStatus(item).status
-        const totalValue = item.inStock * item.unitCost
-
-        return [
-          item.sku,
-          item.name,
-          item.inStock.toString(),
-          item.incoming.toString(),
-          item.reserved.toString(),
-          available.toString(),
-          item.unitCost.toFixed(2),
-          totalValue.toFixed(2),
-          status,
-        ]
-      })
-
-      const csv = [headers, ...rows].map((row) => row.map((f) => `"${f}"`).join(",")).join("\n") + "\n"
-
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-      const url = URL.createObjectURL(blob)
-
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `inventory_${new Date().toISOString().slice(0, 10)}.csv`
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      console.error("Export error", err)
-      alert("Could not export CSV")
-    }
-  }, [filteredInventory])
-
-  /* -------------------------- helpers / utils ----------------------- */
+  }, [formData, loadData])
 
   const getStockStatus = useCallback((item: InventoryItem) => {
-    const available = item.inStock - item.reserved
-    const total = item.inStock + item.incoming
-
-    if (total === 0) return { status: "Out of Stock", badge: "destructive" }
-    if (item.inStock === 0) return { status: "Incoming Only", badge: "secondary" }
-    if (available <= 10) return { status: "Low Stock", badge: "secondary" }
-    return { status: "In Stock", badge: "default" }
+    if (item.inStock === 0) {
+      return { label: "Out of Stock", color: "bg-red-100 text-red-800" }
+    } else if (item.inStock <= 10) {
+      return { label: "Low Stock", color: "bg-yellow-100 text-yellow-800" }
+    } else {
+      return { label: "In Stock", color: "bg-green-100 text-green-800" }
+    }
   }, [])
 
-  const currency = useCallback(
-    (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n),
-    [],
-  )
-
-  /* ------------------------------------------------------------------ */
-  /*                                 UI                                 */
-  /* ------------------------------------------------------------------ */
+  if (error) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
+          <SidebarTrigger className="-ml-1 lg:hidden" />
+          <h1 className="text-lg font-semibold">Inventory</h1>
+        </header>
+        <div className="p-6 ml-16 lg:ml-0">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h3 className="text-red-800 font-medium">Error loading inventory</h3>
+            <p className="text-red-600 mt-1">{error}</p>
+            <Button onClick={loadData} className="mt-3 bg-transparent" variant="outline">
+              Try Again
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
-      {/* --------------------------- header --------------------------- */}
-      <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <Package className="h-5 w-5" />
-          Inventory
-        </h1>
+        <div className="flex items-center justify-between w-full">
+          <h1 className="text-lg font-semibold">Inventory</h1>
+          <Button onClick={() => setIsAddItemOpen(true)} size="sm" className="lg:hidden">
+            <Plus className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
-      {/* ------------------------ main content ----------------------- */}
-      <main className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
-        {/* summary cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold hidden lg:block">Inventory</h1>
+          <Button onClick={() => setIsAddItemOpen(true)} size="sm" className="hidden lg:flex">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Item
+          </Button>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {loading ? (
             <>
-              <SummaryCardSkeleton />
-              <SummaryCardSkeleton />
-              <SummaryCardSkeleton />
-              <SummaryCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
             </>
           ) : (
             <>
-              <SummaryCard
-                icon={<Package className="h-4 w-4 text-muted-foreground" />}
-                title="Total Items"
-                value={aggregatedData.totalItems.toString()}
-                subtitle="Unique SKUs"
-              />
-              <SummaryCard
-                icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
-                title="Total Value"
-                value={currency(aggregatedData.totalValue)}
-                subtitle="Current stock value"
-              />
-              <SummaryCard
-                icon={<TrendingDown className="h-4 w-4 text-muted-foreground" />}
-                title="Low Stock"
-                value={aggregatedData.lowStockItems.toString()}
-                subtitle="≤10 available"
-              />
-              <SummaryCard
-                icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-                title="Out of Stock"
-                value={aggregatedData.outOfStockItems.toString()}
-                subtitle="0 units"
-              />
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Items</p>
+                    <p className="text-lg font-bold">{metrics.totalItems}</p>
+                  </div>
+                  <Package className="w-5 h-5 text-blue-600" />
+                </div>
+              </Card>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Stock</p>
+                    <p className="text-lg font-bold">{metrics.totalStock}</p>
+                  </div>
+                  <TrendingUp className="w-5 h-5 text-green-600" />
+                </div>
+              </Card>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Low Stock</p>
+                    <p className="text-lg font-bold text-red-600">{metrics.lowStockItems}</p>
+                  </div>
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+              </Card>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Value</p>
+                    <p className="text-lg font-bold">${metrics.totalValue.toLocaleString()}</p>
+                  </div>
+                  <DollarSign className="w-5 h-5 text-green-600" />
+                </div>
+              </Card>
             </>
           )}
         </div>
 
-        {/* actions bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="pl-8 w-[260px]"
-                placeholder="Search inventory…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Filter
-            </Button>
-            <Button variant="outline" size="sm" onClick={loadInventory}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" /> Export CSV
-            </Button>
-
-            {/* add-item dialog */}
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Item
-                </Button>
-              </DialogTrigger>
-
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add Inventory Item</DialogTitle>
-                  <DialogDescription>Manually add new stock to your inventory.</DialogDescription>
-                </DialogHeader>
-
-                <ItemForm state={newItem} setState={setNewItem} disableSku={false} />
-
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAddItem}>Add</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
+        {/* Search */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Input
+            placeholder="Search inventory..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 h-9"
+          />
         </div>
 
-        {/* inventory table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Inventory Items</CardTitle>
-            <CardDescription>
-              Showing {filteredInventory.length} of {aggregatedData.totalItems}
-            </CardDescription>
-          </CardHeader>
+        {/* Mobile Card View / Desktop Table View */}
+        <div className="lg:hidden space-y-3">
+          {loading ? (
+            [...Array(5)].map((_, i) => (
+              <Card key={i} className="p-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <div className="h-4 bg-gray-200 rounded w-20 animate-pulse"></div>
+                      <div className="h-3 bg-gray-200 rounded w-32 animate-pulse"></div>
+                    </div>
+                    <div className="h-6 bg-gray-200 rounded w-16 animate-pulse"></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                  </div>
+                </div>
+              </Card>
+            ))
+          ) : filteredInventory.length === 0 ? (
+            <Card className="p-6 text-center">
+              <Package className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+              <p className="text-gray-500">{searchTerm ? "No items found." : "No inventory items yet."}</p>
+              {!searchTerm && (
+                <Button onClick={() => setIsAddItemOpen(true)} className="mt-2" size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add First Item
+                </Button>
+              )}
+            </Card>
+          ) : (
+            filteredInventory.map((item) => {
+              const status = getStockStatus(item)
+              return (
+                <Card key={item.id} className="p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="font-medium">{item.sku}</h3>
+                      <p className="text-sm text-gray-600 truncate">{item.name}</p>
+                    </div>
+                    <Badge className={`${status.color} text-xs`}>{status.label}</Badge>
+                  </div>
 
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead className="text-right">In Stock</TableHead>
-                  <TableHead className="text-right">Incoming</TableHead>
-                  <TableHead className="text-right">Reserved</TableHead>
-                  <TableHead className="text-right">Available</TableHead>
-                  <TableHead className="text-right">Unit Cost</TableHead>
-                  <TableHead className="text-right">Total Value</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-center">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="text-center">
+                      <span className="text-gray-600 block">In Stock</span>
+                      <p className="font-medium">{item.inStock}</p>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-gray-600 block">Incoming</span>
+                      <p className="font-medium">{item.incoming}</p>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-gray-600 block">Reserved</span>
+                      <p className="font-medium">{item.reserved}</p>
+                    </div>
+                  </div>
 
-              <TableBody>
-                {loading ? (
-                  <>
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                  </>
-                ) : (
-                  <>
-                    {filteredInventory.map((item) => {
+                  <div className="mt-3 pt-3 border-t flex justify-between text-sm">
+                    <span>Unit Cost: ${item.unitCost.toFixed(2)}</span>
+                    <span className="font-medium">Value: ${(item.inStock * item.unitCost).toLocaleString()}</span>
+                  </div>
+                </Card>
+              )
+            })
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        {loading ? (
+          <div className="hidden lg:block">
+            <TableSkeleton />
+          </div>
+        ) : (
+          <Card className="hidden lg:block">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="h-10">
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Product Name</TableHead>
+                    <TableHead className="w-[80px]">In Stock</TableHead>
+                    <TableHead className="w-[80px]">Incoming</TableHead>
+                    <TableHead className="w-[80px]">Reserved</TableHead>
+                    <TableHead className="w-[100px]">Unit Cost</TableHead>
+                    <TableHead className="w-[100px]">Total Value</TableHead>
+                    <TableHead className="w-[80px]">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredInventory.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8">
+                        <Package className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-gray-500">{searchTerm ? "No items found." : "No inventory items yet."}</p>
+                        {!searchTerm && (
+                          <Button onClick={() => setIsAddItemOpen(true)} className="mt-2" size="sm">
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add First Item
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredInventory.map((item) => {
                       const status = getStockStatus(item)
-                      const available = item.inStock - item.reserved
-                      const totalVal = item.inStock * item.unitCost
-
                       return (
-                        <TableRow key={item.id}>
+                        <TableRow key={item.id} className="h-12">
                           <TableCell className="font-medium">{item.sku}</TableCell>
-                          <TableCell>{item.name}</TableCell>
-                          <TableCell className="text-right">{item.inStock.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{item.incoming.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{item.reserved.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{available.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{currency(item.unitCost)}</TableCell>
-                          <TableCell className="text-right">{currency(totalVal)}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{item.name}</TableCell>
+                          <TableCell className="text-center">{item.inStock}</TableCell>
+                          <TableCell className="text-center">{item.incoming}</TableCell>
+                          <TableCell className="text-center">{item.reserved}</TableCell>
+                          <TableCell>${item.unitCost.toFixed(2)}</TableCell>
+                          <TableCell>${(item.inStock * item.unitCost).toLocaleString()}</TableCell>
                           <TableCell>
-                            <Badge variant={status.badge}>{status.status}</Badge>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)}>
-                              <Edit className="h-4 w-4" />
-                            </Button>
+                            <Badge className={`${status.color} text-xs px-2 py-1`}>{status.label}</Badge>
                           </TableCell>
                         </TableRow>
                       )
-                    })}
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
 
-                    {filteredInventory.length === 0 && !loading && (
-                      <TableRow>
-                        <TableCell colSpan={10} className="text-center text-muted-foreground">
-                          {searchTerm
-                            ? "No items match your search."
-                            : "Inventory is empty. Add items or import purchase orders."}
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        {/* edit dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent>
+        {/* Add Item Dialog */}
+        <Dialog open={isAddItemOpen} onOpenChange={setIsAddItemOpen}>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Edit Inventory Item</DialogTitle>
-              <DialogDescription>
-                Update details for <strong>{selectedItem?.sku}</strong>.
-              </DialogDescription>
+              <DialogTitle>Add Inventory Item</DialogTitle>
+              <DialogDescription>Add a new item to your inventory manually</DialogDescription>
             </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="sku">SKU *</label>
+                  <Input
+                    id="sku"
+                    placeholder="WH-001"
+                    value={formData.sku}
+                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="name">Product Name *</label>
+                  <Input
+                    id="name"
+                    placeholder="Wireless Headphones"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
 
-            <ItemForm state={editItem} setState={setEditItem} disableSku />
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="quantity">Quantity *</label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    placeholder="50"
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="unitCost">Unit Cost *</label>
+                  <Input
+                    id="unitCost"
+                    type="number"
+                    step="0.01"
+                    placeholder="75.00"
+                    value={formData.unitCost}
+                    onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2">
+              <Button variant="outline" onClick={() => setIsAddItemOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleEditItem}>Update</Button>
-            </DialogFooter>
+              <Button onClick={handleAddItem}>Add Item</Button>
+            </div>
           </DialogContent>
         </Dialog>
-      </main>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------------- */
-/*                      small reusable sub-components                   */
-/* -------------------------------------------------------------------- */
-
-function SummaryCard({
-  title,
-  value,
-  subtitle,
-  icon,
-}: {
-  title: string
-  value: string
-  subtitle: string
-  icon: React.ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        <p className="text-xs text-muted-foreground">{subtitle}</p>
-      </CardContent>
-    </Card>
-  )
-}
-
-function ItemForm({
-  state,
-  setState,
-  disableSku = false,
-}: {
-  state: { sku: string; name: string; quantity: string; unitCost: string }
-  setState: React.Dispatch<
-    React.SetStateAction<{
-      sku: string
-      name: string
-      quantity: string
-      unitCost: string
-    }>
-  >
-  disableSku?: boolean
-}) {
-  return (
-    <div className="grid gap-4 py-4">
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="sku" className="text-right">
-          SKU *
-        </Label>
-        <Input
-          id="sku"
-          disabled={disableSku}
-          value={state.sku}
-          onChange={(e) => setState({ ...state, sku: e.target.value })}
-          className="col-span-3"
-        />
-      </div>
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="name" className="text-right">
-          Name *
-        </Label>
-        <Input
-          id="name"
-          value={state.name}
-          onChange={(e) => setState({ ...state, name: e.target.value })}
-          className="col-span-3"
-        />
-      </div>
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="qty" className="text-right">
-          Quantity *
-        </Label>
-        <Input
-          id="qty"
-          type="number"
-          min="0"
-          value={state.quantity}
-          onChange={(e) => setState({ ...state, quantity: e.target.value })}
-          className="col-span-3"
-        />
-      </div>
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor="cost" className="text-right">
-          Unit Cost *
-        </Label>
-        <Input
-          id="cost"
-          type="number"
-          min="0"
-          step="0.01"
-          value={state.unitCost}
-          onChange={(e) => setState({ ...state, unitCost: e.target.value })}
-          className="col-span-3"
-        />
       </div>
     </div>
   )

@@ -62,6 +62,18 @@ export interface ShopifyStore {
   updatedAt: string
 }
 
+export interface StoreData {
+  id: string
+  name: string
+  url: string
+  api_key?: string
+  api_secret?: string
+  status: "Active" | "Inactive" | "Error"
+  notes?: string
+  created_at: string
+  updated_at: string
+}
+
 export interface ShopifyOrderItem {
   id: string
   sku: string
@@ -874,6 +886,163 @@ async function updatePurchaseOrderWithItems(
 }
 
 /* -------------------------------------------------------------------------- */
+/*                               Store APIs                                   */
+/* -------------------------------------------------------------------------- */
+
+async function getStores(): Promise<StoreData[]> {
+  try {
+    console.log("Fetching stores from database...")
+
+    const { data, error } = await supabase.from("shopify_stores").select("*").order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching stores:", error)
+      throw error
+    }
+
+    console.log("Raw store data from DB:", data)
+
+    // Transform the data to match the expected StoreData interface
+    const stores: StoreData[] = (data || []).map((store) => ({
+      id: store.id,
+      name: store.store_name,
+      url: store.shopify_domain,
+      api_key: store.access_token,
+      api_secret: store.webhook_url, // Using webhook_url as api_secret for now
+      status: store.status === "Connected" ? "Active" : store.status === "Error" ? "Error" : "Inactive",
+      notes: store.notes,
+      created_at: store.created_at,
+      updated_at: store.updated_at,
+    }))
+
+    console.log("Transformed stores:", stores)
+    return stores
+  } catch (error) {
+    console.error("Error in getStores:", error)
+    throw error
+  }
+}
+
+async function createStore(storeData: {
+  name: string
+  url: string
+  api_key?: string
+  api_secret?: string
+  status: "Active" | "Inactive" | "Error"
+  notes?: string
+}): Promise<StoreData> {
+  try {
+    console.log("Creating store with data:", storeData)
+
+    const { data, error } = await supabase
+      .from("shopify_stores")
+      .insert({
+        store_name: storeData.name,
+        shopify_domain: storeData.url,
+        access_token: storeData.api_key || "",
+        webhook_url: storeData.api_secret || "",
+        status: storeData.status === "Active" ? "Connected" : storeData.status === "Error" ? "Error" : "Disconnected",
+        notes: storeData.notes,
+        total_orders: 0,
+        monthly_revenue: 0,
+        last_sync: "Never",
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Error creating store:", error)
+      throw error
+    }
+
+    console.log("Created store:", data)
+
+    return {
+      id: data.id,
+      name: data.store_name,
+      url: data.shopify_domain,
+      api_key: data.access_token,
+      api_secret: data.webhook_url,
+      status: data.status === "Connected" ? "Active" : data.status === "Error" ? "Error" : "Inactive",
+      notes: data.notes,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+    }
+  } catch (error) {
+    console.error("Error in createStore:", error)
+    throw error
+  }
+}
+
+async function updateStore(id: string, updates: Partial<StoreData>): Promise<StoreData | null> {
+  try {
+    console.log("Updating store:", id, updates)
+
+    const dbUpdates: any = {}
+    if (updates.name) dbUpdates.store_name = updates.name
+    if (updates.url) dbUpdates.shopify_domain = updates.url
+    if (updates.api_key !== undefined) dbUpdates.access_token = updates.api_key
+    if (updates.api_secret !== undefined) dbUpdates.webhook_url = updates.api_secret
+    if (updates.status) {
+      dbUpdates.status =
+        updates.status === "Active" ? "Connected" : updates.status === "Error" ? "Error" : "Disconnected"
+    }
+    if (updates.notes !== undefined) dbUpdates.notes = updates.notes
+
+    const { data, error } = await supabase.from("shopify_stores").update(dbUpdates).eq("id", id).select().single()
+
+    if (error) {
+      console.error("Error updating store:", error)
+      throw error
+    }
+
+    console.log("Updated store:", data)
+
+    return {
+      id: data.id,
+      name: data.store_name,
+      url: data.shopify_domain,
+      api_key: data.access_token,
+      api_secret: data.webhook_url,
+      status: data.status === "Connected" ? "Active" : data.status === "Error" ? "Error" : "Inactive",
+      notes: data.notes,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+    }
+  } catch (error) {
+    console.error("Error in updateStore:", error)
+    throw error
+  }
+}
+
+async function deleteStore(id: string): Promise<void> {
+  try {
+    console.log("Deleting store:", id)
+
+    // First delete related orders
+    const { error: ordersError } = await supabase.from("shopify_orders").delete().eq("store_id", id)
+
+    if (ordersError) {
+      console.error("Error deleting related orders:", ordersError)
+      // Don't throw here, continue with store deletion
+    }
+
+    // Then delete the store
+    const { error } = await supabase.from("shopify_stores").delete().eq("id", id)
+
+    if (error) {
+      console.error("Error deleting store:", error)
+      throw error
+    }
+
+    console.log("Store deleted successfully")
+  } catch (error) {
+    console.error("Error in deleteStore:", error)
+    throw error
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /*                               Shopify Store APIs                           */
 /* -------------------------------------------------------------------------- */
 
@@ -1540,6 +1709,12 @@ export const supabaseStore = {
   updateReturn,
   deleteReturn,
 
+  /* Stores */
+  getStores,
+  createStore,
+  updateStore,
+  deleteStore,
+
   /* Shopify Stores */
   getShopifyStores,
   createShopifyStore,
@@ -1551,7 +1726,6 @@ export const supabaseStore = {
   addShopifyOrders,
 
   /* Minimal stubs (unchanged logic) so other pages keep compiling */
-  getStores: () => Promise.resolve([]),
   getReports: () => Promise.resolve([]),
 }
 

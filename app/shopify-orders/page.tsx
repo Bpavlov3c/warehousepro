@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Search, Package, DollarSign, TrendingUp, Calendar, Eye, RefreshCw } from "lucide-react"
+import { Search, ShoppingCart, DollarSign, TrendingUp, Users, Eye, Download } from "lucide-react"
 import { supabaseStore, type ShopifyOrder } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
-// Debounce hook for search optimization
+// Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
 
@@ -29,141 +29,206 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 // Skeleton components
-const MetricCardSkeleton = () => (
-  <Card>
-    <CardContent className="p-6">
-      <div className="flex items-center space-x-2 mb-2">
-        <div className="h-4 w-4 bg-gray-200 rounded animate-pulse"></div>
-        <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
+const StatCardSkeleton = () => (
+  <Card className="p-3">
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="h-3 bg-gray-200 rounded w-16 mb-1 animate-pulse"></div>
+        <div className="h-6 bg-gray-200 rounded w-12 animate-pulse"></div>
       </div>
-      <div className="h-8 bg-gray-200 rounded w-20 animate-pulse"></div>
-    </CardContent>
+      <div className="h-5 w-5 bg-gray-200 rounded animate-pulse"></div>
+    </div>
   </Card>
 )
 
-const TableRowSkeleton = () => (
-  <TableRow>
-    {[...Array(9)].map((_, i) => (
-      <TableCell key={i}>
-        <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
-      </TableCell>
-    ))}
-  </TableRow>
+const TableSkeleton = () => (
+  <Card>
+    <CardContent className="p-0">
+      <Table>
+        <TableHeader>
+          <TableRow className="h-10">
+            <TableHead>Order #</TableHead>
+            <TableHead>Customer</TableHead>
+            <TableHead>Store</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Total</TableHead>
+            <TableHead>Profit</TableHead>
+            <TableHead>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {[...Array(10)].map((_, i) => (
+            <TableRow key={i} className="h-12">
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-20 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-6 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-12 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-12 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-8 bg-gray-200 rounded w-8 animate-pulse"></div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </CardContent>
+  </Card>
 )
 
 export default function ShopifyOrders() {
   const [orders, setOrders] = useState<ShopifyOrder[]>([])
   const [searchTerm, setSearchTerm] = useState("")
-  const debouncedSearchTerm = useDebounce(searchTerm, 300)
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
   const [isViewOrderOpen, setIsViewOrderOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [syncing, setSyncing] = useState(false)
+
+  // Debounced search term
+  const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
   // Load data on component mount
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        const ordersData = await supabaseStore.getShopifyOrders()
-        setOrders(ordersData)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load orders")
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadData()
-  }, [])
-
-  const handleSyncOrders = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      setSyncing(true)
-      // This would typically call your Shopify API sync endpoint
-      const response = await fetch("/api/shopify-orders", {
-        method: "POST",
-      })
-
-      if (response.ok) {
-        // Refresh the orders list
-        const ordersData = await supabaseStore.getShopifyOrders()
-        setOrders(ordersData)
-        alert("Orders synced successfully!")
-      } else {
-        throw new Error("Failed to sync orders")
-      }
-    } catch (error) {
-      console.error("Error syncing orders:", error)
-      alert("Error syncing orders. Please try again.")
+      setLoading(true)
+      const ordersData = await supabaseStore.getShopifyOrders()
+      setOrders(ordersData)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load orders")
     } finally {
-      setSyncing(false)
+      setLoading(false)
     }
   }, [])
 
-  const getStatusColor = useCallback((status: string) => {
-    switch (status.toLowerCase()) {
-      case "pending":
-        return "bg-yellow-100 text-yellow-800"
-      case "processing":
-        return "bg-blue-100 text-blue-800"
-      case "fulfilled":
-      case "shipped":
-      case "delivered":
-        return "bg-green-100 text-green-800"
-      case "cancelled":
-        return "bg-red-100 text-red-800"
-      case "refunded":
-        return "bg-purple-100 text-purple-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }, [])
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
   // Memoized filtered orders
   const filteredOrders = useMemo(() => {
     if (!debouncedSearchTerm) return orders
 
-    const lower = debouncedSearchTerm.toLowerCase()
     return orders.filter(
       (order) =>
-        order.orderNumber?.toLowerCase().includes(lower) ||
-        order.customerName?.toLowerCase().includes(lower) ||
-        order.customerEmail?.toLowerCase().includes(lower) ||
-        order.storeName?.toLowerCase().includes(lower) ||
-        order.status?.toLowerCase().includes(lower),
+        order.orderNumber.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        order.customerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        order.customerEmail.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
     )
   }, [orders, debouncedSearchTerm])
 
-  // Memoized order stats
-  const orderStats = useMemo(() => {
-    const totalRevenue = orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0)
-    const totalProfit = orders.reduce((sum, order) => sum + (order.profit || 0), 0)
-    const pendingOrders = orders.filter(
-      (order) =>
-        order.status && !["fulfilled", "shipped", "delivered", "cancelled"].includes(order.status.toLowerCase()),
-    ).length
+  // Memoized metrics
+  const metrics = useMemo(() => {
+    const totalOrders = filteredOrders.length
+    const totalRevenue = filteredOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+    const totalProfit = filteredOrders.reduce((sum, order) => sum + order.profit, 0)
+    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
 
-    return { totalRevenue, totalProfit, pendingOrders }
-  }, [orders])
+    return {
+      totalOrders,
+      totalRevenue,
+      totalProfit,
+      avgOrderValue,
+    }
+  }, [filteredOrders])
+
+  // Memoized status counts
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    filteredOrders.forEach((order) => {
+      counts[order.status] = (counts[order.status] || 0) + 1
+    })
+    return counts
+  }, [filteredOrders])
+
+  const getStatusColor = useCallback((status: string) => {
+    switch (status.toLowerCase()) {
+      case "fulfilled":
+      case "shipped":
+      case "delivered":
+        return "bg-green-100 text-green-800"
+      case "processing":
+      case "pending":
+        return "bg-yellow-100 text-yellow-800"
+      case "cancelled":
+        return "bg-red-100 text-red-800"
+      default:
+        return "bg-gray-100 text-gray-800"
+    }
+  }, [])
+
+  const exportToCSV = useCallback(() => {
+    const headers = [
+      "Order Number",
+      "Customer Name",
+      "Customer Email",
+      "Store",
+      "Date",
+      "Status",
+      "Total Amount",
+      "Shipping Cost",
+      "Tax Amount",
+      "Profit",
+      "Items Count",
+    ]
+
+    const csvData = filteredOrders.map((order) => [
+      order.orderNumber,
+      order.customerName,
+      order.customerEmail,
+      order.storeName,
+      new Date(order.orderDate).toLocaleDateString(),
+      order.status,
+      order.totalAmount.toFixed(2),
+      order.shippingCost.toFixed(2),
+      order.taxAmount.toFixed(2),
+      order.profit.toFixed(2),
+      order.items.length,
+    ])
+
+    const csvContent = [headers, ...csvData].map((row) => row.join(",")).join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `shopify-orders-${new Date().toISOString().split("T")[0]}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [filteredOrders])
 
   if (error) {
     return (
       <div className="flex flex-col min-h-screen">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
           <SidebarTrigger className="-ml-1 lg:hidden" />
-          <div className="flex items-center justify-between w-full">
-            <h1 className="text-lg font-semibold">Shopify Orders</h1>
-            <Button onClick={handleSyncOrders} disabled={syncing}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-              {syncing ? "Syncing..." : "Sync Orders"}
-            </Button>
-          </div>
+          <h1 className="text-lg font-semibold">Shopify Orders</h1>
         </header>
-
-        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-lg text-red-600">Error: {error}</div>
+        <div className="p-6 ml-16 lg:ml-0">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h3 className="text-red-800 font-medium">Error loading orders</h3>
+            <p className="text-red-600 mt-1">{error}</p>
+            <Button onClick={loadData} className="mt-3 bg-transparent" variant="outline">
+              Try Again
+            </Button>
           </div>
         </div>
       </div>
@@ -176,269 +241,346 @@ export default function ShopifyOrders() {
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Shopify Orders</h1>
-          <Button onClick={handleSyncOrders} disabled={syncing}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync Orders"}
+          <Button onClick={exportToCSV} size="sm" className="lg:hidden" disabled={loading}>
+            <Download className="w-4 h-4" />
           </Button>
         </div>
       </header>
 
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold hidden lg:block">Shopify Orders</h1>
+          <Button onClick={exportToCSV} size="sm" className="hidden lg:flex" disabled={loading}>
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {loading ? (
             <>
-              <MetricCardSkeleton />
-              <MetricCardSkeleton />
-              <MetricCardSkeleton />
-              <MetricCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
             </>
           ) : (
             <>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-2">
-                    <Package className="h-4 w-4 text-muted-foreground" />
-                    <div className="text-sm font-medium">Total Orders</div>
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Orders</p>
+                    <p className="text-lg font-bold">{metrics.totalOrders}</p>
                   </div>
-                  <div className="text-2xl font-bold">{orders.length}</div>
-                </CardContent>
+                  <ShoppingCart className="w-5 h-5 text-blue-600" />
+                </div>
               </Card>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-2">
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    <div className="text-sm font-medium">Total Revenue</div>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Revenue</p>
+                    <p className="text-lg font-bold">${metrics.totalRevenue.toLocaleString()}</p>
                   </div>
-                  <div className="text-2xl font-bold">${orderStats.totalRevenue.toFixed(2)}</div>
-                </CardContent>
+                  <DollarSign className="w-5 h-5 text-green-600" />
+                </div>
               </Card>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                    <div className="text-sm font-medium">Total Profit</div>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Profit</p>
+                    <p className="text-lg font-bold">${metrics.totalProfit.toLocaleString()}</p>
                   </div>
-                  <div className="text-2xl font-bold">${orderStats.totalProfit.toFixed(2)}</div>
-                </CardContent>
+                  <TrendingUp className="w-5 h-5 text-green-600" />
+                </div>
               </Card>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <div className="text-sm font-medium">Pending Orders</div>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Avg Order Value</p>
+                    <p className="text-lg font-bold">${metrics.avgOrderValue.toFixed(2)}</p>
                   </div>
-                  <div className="text-2xl font-bold">{orderStats.pendingOrders}</div>
-                </CardContent>
+                  <Users className="w-5 h-5 text-purple-600" />
+                </div>
               </Card>
             </>
           )}
         </div>
 
-        <div className="flex items-center space-x-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search orders..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8"
-            />
-          </div>
+        {/* Search */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Input
+            placeholder="Search orders..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 h-9"
+          />
         </div>
 
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Order #</TableHead>
-                  <TableHead>Store</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Profit</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <>
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                    <TableRowSkeleton />
-                  </>
-                ) : (
-                  filteredOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.orderNumber || "N/A"}</TableCell>
-                      <TableCell>{order.storeName || "N/A"}</TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{order.customerName || "N/A"}</div>
-                          {order.customerEmail && (
-                            <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{order.orderDate ? new Date(order.orderDate).toLocaleDateString() : "N/A"}</TableCell>
-                      <TableCell>
-                        <Badge className={getStatusColor(order.status || "unknown")}>{order.status || "Unknown"}</Badge>
-                      </TableCell>
-                      <TableCell>{order.items?.length || 0} items</TableCell>
-                      <TableCell>${(order.totalAmount || 0).toFixed(2)}</TableCell>
-                      <TableCell
-                        className={`font-medium ${(order.profit || 0) >= 0 ? "text-green-600" : "text-red-600"}`}
-                      >
-                        ${(order.profit || 0).toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedOrder(order)
-                            setIsViewOrderOpen(true)
-                          }}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        {/* View Order Dialog */}
-        <Dialog open={isViewOrderOpen} onOpenChange={setIsViewOrderOpen}>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>Order Details</DialogTitle>
-              <DialogDescription>View the complete details of this Shopify order.</DialogDescription>
-            </DialogHeader>
-            {selectedOrder && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Order Number</h3>
-                    <p className="text-lg font-medium">{selectedOrder.orderNumber || "N/A"}</p>
+        {/* Mobile Card View / Desktop Table View */}
+        <div className="lg:hidden space-y-3">
+          {loading ? (
+            [...Array(5)].map((_, i) => (
+              <Card key={i} className="p-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <div className="h-4 bg-gray-200 rounded w-20 animate-pulse"></div>
+                      <div className="h-3 bg-gray-200 rounded w-32 animate-pulse"></div>
+                    </div>
+                    <div className="h-6 bg-gray-200 rounded w-16 animate-pulse"></div>
                   </div>
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Status</h3>
-                    <Badge className={getStatusColor(selectedOrder.status || "unknown")}>
-                      {selectedOrder.status || "Unknown"}
-                    </Badge>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
                   </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
+              </Card>
+            ))
+          ) : filteredOrders.length === 0 ? (
+            <Card className="p-6 text-center">
+              <ShoppingCart className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+              <p className="text-gray-500">{searchTerm ? "No orders found." : "No orders yet."}</p>
+            </Card>
+          ) : (
+            filteredOrders.map((order) => (
+              <Card key={order.id} className="p-4">
+                <div className="flex justify-between items-start mb-3">
                   <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Store</h3>
-                    <p className="font-medium">{selectedOrder.storeName || "N/A"}</p>
+                    <h3 className="font-medium">{order.orderNumber}</h3>
+                    <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
+                    <p className="text-xs text-gray-500">{order.storeName}</p>
                   </div>
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Order Date</h3>
-                    <p>{selectedOrder.orderDate ? new Date(selectedOrder.orderDate).toLocaleDateString() : "N/A"}</p>
-                  </div>
+                  <Badge className={`${getStatusColor(order.status)} text-xs`}>{order.status}</Badge>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4 text-sm mb-3">
                   <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Customer</h3>
-                    <p className="font-medium">{selectedOrder.customerName || "N/A"}</p>
-                    {selectedOrder.customerEmail && (
-                      <p className="text-sm text-muted-foreground">{selectedOrder.customerEmail}</p>
-                    )}
+                    <span className="text-gray-600">Total:</span>
+                    <p className="font-medium">${order.totalAmount.toFixed(2)}</p>
                   </div>
                   <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Shipping Address</h3>
-                    <p className="text-sm">{selectedOrder.shippingAddress || "N/A"}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-4 gap-4">
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Subtotal</h3>
-                    <p className="text-lg font-medium">
-                      $
-                      {(
-                        (selectedOrder.totalAmount || 0) -
-                        (selectedOrder.taxAmount || 0) -
-                        (selectedOrder.shippingCost || 0)
-                      ).toFixed(2)}
+                    <span className="text-gray-600">Profit:</span>
+                    <p className={`font-medium ${order.profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                      ${order.profit.toFixed(2)}
                     </p>
                   </div>
                   <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Shipping</h3>
-                    <p className="text-lg font-medium">${(selectedOrder.shippingCost || 0).toFixed(2)}</p>
+                    <span className="text-gray-600">Date:</span>
+                    <p>{new Date(order.orderDate).toLocaleDateString()}</p>
                   </div>
                   <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Tax</h3>
-                    <p className="text-lg font-medium">${(selectedOrder.taxAmount || 0).toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground">Total</h3>
-                    <p className="text-lg font-medium">${(selectedOrder.totalAmount || 0).toFixed(2)}</p>
+                    <span className="text-gray-600">Items:</span>
+                    <p>{order.items.length}</p>
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-medium">Order Items</h3>
-                    <div className="text-sm text-muted-foreground">
-                      Profit:{" "}
-                      <span
-                        className={`font-medium ${(selectedOrder.profit || 0) >= 0 ? "text-green-600" : "text-red-600"}`}
-                      >
-                        ${(selectedOrder.profit || 0).toFixed(2)}
-                      </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedOrder(order)
+                    setIsViewOrderOpen(true)
+                  }}
+                  className="w-full"
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  View Details
+                </Button>
+              </Card>
+            ))
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        {loading ? (
+          <div className="hidden lg:block">
+            <TableSkeleton />
+          </div>
+        ) : (
+          <Card className="hidden lg:block">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="h-10">
+                    <TableHead>Order #</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Store</TableHead>
+                    <TableHead className="w-[100px]">Date</TableHead>
+                    <TableHead className="w-[80px]">Status</TableHead>
+                    <TableHead className="w-[100px]">Total</TableHead>
+                    <TableHead className="w-[100px]">Profit</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredOrders.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8">
+                        <ShoppingCart className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-gray-500">{searchTerm ? "No orders found." : "No orders yet."}</p>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredOrders.map((order) => (
+                      <TableRow key={order.id} className="h-12">
+                        <TableCell className="font-medium">{order.orderNumber}</TableCell>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{order.customerName}</div>
+                            <div className="text-sm text-gray-500 truncate max-w-[150px]">{order.customerEmail}</div>
+                          </div>
+                        </TableCell>
+                        <TableCell>{order.storeName}</TableCell>
+                        <TableCell className="text-sm">{new Date(order.orderDate).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          <Badge className={`${getStatusColor(order.status)} text-xs px-2 py-1`}>{order.status}</Badge>
+                        </TableCell>
+                        <TableCell>${order.totalAmount.toFixed(2)}</TableCell>
+                        <TableCell>
+                          <span className={order.profit >= 0 ? "text-green-600" : "text-red-600"}>
+                            ${order.profit.toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedOrder(order)
+                              setIsViewOrderOpen(true)
+                            }}
+                            title="View Order Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* View Order Dialog */}
+        <Dialog open={isViewOrderOpen} onOpenChange={setIsViewOrderOpen}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Order Details - {selectedOrder?.orderNumber}</DialogTitle>
+              <DialogDescription>Complete order information and line items</DialogDescription>
+            </DialogHeader>
+
+            {selectedOrder && (
+              <div className="space-y-6">
+                {/* Order Header */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="font-medium text-gray-900">Customer Information</h3>
+                      <div className="mt-2 text-sm">
+                        <p>
+                          <strong>Name:</strong> {selectedOrder.customerName}
+                        </p>
+                        <p>
+                          <strong>Email:</strong> {selectedOrder.customerEmail}
+                        </p>
+                        <p>
+                          <strong>Shipping:</strong> {selectedOrder.shippingAddress}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>SKU</TableHead>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Unit Price</TableHead>
-                        <TableHead>Total Price</TableHead>
-                        <TableHead>Cost</TableHead>
-                        <TableHead>Item Profit</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedOrder.items?.map((item, index) => {
-                        const costPrice = (item as any).cost_price || 0
-                        const itemProfit = (item.total_price || 0) - costPrice * (item.quantity || 0)
 
-                        return (
-                          <TableRow key={index}>
-                            <TableCell className="font-medium">{item.sku || "N/A"}</TableCell>
-                            <TableCell>{item.product_name || "N/A"}</TableCell>
-                            <TableCell>{item.quantity || 0}</TableCell>
-                            <TableCell>${(item.unit_price || 0).toFixed(2)}</TableCell>
-                            <TableCell>${(item.total_price || 0).toFixed(2)}</TableCell>
-                            <TableCell>${costPrice.toFixed(2)}</TableCell>
-                            <TableCell className={`font-medium ${itemProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
-                              ${itemProfit.toFixed(2)}
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="font-medium text-gray-900">Order Information</h3>
+                      <div className="mt-2 text-sm">
+                        <p>
+                          <strong>Store:</strong> {selectedOrder.storeName}
+                        </p>
+                        <p>
+                          <strong>Date:</strong> {new Date(selectedOrder.orderDate).toLocaleDateString()}
+                        </p>
+                        <p>
+                          <strong>Status:</strong>
+                          <Badge className={`${getStatusColor(selectedOrder.status)} text-xs ml-2`}>
+                            {selectedOrder.status}
+                          </Badge>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex justify-end">
-                  <Button variant="outline" onClick={() => setIsViewOrderOpen(false)}>
-                    Close
-                  </Button>
+                {/* Order Items */}
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-3">Order Items</h3>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>SKU</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="w-[80px]">Qty</TableHead>
+                          <TableHead className="w-[100px]">Unit Price</TableHead>
+                          <TableHead className="w-[100px]">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedOrder.items.map((item, index) => (
+                          <TableRow key={index}>
+                            <TableCell className="font-medium">{item.sku}</TableCell>
+                            <TableCell>{item.product_name}</TableCell>
+                            <TableCell className="text-center">{item.quantity}</TableCell>
+                            <TableCell>${item.unit_price.toFixed(2)}</TableCell>
+                            <TableCell>${item.total_price.toFixed(2)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                {/* Order Summary */}
+                <div className="border-t pt-4">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div></div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>
+                          $
+                          {(selectedOrder.totalAmount - selectedOrder.shippingCost - selectedOrder.taxAmount).toFixed(
+                            2,
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Shipping:</span>
+                        <span>${selectedOrder.shippingCost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tax:</span>
+                        <span>${selectedOrder.taxAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-medium text-base border-t pt-2">
+                        <span>Total:</span>
+                        <span>${selectedOrder.totalAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-medium text-base">
+                        <span>Profit:</span>
+                        <span className={selectedOrder.profit >= 0 ? "text-green-600" : "text-red-600"}>
+                          ${selectedOrder.profit.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
