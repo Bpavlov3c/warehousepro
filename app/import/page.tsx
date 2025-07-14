@@ -714,8 +714,8 @@ RET-002`
   }
 
   return (
-    <div className="flex flex-col">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+    <div className="flex flex-col min-h-screen">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1" />
         <div className="flex items-center gap-2">
           {getImportIcon()}
@@ -723,7 +723,7 @@ RET-002`
         </div>
       </header>
 
-      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
+      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-0 lg:pl-72">
         {/* Import Type Selection */}
         <Card>
           <CardHeader>
