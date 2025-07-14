@@ -329,11 +329,11 @@ export default function PurchaseOrders() {
   if (error) {
     return (
       <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
           <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
         </header>
-        <div className="p-6 ml-16 lg:ml-64">
+        <div className="p-6 ml-16 lg:ml-0">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <h3 className="text-red-800 font-medium">Error loading purchase orders</h3>
             <p className="text-red-600 mt-1">{error}</p>
@@ -348,7 +348,7 @@ export default function PurchaseOrders() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Purchase Orders</h1>
@@ -358,7 +358,7 @@ export default function PurchaseOrders() {
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Purchase Orders</h1>
           <Button onClick={() => setIsNewPOOpen(true)} size="sm" className="hidden lg:flex">

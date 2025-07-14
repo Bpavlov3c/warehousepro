@@ -405,7 +405,7 @@ export default function Reports() {
           <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Reports</h1>
         </header>
-        <div className="p-6 ml-16 lg:ml-64">
+        <div className="p-6 ml-16 lg:ml-0">
           <div className="animate-pulse">
             <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
@@ -426,14 +426,14 @@ export default function Reports() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold">Reports</h1>
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-64">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         {/* Controls */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
