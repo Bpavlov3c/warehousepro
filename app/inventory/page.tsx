@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -33,16 +33,56 @@ import {
 } from "lucide-react"
 import { supabaseStore, type InventoryItem } from "@/lib/supabase-store"
 
+// Debounce hook for search optimization
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
+
+// Skeleton components for loading states
+const TableRowSkeleton = () => (
+  <TableRow>
+    {[...Array(10)].map((_, i) => (
+      <TableCell key={i}>
+        <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+      </TableCell>
+    ))}
+  </TableRow>
+)
+
+const SummaryCardSkeleton = () => (
+  <Card>
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
+      <div className="h-4 w-4 bg-gray-200 rounded animate-pulse"></div>
+    </CardHeader>
+    <CardContent>
+      <div className="h-8 bg-gray-200 rounded w-20 mb-2 animate-pulse"></div>
+      <div className="h-3 bg-gray-200 rounded w-16 animate-pulse"></div>
+    </CardContent>
+  </Card>
+)
+
 export default function Inventory() {
   /* ------------------------------------------------------------------ */
   /*                            state / refs                            */
   /* ------------------------------------------------------------------ */
 
   const [inventory, setInventory] = useState<InventoryItem[]>([])
-  const [filteredInventory, setFilteredInventory] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
-
   const [searchTerm, setSearchTerm] = useState("")
+  const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -64,6 +104,28 @@ export default function Inventory() {
   })
 
   /* ------------------------------------------------------------------ */
+  /*                         memoized calculations                      */
+  /* ------------------------------------------------------------------ */
+
+  // Memoized filtered inventory to avoid recalculating on every render
+  const filteredInventory = useMemo(() => {
+    if (!debouncedSearchTerm) return inventory
+
+    const lower = debouncedSearchTerm.toLowerCase()
+    return inventory.filter((item) => item.sku.toLowerCase().includes(lower) || item.name.toLowerCase().includes(lower))
+  }, [inventory, debouncedSearchTerm])
+
+  // Memoized aggregated data
+  const aggregatedData = useMemo(() => {
+    const totalItems = inventory.length
+    const totalValue = inventory.reduce((sum, i) => sum + i.inStock * i.unitCost, 0)
+    const lowStockItems = inventory.filter((i) => i.inStock - i.reserved <= 10 && i.inStock > 0).length
+    const outOfStockItems = inventory.filter((i) => i.inStock === 0).length
+
+    return { totalItems, totalValue, lowStockItems, outOfStockItems }
+  }, [inventory])
+
+  /* ------------------------------------------------------------------ */
   /*                         lifecycle / handlers                       */
   /* ------------------------------------------------------------------ */
 
@@ -72,15 +134,7 @@ export default function Inventory() {
     loadInventory()
   }, [])
 
-  // filter whenever inventory or search term changes
-  useEffect(() => {
-    const lower = searchTerm.toLowerCase()
-    setFilteredInventory(
-      inventory.filter((item) => item.sku.toLowerCase().includes(lower) || item.name.toLowerCase().includes(lower)),
-    )
-  }, [inventory, searchTerm])
-
-  async function loadInventory() {
+  const loadInventory = useCallback(async () => {
     try {
       setLoading(true)
       console.log("Loading inventory data...")
@@ -96,18 +150,17 @@ export default function Inventory() {
       }))
 
       console.log("Loaded inventory items:", sanitized.length)
-      console.log("Sample inventory items:", sanitized.slice(0, 3))
       setInventory(sanitized)
     } catch (err) {
       console.error("Error loading inventory", err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   /* ------------------------- add / edit logic ----------------------- */
 
-  async function handleAddItem() {
+  const handleAddItem = useCallback(async () => {
     try {
       const quantity = Number.parseInt(newItem.quantity)
       const unitCost = Number.parseFloat(newItem.unitCost)
@@ -139,9 +192,9 @@ export default function Inventory() {
       console.error("Add item error", err)
       alert("Unable to add inventory item")
     }
-  }
+  }, [newItem, loadInventory])
 
-  async function handleEditItem() {
+  const handleEditItem = useCallback(async () => {
     if (!selectedItem) return
 
     try {
@@ -172,9 +225,9 @@ export default function Inventory() {
       console.error("Edit item error", err)
       alert("Unable to update inventory item")
     }
-  }
+  }, [selectedItem, editItem, loadInventory])
 
-  function openEditDialog(item: InventoryItem) {
+  const openEditDialog = useCallback((item: InventoryItem) => {
     setSelectedItem(item)
     setEditItem({
       sku: item.sku,
@@ -183,11 +236,11 @@ export default function Inventory() {
       unitCost: item.unitCost.toString(),
     })
     setIsEditDialogOpen(true)
-  }
+  }, [])
 
   /* ---------------------------- export CSV -------------------------- */
 
-  function handleExport() {
+  const handleExport = useCallback(() => {
     try {
       const headers = [
         "SKU",
@@ -233,11 +286,11 @@ export default function Inventory() {
       console.error("Export error", err)
       alert("Could not export CSV")
     }
-  }
+  }, [filteredInventory])
 
   /* -------------------------- helpers / utils ----------------------- */
 
-  function getStockStatus(item: InventoryItem) {
+  const getStockStatus = useCallback((item: InventoryItem) => {
     const available = item.inStock - item.reserved
     const total = item.inStock + item.incoming
 
@@ -245,34 +298,16 @@ export default function Inventory() {
     if (item.inStock === 0) return { status: "Incoming Only", badge: "secondary" }
     if (available <= 10) return { status: "Low Stock", badge: "secondary" }
     return { status: "In Stock", badge: "default" }
-  }
+  }, [])
 
-  const currency = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n)
-
-  /* --------------------------- aggregated data ---------------------- */
-
-  const totalItems = inventory.length
-  const totalValue = inventory.reduce((sum, i) => sum + i.inStock * i.unitCost, 0)
-
-  const lowStockItems = inventory.filter((i) => i.inStock - i.reserved <= 10 && i.inStock > 0).length
-
-  const outOfStockItems = inventory.filter((i) => i.inStock === 0).length
+  const currency = useCallback(
+    (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n),
+    [],
+  )
 
   /* ------------------------------------------------------------------ */
   /*                                 UI                                 */
   /* ------------------------------------------------------------------ */
-
-  if (loading) {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
-          <SidebarTrigger className="-ml-1 lg:hidden" />
-          <h1 className="text-lg font-semibold">Inventory</h1>
-        </header>
-        <div className="p-8 text-center ml-16 lg:ml-0">Loading…</div>
-      </div>
-    )
-  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -289,30 +324,41 @@ export default function Inventory() {
       <main className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         {/* summary cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <SummaryCard
-            icon={<Package className="h-4 w-4 text-muted-foreground" />}
-            title="Total Items"
-            value={totalItems.toString()}
-            subtitle="Unique SKUs"
-          />
-          <SummaryCard
-            icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
-            title="Total Value"
-            value={currency(totalValue)}
-            subtitle="Current stock value"
-          />
-          <SummaryCard
-            icon={<TrendingDown className="h-4 w-4 text-muted-foreground" />}
-            title="Low Stock"
-            value={lowStockItems.toString()}
-            subtitle="≤10 available"
-          />
-          <SummaryCard
-            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-            title="Out of Stock"
-            value={outOfStockItems.toString()}
-            subtitle="0 units"
-          />
+          {loading ? (
+            <>
+              <SummaryCardSkeleton />
+              <SummaryCardSkeleton />
+              <SummaryCardSkeleton />
+              <SummaryCardSkeleton />
+            </>
+          ) : (
+            <>
+              <SummaryCard
+                icon={<Package className="h-4 w-4 text-muted-foreground" />}
+                title="Total Items"
+                value={aggregatedData.totalItems.toString()}
+                subtitle="Unique SKUs"
+              />
+              <SummaryCard
+                icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+                title="Total Value"
+                value={currency(aggregatedData.totalValue)}
+                subtitle="Current stock value"
+              />
+              <SummaryCard
+                icon={<TrendingDown className="h-4 w-4 text-muted-foreground" />}
+                title="Low Stock"
+                value={aggregatedData.lowStockItems.toString()}
+                subtitle="≤10 available"
+              />
+              <SummaryCard
+                icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
+                title="Out of Stock"
+                value={aggregatedData.outOfStockItems.toString()}
+                subtitle="0 units"
+              />
+            </>
+          )}
         </div>
 
         {/* actions bar */}
@@ -375,7 +421,7 @@ export default function Inventory() {
           <CardHeader>
             <CardTitle>Inventory Items</CardTitle>
             <CardDescription>
-              Showing {filteredInventory.length} of {totalItems}
+              Showing {filteredInventory.length} of {aggregatedData.totalItems}
             </CardDescription>
           </CardHeader>
 
@@ -397,41 +443,53 @@ export default function Inventory() {
               </TableHeader>
 
               <TableBody>
-                {filteredInventory.map((item) => {
-                  const status = getStockStatus(item)
-                  const available = item.inStock - item.reserved
-                  const totalVal = item.inStock * item.unitCost
+                {loading ? (
+                  <>
+                    <TableRowSkeleton />
+                    <TableRowSkeleton />
+                    <TableRowSkeleton />
+                    <TableRowSkeleton />
+                    <TableRowSkeleton />
+                  </>
+                ) : (
+                  <>
+                    {filteredInventory.map((item) => {
+                      const status = getStockStatus(item)
+                      const available = item.inStock - item.reserved
+                      const totalVal = item.inStock * item.unitCost
 
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">{item.sku}</TableCell>
-                      <TableCell>{item.name}</TableCell>
-                      <TableCell className="text-right">{item.inStock.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{item.incoming.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{item.reserved.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{available.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{currency(item.unitCost)}</TableCell>
-                      <TableCell className="text-right">{currency(totalVal)}</TableCell>
-                      <TableCell>
-                        <Badge variant={status.badge}>{status.status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">{item.sku}</TableCell>
+                          <TableCell>{item.name}</TableCell>
+                          <TableCell className="text-right">{item.inStock.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{item.incoming.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{item.reserved.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{available.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{currency(item.unitCost)}</TableCell>
+                          <TableCell className="text-right">{currency(totalVal)}</TableCell>
+                          <TableCell>
+                            <Badge variant={status.badge}>{status.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
 
-                {filteredInventory.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground">
-                      {searchTerm
-                        ? "No items match your search."
-                        : "Inventory is empty. Add items or import purchase orders."}
-                    </TableCell>
-                  </TableRow>
+                    {filteredInventory.length === 0 && !loading && (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center text-muted-foreground">
+                          {searchTerm
+                            ? "No items match your search."
+                            : "Inventory is empty. Add items or import purchase orders."}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
                 )}
               </TableBody>
             </Table>

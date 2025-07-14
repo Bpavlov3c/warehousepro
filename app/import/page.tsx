@@ -2,913 +2,469 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Upload, FileText, Package, ShoppingCart, AlertCircle, CheckCircle, X } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Upload,
-  Download,
-  FileText,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  Package,
-  ShoppingCart,
-  RotateCcw,
-} from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { supabaseStore } from "@/lib/supabase-store"
 
 interface ImportResult {
   success: boolean
   message: string
-  count?: number
-  errors?: string[]
+  imported: number
+  errors: string[]
 }
 
-interface ImportProgress {
-  current: number
-  total: number
-  status: string
-  percentage?: number
-}
-
-// Batch size for processing large files
-const BATCH_SIZE = 100
-const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
-const MAX_ROWS = 100000
-
-// Helper function to normalize date formats
-function normalizeDate(dateStr: string): string {
-  if (!dateStr) return new Date().toISOString().split("T")[0]
-
-  // Try different date formats
-  const formats = [
-    // ISO format (already correct)
-    /^\d{4}-\d{2}-\d{2}$/,
-    // US format MM/DD/YYYY
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
-    // European format DD/MM/YYYY
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
-    // DD-MM-YYYY
-    /^(\d{1,2})-(\d{1,2})-(\d{4})$/,
-  ]
-
-  // If already in ISO format, return as-is
-  if (formats[0].test(dateStr)) {
-    return dateStr
-  }
-
-  // Try to parse other formats
-  let date: Date | null = null
-
-  // Try MM/DD/YYYY or DD/MM/YYYY
-  const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (slashMatch) {
-    const [, first, second, year] = slashMatch
-    // Assume MM/DD/YYYY if first number > 12, otherwise try both
-    if (Number.parseInt(first) > 12) {
-      // Must be DD/MM/YYYY
-      date = new Date(Number.parseInt(year), Number.parseInt(second) - 1, Number.parseInt(first))
-    } else if (Number.parseInt(second) > 12) {
-      // Must be MM/DD/YYYY
-      date = new Date(Number.parseInt(year), Number.parseInt(first) - 1, Number.parseInt(second))
-    } else {
-      // Ambiguous - assume MM/DD/YYYY (US format)
-      date = new Date(Number.parseInt(year), Number.parseInt(first) - 1, Number.parseInt(second))
-    }
-  }
-
-  // Try DD-MM-YYYY
-  const dashMatch = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
-  if (dashMatch && !date) {
-    const [, day, month, year] = dashMatch
-    date = new Date(Number.parseInt(year), Number.parseInt(month) - 1, Number.parseInt(day))
-  }
-
-  // If we couldn't parse it, try the built-in Date parser
-  if (!date) {
-    date = new Date(dateStr)
-  }
-
-  // Validate the date
-  if (!date || isNaN(date.getTime())) {
-    throw new Error(`Invalid date format: ${dateStr}. Please use YYYY-MM-DD, MM/DD/YYYY, or DD/MM/YYYY format.`)
-  }
-
-  // Return in ISO format
-  return date.toISOString().split("T")[0]
-}
-
-// Helper function to process CSV in chunks to avoid memory issues
-function parseCSVInChunks(csvText: string): any[] {
-  const lines = csvText.trim().split("\n")
-  if (lines.length < 2) return []
-
-  // Check row limit
-  if (lines.length - 1 > MAX_ROWS) {
-    throw new Error(`File contains ${lines.length - 1} rows. Maximum allowed is ${MAX_ROWS} rows.`)
-  }
-
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/"/g, ""))
-  const rows = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(",").map((v) => v.trim().replace(/"/g, ""))
-    if (values.length === headers.length && values.some((v) => v.length > 0)) {
-      const row: any = {}
-      headers.forEach((header, index) => {
-        row[header] = values[index]
-      })
-      rows.push(row)
-    }
-  }
-
-  return rows
-}
-
-// Helper function to process data in batches
-async function processBatch<T>(
-  items: T[],
-  batchSize: number,
-  processor: (batch: T[], batchIndex: number) => Promise<void>,
-  onProgress?: (current: number, total: number, status: string) => void,
-): Promise<void> {
-  const totalBatches = Math.ceil(items.length / batchSize)
-
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize)
-    const batchIndex = Math.floor(i / batchSize)
-
-    if (onProgress) {
-      onProgress(
-        Math.min(i + batchSize, items.length),
-        items.length,
-        `Processing batch ${batchIndex + 1}/${totalBatches}...`,
-      )
-    }
-
-    await processor(batch, batchIndex)
-
-    // Small delay to prevent overwhelming the database
-    if (batchIndex < totalBatches - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100))
-    }
-  }
+interface PreviewData {
+  headers: string[]
+  rows: string[][]
+  type: "purchase-orders" | "inventory" | "orders" | null
 }
 
 export default function ImportPage() {
-  const [importType, setImportType] = useState<"inventory" | "purchase-orders" | "shopify-orders" | "returns">(
-    "inventory",
-  )
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
-  const [progress, setProgress] = useState<ImportProgress>({ current: 0, total: 0, status: "" })
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [preview, setPreview] = useState<PreviewData | null>(null)
+  const [importType, setImportType] = useState<"purchase-orders" | "inventory" | "orders">("purchase-orders")
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0]
-
-    if (!selectedFile) return
-
-    // Check file type
-    if (selectedFile.type !== "text/csv" && !selectedFile.name.endsWith(".csv")) {
-      alert("Please select a valid CSV file")
-      return
+    if (selectedFile) {
+      setFile(selectedFile)
+      setResult(null)
+      previewFile(selectedFile)
     }
+  }, [])
 
-    // Check file size
-    if (selectedFile.size > MAX_FILE_SIZE) {
-      alert(
-        `File size (${(selectedFile.size / 1024 / 1024).toFixed(1)}MB) exceeds maximum allowed size of ${MAX_FILE_SIZE / 1024 / 1024}MB`,
-      )
-      return
+  const previewFile = useCallback(async (file: File) => {
+    try {
+      const text = await file.text()
+      const lines = text.split("\n").filter((line) => line.trim())
+
+      if (lines.length < 2) {
+        setPreview(null)
+        return
+      }
+
+      const headers = lines[0].split(",").map((h) => h.replace(/"/g, "").trim())
+      const rows = lines.slice(1, 6).map((line) => line.split(",").map((cell) => cell.replace(/"/g, "").trim()))
+
+      // Auto-detect import type based on headers
+      let detectedType: "purchase-orders" | "inventory" | "orders" | null = null
+
+      if (headers.some((h) => h.toLowerCase().includes("supplier") || h.toLowerCase().includes("po"))) {
+        detectedType = "purchase-orders"
+      } else if (headers.some((h) => h.toLowerCase().includes("sku") && h.toLowerCase().includes("stock"))) {
+        detectedType = "inventory"
+      } else if (headers.some((h) => h.toLowerCase().includes("order") && h.toLowerCase().includes("customer"))) {
+        detectedType = "orders"
+      }
+
+      setPreview({
+        headers,
+        rows,
+        type: detectedType,
+      })
+
+      if (detectedType) {
+        setImportType(detectedType)
+      }
+    } catch (error) {
+      console.error("Error previewing file:", error)
+      setPreview(null)
     }
+  }, [])
 
-    setFile(selectedFile)
-    setResult(null)
-  }
-
-  const handleImport = async () => {
+  const handleImport = useCallback(async () => {
     if (!file) return
 
-    setImporting(true)
-    setProgress({ current: 0, total: 0, status: "Reading file...", percentage: 0 })
-    setResult(null)
-
     try {
-      const csvText = await file.text()
+      setImporting(true)
+      setResult(null)
 
-      setProgress({ current: 0, total: 0, status: "Parsing CSV data...", percentage: 10 })
+      const text = await file.text()
+      const lines = text.split("\n").filter((line) => line.trim())
 
-      const rows = parseCSVInChunks(csvText)
-
-      if (rows.length === 0) {
-        throw new Error("No valid data found in CSV file")
+      if (lines.length < 2) {
+        setResult({
+          success: false,
+          message: "File must contain at least a header row and one data row",
+          imported: 0,
+          errors: ["Invalid file format"],
+        })
+        return
       }
 
-      console.log(`Processing ${rows.length} rows in batches of ${BATCH_SIZE}`)
+      const headers = lines[0].split(",").map((h) => h.replace(/"/g, "").trim())
+      const dataRows = lines.slice(1).map((line) => line.split(",").map((cell) => cell.replace(/"/g, "").trim()))
 
-      setProgress({ current: 0, total: rows.length, status: "Processing data...", percentage: 20 })
+      let imported = 0
+      const errors: string[] = []
 
-      let importResult: ImportResult
+      if (importType === "purchase-orders") {
+        // Import purchase orders
+        for (let i = 0; i < dataRows.length; i++) {
+          try {
+            const row = dataRows[i]
+            if (row.length < headers.length) continue
 
-      switch (importType) {
-        case "inventory":
-          importResult = await importInventory(rows)
-          break
-        case "purchase-orders":
-          importResult = await importPurchaseOrders(rows)
-          break
-        case "shopify-orders":
-          importResult = await importShopifyOrders(rows)
-          break
-        case "returns":
-          importResult = await importReturns(rows)
-          break
-        default:
-          throw new Error("Invalid import type")
+            const poData = {
+              supplier_name:
+                row[headers.indexOf("Supplier")] || row[headers.indexOf("supplier")] || `Supplier ${i + 1}`,
+              po_date:
+                row[headers.indexOf("Date")] || row[headers.indexOf("date")] || new Date().toISOString().split("T")[0],
+              status: (row[headers.indexOf("Status")] || row[headers.indexOf("status")] || "Draft") as
+                | "Draft"
+                | "Pending"
+                | "In Transit"
+                | "Delivered",
+              delivery_cost: Number.parseFloat(
+                row[headers.indexOf("Delivery Cost")] || row[headers.indexOf("delivery_cost")] || "0",
+              ),
+              items: [
+                {
+                  sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
+                  product_name:
+                    row[headers.indexOf("Product")] || row[headers.indexOf("product")] || `Product ${i + 1}`,
+                  quantity: Number.parseInt(
+                    row[headers.indexOf("Quantity")] || row[headers.indexOf("quantity")] || "1",
+                  ),
+                  unit_cost: Number.parseFloat(
+                    row[headers.indexOf("Unit Cost")] || row[headers.indexOf("unit_cost")] || "0",
+                  ),
+                },
+              ],
+              notes: row[headers.indexOf("Notes")] || row[headers.indexOf("notes")] || "",
+            }
+
+            await supabaseStore.createPurchaseOrder(poData)
+            imported++
+          } catch (error) {
+            errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
+      } else if (importType === "inventory") {
+        // Import inventory
+        for (let i = 0; i < dataRows.length; i++) {
+          try {
+            const row = dataRows[i]
+            if (row.length < headers.length) continue
+
+            const inventoryData = {
+              sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
+              name:
+                row[headers.indexOf("Name")] ||
+                row[headers.indexOf("name")] ||
+                row[headers.indexOf("Product")] ||
+                `Product ${i + 1}`,
+              quantity: Number.parseInt(
+                row[headers.indexOf("Quantity")] ||
+                  row[headers.indexOf("quantity")] ||
+                  row[headers.indexOf("Stock")] ||
+                  "0",
+              ),
+              unitCost: Number.parseFloat(
+                row[headers.indexOf("Unit Cost")] ||
+                  row[headers.indexOf("unit_cost")] ||
+                  row[headers.indexOf("Cost")] ||
+                  "0",
+              ),
+            }
+
+            if (inventoryData.quantity > 0) {
+              await supabaseStore.addManualInventory(inventoryData)
+              imported++
+            }
+          } catch (error) {
+            errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
+      } else if (importType === "orders") {
+        // Import orders (simplified - would need more complex mapping for real Shopify orders)
+        for (let i = 0; i < dataRows.length; i++) {
+          try {
+            const row = dataRows[i]
+            if (row.length < headers.length) continue
+
+            const orderData = {
+              store_id: "1", // Default store
+              shopify_order_id: row[headers.indexOf("Order ID")] || `ORDER-${Date.now()}-${i}`,
+              order_number: row[headers.indexOf("Order Number")] || `#${1000 + i}`,
+              customer_name:
+                row[headers.indexOf("Customer")] || row[headers.indexOf("customer")] || `Customer ${i + 1}`,
+              customer_email: row[headers.indexOf("Email")] || row[headers.indexOf("email")] || "",
+              order_date: row[headers.indexOf("Date")] || row[headers.indexOf("date")] || new Date().toISOString(),
+              status: row[headers.indexOf("Status")] || row[headers.indexOf("status")] || "pending",
+              total_amount: Number.parseFloat(row[headers.indexOf("Total")] || row[headers.indexOf("total")] || "0"),
+              shipping_cost: Number.parseFloat(
+                row[headers.indexOf("Shipping")] || row[headers.indexOf("shipping")] || "0",
+              ),
+              tax_amount: Number.parseFloat(row[headers.indexOf("Tax")] || row[headers.indexOf("tax")] || "0"),
+              shipping_address: row[headers.indexOf("Address")] || row[headers.indexOf("address")] || "",
+              items: [
+                {
+                  sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
+                  product_name:
+                    row[headers.indexOf("Product")] || row[headers.indexOf("product")] || `Product ${i + 1}`,
+                  quantity: Number.parseInt(
+                    row[headers.indexOf("Quantity")] || row[headers.indexOf("quantity")] || "1",
+                  ),
+                  unit_price: Number.parseFloat(row[headers.indexOf("Price")] || row[headers.indexOf("price")] || "0"),
+                  total_price: Number.parseFloat(row[headers.indexOf("Total")] || row[headers.indexOf("total")] || "0"),
+                },
+              ],
+            }
+
+            await supabaseStore.addShopifyOrders([orderData])
+            imported++
+          } catch (error) {
+            errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
       }
 
-      setResult(importResult)
+      setResult({
+        success: imported > 0,
+        message: `Successfully imported ${imported} ${importType.replace("-", " ")}`,
+        imported,
+        errors,
+      })
     } catch (error) {
-      console.error("Import error:", error)
       setResult({
         success: false,
         message: error instanceof Error ? error.message : "Import failed",
+        imported: 0,
+        errors: [error instanceof Error ? error.message : "Unknown error"],
       })
     } finally {
       setImporting(false)
-      setProgress({ current: 0, total: 0, status: "", percentage: 100 })
     }
-  }
+  }, [file, importType])
 
-  const importInventory = async (rows: any[]): Promise<ImportResult> => {
-    const errors: string[] = []
-    let successCount = 0
-
-    await processBatch(
-      rows,
-      BATCH_SIZE,
-      async (batch, batchIndex) => {
-        for (let i = 0; i < batch.length; i++) {
-          const row = batch[i]
-          const globalIndex = batchIndex * BATCH_SIZE + i + 1
-
-          try {
-            // Validate required fields - allow 0 values but require fields to exist
-            if (
-              !row.sku ||
-              row.sku.trim() === "" ||
-              !row.product_name ||
-              row.product_name.trim() === "" ||
-              row.quantity === undefined ||
-              row.quantity === "" ||
-              row.unit_cost === undefined ||
-              row.unit_cost === ""
-            ) {
-              errors.push(`Row ${globalIndex}: Missing required fields (sku, product_name, quantity, unit_cost)`)
-              continue
-            }
-
-            // Parse values - allow 0 for quantity and unit_cost
-            const quantity = Number.parseFloat(row.quantity)
-            const unitCost = Number.parseFloat(row.unit_cost)
-
-            // Check for invalid numbers (NaN)
-            if (isNaN(quantity) || isNaN(unitCost)) {
-              errors.push(`Row ${globalIndex}: Invalid numeric values for quantity or unit_cost`)
-              continue
-            }
-
-            await supabaseStore.addManualInventory({
-              sku: row.sku.trim(),
-              name: row.product_name.trim(),
-              quantity: quantity, // Allow 0
-              unitCost: unitCost, // Allow 0
-            })
-
-            successCount++
-          } catch (error) {
-            errors.push(`Row ${globalIndex}: ${error instanceof Error ? error.message : "Unknown error"}`)
-          }
-        }
-      },
-      (current, total, status) => {
-        setProgress({
-          current,
-          total,
-          status,
-          percentage: 20 + (current / total) * 70,
-        })
-      },
-    )
-
-    return {
-      success: errors.length === 0,
-      message: `Imported ${successCount} inventory items${errors.length > 0 ? ` with ${errors.length} errors` : ""}`,
-      count: successCount,
-      errors: errors.length > 0 ? errors.slice(0, 100) : undefined, // Limit errors shown
-    }
-  }
-
-  const importPurchaseOrders = async (rows: any[]): Promise<ImportResult> => {
-    const errors: string[] = []
-    let successCount = 0
-
-    // Group rows by PO number to handle multi-line POs
-    const poGroups = new Map<string, any[]>()
-
-    rows.forEach((row, index) => {
-      if (!row.po_number) {
-        errors.push(`Row ${index + 1}: Missing po_number`)
-        return
-      }
-
-      if (!poGroups.has(row.po_number)) {
-        poGroups.set(row.po_number, [])
-      }
-      poGroups.get(row.po_number)!.push({ ...row, rowIndex: index + 1 })
-    })
-
-    const poEntries = Array.from(poGroups.entries())
-
-    await processBatch(
-      poEntries,
-      Math.max(1, Math.floor(BATCH_SIZE / 10)), // Smaller batches for POs since they can have multiple items
-      async (batch, batchIndex) => {
-        for (const [poNumber, poRows] of batch) {
-          try {
-            // Use first row for PO header data
-            const headerRow = poRows[0]
-
-            // Validate required header fields
-            if (!headerRow.supplier_name && !headerRow.supplier) {
-              errors.push(`PO ${poNumber}: Missing supplier_name/supplier`)
-              continue
-            }
-
-            // Collect all items for this PO
-            const items = []
-            let hasItemErrors = false
-
-            for (const row of poRows) {
-              // Validate required item fields - allow 0 values but require fields to exist
-              if (
-                row.sku === undefined ||
-                row.sku === "" ||
-                row.product_name === undefined ||
-                row.product_name === "" ||
-                row.quantity === undefined ||
-                row.quantity === "" ||
-                row.unit_cost === undefined ||
-                row.unit_cost === ""
-              ) {
-                errors.push(
-                  `PO ${poNumber}, Row ${row.rowIndex}: Missing required item fields (sku, product_name, quantity, unit_cost)`,
-                )
-                hasItemErrors = true
-                continue
-              }
-
-              // Parse values - allow 0 for quantity and unit_cost
-              const quantity = Number.parseFloat(row.quantity)
-              const unitCost = Number.parseFloat(row.unit_cost)
-
-              // Check for invalid numbers (NaN)
-              if (isNaN(quantity) || isNaN(unitCost)) {
-                errors.push(`PO ${poNumber}, Row ${row.rowIndex}: Invalid numeric values for quantity or unit_cost`)
-                hasItemErrors = true
-                continue
-              }
-
-              items.push({
-                sku: row.sku.trim(),
-                product_name: row.product_name.trim(),
-                quantity: quantity, // Allow 0
-                unit_cost: unitCost, // Allow 0
-              })
-            }
-
-            // Skip this PO if there were item errors
-            if (hasItemErrors || items.length === 0) {
-              continue
-            }
-
-            // Create the PO with all items
-            await supabaseStore.createPurchaseOrder({
-              supplier_name: headerRow.supplier_name || headerRow.supplier,
-              po_date: normalizeDate(headerRow.po_date || headerRow.date),
-              status: (headerRow.status as any) || "Pending",
-              delivery_cost: Number.parseFloat(headerRow.delivery_cost || headerRow.shipping_cost || "0"),
-              notes: headerRow.notes || "",
-              items,
-            })
-
-            successCount++
-          } catch (error) {
-            errors.push(`PO ${poNumber}: ${error instanceof Error ? error.message : "Unknown error"}`)
-          }
-        }
-      },
-      (current, total, status) => {
-        setProgress({
-          current,
-          total,
-          status,
-          percentage: 20 + (current / total) * 70,
-        })
-      },
-    )
-
-    return {
-      success: errors.length === 0,
-      message: `Imported ${successCount} purchase orders${errors.length > 0 ? ` with ${errors.length} errors` : ""}`,
-      count: successCount,
-      errors: errors.length > 0 ? errors.slice(0, 100) : undefined, // Limit errors shown
-    }
-  }
-
-  const importShopifyOrders = async (rows: any[]): Promise<ImportResult> => {
-    const errors: string[] = []
-    let successCount = 0
-
-    // Group rows by order number to handle multi-line orders
-    const orderGroups = new Map<string, any[]>()
-
-    rows.forEach((row, index) => {
-      if (!row.order_number) {
-        errors.push(`Row ${index + 1}: Missing order_number`)
-        return
-      }
-
-      if (!orderGroups.has(row.order_number)) {
-        orderGroups.set(row.order_number, [])
-      }
-      orderGroups.get(row.order_number)!.push({ ...row, rowIndex: index + 1 })
-    })
-
-    // Convert grouped orders to the format expected by addShopifyOrders
-    const ordersToImport: any[] = []
-
-    for (const [orderNumber, orderRows] of orderGroups) {
-      try {
-        // Use first row for order header data
-        const headerRow = orderRows[0]
-
-        // Validate required header fields
-        if (!headerRow.customer_name || !headerRow.order_date || !headerRow.total_amount) {
-          errors.push(`Order ${orderNumber}: Missing required fields (customer_name, order_date, total_amount)`)
-          continue
-        }
-
-        // Collect all items for this order
-        const items = []
-        let hasItemErrors = false
-
-        for (const row of orderRows) {
-          // Validate required item fields
-          if (!row.sku || !row.product_name || !row.quantity || !row.unit_price) {
-            errors.push(
-              `Order ${orderNumber}, Row ${row.rowIndex}: Missing required item fields (sku, product_name, quantity, unit_price)`,
-            )
-            hasItemErrors = true
-            continue
-          }
-
-          items.push({
-            sku: row.sku,
-            product_name: row.product_name,
-            quantity: Number.parseInt(row.quantity) || 0,
-            unit_price: Number.parseFloat(row.unit_price) || 0,
-            total_price:
-              Number.parseFloat(row.total_price) || Number.parseFloat(row.unit_price) * Number.parseInt(row.quantity),
-          })
-        }
-
-        // Skip this order if there were item errors
-        if (hasItemErrors || items.length === 0) {
-          continue
-        }
-
-        // Create order object
-        ordersToImport.push({
-          store_id: headerRow.store_id || "imported",
-          shopify_order_id: `imported-${orderNumber}`,
-          order_number: orderNumber,
-          customer_name: headerRow.customer_name,
-          customer_email: headerRow.customer_email || "",
-          order_date: normalizeDate(headerRow.order_date),
-          status: headerRow.status || "fulfilled",
-          total_amount: Number.parseFloat(headerRow.total_amount) || 0,
-          shipping_cost: Number.parseFloat(headerRow.shipping_cost || "0"),
-          tax_amount: Number.parseFloat(headerRow.tax_amount || "0"),
-          shipping_address: headerRow.shipping_address || "",
-          items,
-        })
-      } catch (error) {
-        errors.push(`Order ${orderNumber}: ${error instanceof Error ? error.message : "Unknown error"}`)
-      }
-    }
-
-    // Import orders in batches
-    if (ordersToImport.length > 0) {
-      try {
-        await processBatch(
-          ordersToImport,
-          Math.max(1, Math.floor(BATCH_SIZE / 5)), // Smaller batches for orders
-          async (batch) => {
-            await supabaseStore.addShopifyOrders(batch)
-            successCount += batch.length
-          },
-          (current, total, status) => {
-            setProgress({
-              current,
-              total,
-              status: `Saving orders to database... ${status}`,
-              percentage: 20 + (current / total) * 70,
-            })
-          },
-        )
-      } catch (error) {
-        errors.push(`Database error: ${error instanceof Error ? error.message : "Unknown error"}`)
-      }
-    }
-
-    return {
-      success: errors.length === 0,
-      message: `Imported ${successCount} Shopify orders${errors.length > 0 ? ` with ${errors.length} errors` : ""}`,
-      count: successCount,
-      errors: errors.length > 0 ? errors.slice(0, 100) : undefined, // Limit errors shown
-    }
-  }
-
-  const importReturns = async (rows: any[]): Promise<ImportResult> => {
-    const errors: string[] = []
-    let successCount = 0
-
-    // Group rows by return number to handle multi-line returns
-    const returnGroups = new Map<string, any[]>()
-
-    rows.forEach((row, index) => {
-      if (!row.return_number) {
-        errors.push(`Row ${index + 1}: Missing return_number`)
-        return
-      }
-
-      if (!returnGroups.has(row.return_number)) {
-        returnGroups.set(row.return_number, [])
-      }
-      returnGroups.get(row.return_number)!.push({ ...row, rowIndex: index + 1 })
-    })
-
-    // Convert grouped returns to the format expected by createReturn
-    const returnsToImport: any[] = []
-
-    for (const [returnNumber, returnRows] of returnGroups) {
-      try {
-        // Use first row for return header data
-        const headerRow = returnRows[0]
-
-        // Validate required header fields
-        if (!headerRow.customer_name || !headerRow.return_date) {
-          errors.push(`Return ${returnNumber}: Missing required fields (customer_name, return_date)`)
-          continue
-        }
-
-        // Collect all items for this return
-        const items = []
-        let hasItemErrors = false
-
-        for (const row of returnRows) {
-          // Validate required item fields
-          if (!row.sku || !row.product_name || !row.quantity) {
-            errors.push(
-              `Return ${returnNumber}, Row ${row.rowIndex}: Missing required item fields (sku, product_name, quantity)`,
-            )
-            hasItemErrors = true
-            continue
-          }
-
-          items.push({
-            sku: row.sku,
-            product_name: row.product_name,
-            quantity: Number.parseInt(row.quantity) || 0,
-            condition: row.condition || "Good",
-            reason: row.reason || "Other",
-          })
-        }
-
-        // Skip this return if there were item errors
-        if (hasItemErrors || items.length === 0) {
-          continue
-        }
-
-        // Create return object
-        const returnData = {
-          customer_name: headerRow.customer_name,
-          customer_email: headerRow.customer_email || "",
-          order_number: headerRow.order_number || "",
-          return_date: normalizeDate(headerRow.return_date),
-          status: (headerRow.status as any) || "Pending",
-          notes: headerRow.notes || "",
-          items,
-        }
-
-        const createdReturn = await supabaseStore.createReturn(returnData)
-        successCount++
-      } catch (error) {
-        errors.push(`Return ${returnNumber}: ${error instanceof Error ? error.message : "Unknown error"}`)
-      }
-    }
-
-    return {
-      success: errors.length === 0,
-      message: `Imported ${successCount} returns${errors.length > 0 ? ` with ${errors.length} errors` : ""}`,
-      count: successCount,
-      errors: errors.length > 0 ? errors.slice(0, 100) : undefined, // Limit errors shown
-    }
-  }
-
-  const downloadTemplate = () => {
-    let csvContent = ""
-    let filename = ""
-
-    switch (importType) {
-      case "inventory":
-        csvContent = `sku,product_name,quantity,unit_cost
-T-565762,Sample T-Shirt,100,21.50
-J-123456,Sample Jeans,50,35.00
-S-789012,Sample Shoes,25,45.00
-T-000001,Zero Stock Item,0,15.00
-F-000001,Free Sample,10,0`
-        filename = "inventory_template.csv"
-        break
-
-      case "purchase-orders":
-        csvContent = `po_number,supplier_name,po_date,delivery_cost,status,notes,sku,product_name,quantity,unit_cost
-PO-001,Supplier ABC,2024-01-15,50.00,Pending,Sample PO,T-565762,Sample T-Shirt,100,21.50
-PO-001,Supplier ABC,2024-01-15,50.00,Pending,Sample PO,J-123456,Sample Jeans,50,35.00
-PO-002,Supplier XYZ,2024-01-16,75.00,Delivered,Another PO,S-789012,Sample Shoes,25,45.00
-PO-003,Supplier ABC,2024-01-17,0,Pending,Zero cost items,F-000001,Free Sample,10,0`
-        filename = "purchase_orders_template.csv"
-        break
-
-      case "shopify-orders":
-        csvContent = `order_number,order_date,customer_name,customer_email,total_amount,tax_amount,shipping_cost,store_id,store_name,sku,product_name,quantity,unit_price,total_price
-1001,2024-01-15,John Doe,john@example.com,128.50,8.50,10.00,store1,Main Store,T-565762,Sample T-Shirt,1,110.00,110.00
-1002,2024-01-16,Jane Smith,jane@example.com,185.75,15.75,20.00,store1,Main Store,J-123456,Sample Jeans,1,150.00,150.00
-1002,2024-01-16,Jane Smith,jane@example.com,185.75,15.75,20.00,store1,Main Store,S-789012,Sample Shoes,1,35.00,35.00`
-        filename = "shopify_orders_template.csv"
-        break
-      case "returns":
-        csvContent = `return_number,customer_name,customer_email,order_number,return_date,status,notes,sku,product_name,quantity,condition,reason
-RET-001,John Doe,john@example.com,#1001,2024-01-15,Pending,Defective item,T-565762,Sample T-Shirt,1,Defective,Defective
-RET-002,Jane Smith,jane@example.com,#1002,2024-01-16,Pending,Wrong size,J-123456,Sample Jeans,1,Good,Wrong Item`
-        filename = "returns_template.csv"
-        break
-    }
-
-    const blob = new Blob([csvContent], { type: "text/csv" })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = filename
-    a.click()
-    window.URL.revokeObjectURL(url)
-  }
-
-  const getImportIcon = () => {
-    switch (importType) {
-      case "inventory":
-        return <Package className="h-5 w-5" />
-      case "purchase-orders":
-        return <FileText className="h-5 w-5" />
-      case "shopify-orders":
-        return <ShoppingCart className="h-5 w-5" />
-      case "returns":
-        return <RotateCcw className="h-5 w-5" />
-      default:
-        return <Upload className="h-5 w-5" />
-    }
-  }
-
-  const getImportDescription = () => {
-    switch (importType) {
-      case "inventory":
-        return "Import inventory items with SKU, product name, quantity, and unit cost. Supports up to 100,000 items with 0 values allowed."
-      case "purchase-orders":
-        return "Import purchase orders with supplier info and line items. Multiple rows with same PO number will be grouped into one PO with multiple items. Supports up to 100,000 items with 0 values allowed."
-      case "shopify-orders":
-        return "Import Shopify orders with customer info and line items. Multiple rows with same order number will be grouped into one order with multiple items. Supports up to 100,000 items."
-      case "returns":
-        return "Import return orders with customer info and returned items. Multiple rows with same return number will be grouped into one return with multiple items. Supports up to 100,000 items."
-      default:
-        return "Select an import type to get started"
-    }
-  }
+  const clearFile = useCallback(() => {
+    setFile(null)
+    setPreview(null)
+    setResult(null)
+  }, [])
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col min-h-screen">
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
-        <div className="flex items-center gap-2">
-          {getImportIcon()}
-          <h1 className="text-lg font-semibold">Data Import</h1>
-        </div>
+        <h1 className="text-lg font-semibold">Import Data</h1>
       </header>
 
       <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
-        {/* Import Type Selection */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Import Type</CardTitle>
-            <CardDescription>Choose what type of data you want to import (up to 100,000 items)</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <Card
-                className={`cursor-pointer transition-colors ${
-                  importType === "inventory" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-                }`}
-                onClick={() => setImportType("inventory")}
-              >
-                <CardContent className="flex items-center space-x-3 p-4">
-                  <Package className="h-8 w-8 text-primary" />
-                  <div>
-                    <h3 className="font-medium">Inventory Items</h3>
-                    <p className="text-sm text-muted-foreground">Import stock items</p>
-                  </div>
-                </CardContent>
-              </Card>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Purchase Orders
+              </CardTitle>
+              <CardDescription>Import purchase orders with supplier information, items, and costs</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Expected columns: Supplier, Date, Status, SKU, Product, Quantity, Unit Cost, Delivery Cost, Notes
+              </p>
+            </CardContent>
+          </Card>
 
-              <Card
-                className={`cursor-pointer transition-colors ${
-                  importType === "purchase-orders" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-                }`}
-                onClick={() => setImportType("purchase-orders")}
-              >
-                <CardContent className="flex items-center space-x-3 p-4">
-                  <FileText className="h-8 w-8 text-primary" />
-                  <div>
-                    <h3 className="font-medium">Purchase Orders</h3>
-                    <p className="text-sm text-muted-foreground">Import POs with items</p>
-                  </div>
-                </CardContent>
-              </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Inventory
+              </CardTitle>
+              <CardDescription>Import inventory items with stock levels and costs</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Expected columns: SKU, Name/Product, Quantity/Stock, Unit Cost/Cost
+              </p>
+            </CardContent>
+          </Card>
 
-              <Card
-                className={`cursor-pointer transition-colors ${
-                  importType === "shopify-orders" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-                }`}
-                onClick={() => setImportType("shopify-orders")}
-              >
-                <CardContent className="flex items-center space-x-3 p-4">
-                  <ShoppingCart className="h-8 w-8 text-primary" />
-                  <div>
-                    <h3 className="font-medium">Shopify Orders</h3>
-                    <p className="text-sm text-muted-foreground">Import order data</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card
-                className={`cursor-pointer transition-colors ${
-                  importType === "returns" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-                }`}
-                onClick={() => setImportType("returns")}
-              >
-                <CardContent className="flex items-center space-x-3 p-4">
-                  <RotateCcw className="h-8 w-8 text-primary" />
-                  <div>
-                    <h3 className="font-medium">Returns</h3>
-                    <p className="text-sm text-muted-foreground">Import return data</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5" />
+                Orders
+              </CardTitle>
+              <CardDescription>Import customer orders with items and shipping information</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Expected columns: Order ID, Order Number, Customer, Email, Date, Status, SKU, Product, Quantity, Price,
+                Total, Shipping, Tax, Address
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
-            <Alert>
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>{getImportDescription()}</AlertDescription>
-            </Alert>
-          </CardContent>
-        </Card>
-
-        {/* File Upload */}
         <Card>
           <CardHeader>
             <CardTitle>Upload CSV File</CardTitle>
             <CardDescription>
-              Select a CSV file to import your {importType.replace("-", " ")} data (Max: 50MB, 100,000 rows)
+              Select a CSV file to import data. The system will auto-detect the data type based on column headers.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-2">
-                <Label htmlFor="csv-file">CSV File</Label>
-                <Input
-                  id="csv-file"
-                  type="file"
-                  accept=".csv"
-                  onChange={handleFileChange}
-                  disabled={importing}
-                  className="w-full max-w-md"
-                />
+            <div className="space-y-2">
+              <Label htmlFor="import-type">Import Type</Label>
+              <select
+                id="import-type"
+                value={importType}
+                onChange={(e) => setImportType(e.target.value as any)}
+                className="w-full p-2 border rounded-md"
+              >
+                <option value="purchase-orders">Purchase Orders</option>
+                <option value="inventory">Inventory</option>
+                <option value="orders">Orders</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="file-upload">CSV File</Label>
+              <div className="flex items-center gap-2">
+                <Input id="file-upload" type="file" accept=".csv" onChange={handleFileSelect} className="flex-1" />
+                {file && (
+                  <Button variant="outline" size="sm" onClick={clearFile}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
-              <Button variant="outline" onClick={downloadTemplate} className="flex items-center gap-2 bg-transparent">
-                <Download className="h-4 w-4" />
-                Download Template
-              </Button>
             </div>
 
             {file && (
-              <Alert>
-                <FileText className="h-4 w-4" />
-                <AlertDescription>
-                  Selected file: <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} KB)
-                </AlertDescription>
-              </Alert>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <FileText className="h-4 w-4" />
+                  <span>{file.name}</span>
+                  <Badge variant="secondary">{(file.size / 1024).toFixed(1)} KB</Badge>
+                  {preview?.type && <Badge variant="outline">Auto-detected: {preview.type.replace("-", " ")}</Badge>}
+                </div>
+              </div>
             )}
+
+            {preview && (
+              <div className="space-y-2">
+                <Label>Preview (first 5 rows)</Label>
+                <div className="border rounded-md overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {preview.headers.map((header, index) => (
+                          <TableHead key={index} className="text-xs">
+                            {header}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {preview.rows.map((row, rowIndex) => (
+                        <TableRow key={rowIndex}>
+                          {row.map((cell, cellIndex) => (
+                            <TableCell key={cellIndex} className="text-xs">
+                              {cell}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button onClick={handleImport} disabled={!file || importing} className="flex items-center gap-2">
+                <Upload className="h-4 w-4" />
+                {importing ? "Importing..." : "Import Data"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
-        {/* Import Progress */}
-        {importing && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Import Progress</CardTitle>
-              <CardDescription>Processing your data in batches...</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>{progress.status}</span>
-                  <span>
-                    {progress.current}/{progress.total}
-                  </span>
-                </div>
-                <Progress
-                  value={progress.percentage || (progress.total > 0 ? (progress.current / progress.total) * 100 : 0)}
-                  className="w-full"
-                />
-                <div className="text-xs text-muted-foreground">
-                  Processing in batches of {BATCH_SIZE} items for optimal performance
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Import Results */}
         {result && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {result.success ? (
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                ) : (
-                  <XCircle className="h-5 w-5 text-red-600" />
-                )}
-                Import {result.success ? "Completed" : "Failed"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Alert className={result.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}>
-                <AlertDescription>{result.message}</AlertDescription>
-              </Alert>
-
-              {result.errors && result.errors.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Errors (showing first 100):</Label>
-                  <Textarea
-                    value={result.errors.join("\n")}
-                    readOnly
-                    className="h-32 text-sm font-mono"
-                    placeholder="No errors"
-                  />
-                </div>
+          <Alert className={result.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}>
+            <div className="flex items-center gap-2">
+              {result.success ? (
+                <CheckCircle className="h-4 w-4 text-green-600" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-red-600" />
               )}
-            </CardContent>
-          </Card>
+              <AlertDescription className={result.success ? "text-green-800" : "text-red-800"}>
+                <div className="space-y-2">
+                  <p className="font-medium">{result.message}</p>
+                  {result.errors.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Errors:</p>
+                      <ul className="text-sm space-y-1">
+                        {result.errors.slice(0, 5).map((error, index) => (
+                          <li key={index} className="list-disc list-inside">
+                            {error}
+                          </li>
+                        ))}
+                        {result.errors.length > 5 && (
+                          <li className="text-muted-foreground">... and {result.errors.length - 5} more errors</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </AlertDescription>
+            </div>
+          </Alert>
         )}
 
-        {/* Import Button */}
-        <div className="flex justify-center">
-          <Button
-            onClick={handleImport}
-            disabled={!file || importing}
-            size="lg"
-            className="flex items-center gap-2 px-8"
-          >
-            <Upload className="h-5 w-5" />
-            {importing ? "Importing..." : `Import ${importType.replace("-", " ")}`}
-          </Button>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Import Guidelines</CardTitle>
+            <CardDescription>Follow these guidelines for successful data imports</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4 text-sm">
+              <div>
+                <h4 className="font-medium mb-2">File Format</h4>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• Use CSV format with comma-separated values</li>
+                  <li>• Include a header row with column names</li>
+                  <li>• Ensure data types match expected formats (numbers, dates, etc.)</li>
+                  <li>• Use quotes around text values that contain commas</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-2">Data Validation</h4>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• SKUs should be unique within the file</li>
+                  <li>• Quantities and costs must be positive numbers</li>
+                  <li>• Dates should be in YYYY-MM-DD format</li>
+                  <li>• Status values must match predefined options</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-2">Error Handling</h4>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• Invalid rows will be skipped and reported</li>
+                  <li>• Partial imports are possible if some rows are valid</li>
+                  <li>• Check the error log for specific issues</li>
+                  <li>• Fix errors and re-import if needed</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

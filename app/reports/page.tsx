@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
@@ -62,6 +62,32 @@ interface StorePerformance {
   margin: number
 }
 
+// Skeleton components
+const MetricCardSkeleton = () => (
+  <Card>
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
+      <div className="h-4 w-4 bg-gray-200 rounded animate-pulse"></div>
+    </CardHeader>
+    <CardContent>
+      <div className="h-8 bg-gray-200 rounded w-20 mb-2 animate-pulse"></div>
+      <div className="h-3 bg-gray-200 rounded w-16 animate-pulse"></div>
+    </CardContent>
+  </Card>
+)
+
+const ChartSkeleton = () => (
+  <Card>
+    <CardHeader>
+      <div className="h-5 bg-gray-200 rounded w-32 mb-2 animate-pulse"></div>
+      <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
+    </CardHeader>
+    <CardContent>
+      <div className="h-64 bg-gray-200 rounded animate-pulse"></div>
+    </CardContent>
+  </Card>
+)
+
 export default function Reports() {
   const [reportData, setReportData] = useState<ReportData>({
     totalRevenue: 0,
@@ -83,52 +109,8 @@ export default function Reports() {
   })
   const [reportType, setReportType] = useState<"overview" | "products" | "stores" | "trends">("overview")
 
-  useEffect(() => {
-    loadReportData()
-  }, [dateRange])
-
-  const loadReportData = async () => {
-    try {
-      setLoading(true)
-
-      const [orders, purchaseOrders, inventory] = await Promise.all([
-        supabaseStore.getShopifyOrders(),
-        supabaseStore.getPurchaseOrders(),
-        supabaseStore.getInventory(),
-      ])
-
-      // Filter orders by date range
-      const filteredOrders = orders.filter((order) => {
-        const orderDate = new Date(order.orderDate)
-        return orderDate >= dateRange.from && orderDate <= dateRange.to
-      })
-
-      // Build cost map from delivered purchase orders
-      const costMap = buildCostMap(purchaseOrders)
-
-      // Calculate report data
-      const data = calculateReportData(filteredOrders, orders, costMap)
-      setReportData(data)
-
-      // Calculate product performance
-      const products = calculateProductPerformance(filteredOrders, costMap)
-      setProductPerformance(products)
-
-      // Calculate monthly trends
-      const trends = calculateMonthlyTrends(filteredOrders, costMap)
-      setMonthlyTrends(trends)
-
-      // Calculate store performance
-      const stores = calculateStorePerformance(filteredOrders, costMap)
-      setStorePerformance(stores)
-    } catch (error) {
-      console.error("Error loading report data:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const buildCostMap = (purchaseOrders: PurchaseOrder[]): Map<string, number> => {
+  // Memoized cost map calculation
+  const buildCostMap = useCallback((purchaseOrders: PurchaseOrder[]): Map<string, number> => {
     const costMap = new Map<string, number>()
 
     const deliveredPOs = purchaseOrders.filter((po) => po.status === "Delivered")
@@ -144,105 +126,108 @@ export default function Reports() {
     })
 
     return costMap
-  }
+  }, [])
 
-  const calculateReportData = (
-    currentOrders: ShopifyOrder[],
-    allOrders: ShopifyOrder[],
-    costMap: Map<string, number>,
-  ): ReportData => {
-    // Calculate current period metrics
-    const totalRevenue = currentOrders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
+  // Memoized report calculations
+  const calculateReportData = useCallback(
+    (currentOrders: ShopifyOrder[], allOrders: ShopifyOrder[], costMap: Map<string, number>): ReportData => {
+      // Calculate current period metrics
+      const totalRevenue = currentOrders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
 
-    const totalCost = currentOrders.reduce((sum, order) => {
-      return (
-        sum +
-        order.items.reduce((itemSum, item) => {
-          const costPrice = costMap.get(item.sku) || 0
-          return itemSum + costPrice * item.quantity
-        }, 0)
-      )
-    }, 0)
+      const totalCost = currentOrders.reduce((sum, order) => {
+        return (
+          sum +
+          order.items.reduce((itemSum, item) => {
+            const costPrice = costMap.get(item.sku) || 0
+            return itemSum + costPrice * item.quantity
+          }, 0)
+        )
+      }, 0)
 
-    const totalProfit = totalRevenue - totalCost
-    const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
+      const totalProfit = totalRevenue - totalCost
+      const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
 
-    // Calculate previous period for comparison
-    const periodLength = dateRange.to.getTime() - dateRange.from.getTime()
-    const previousFrom = new Date(dateRange.from.getTime() - periodLength)
-    const previousTo = new Date(dateRange.to.getTime() - periodLength)
+      // Calculate previous period for comparison
+      const periodLength = dateRange.to.getTime() - dateRange.from.getTime()
+      const previousFrom = new Date(dateRange.from.getTime() - periodLength)
+      const previousTo = new Date(dateRange.to.getTime() - periodLength)
 
-    const previousOrders = allOrders.filter((order) => {
-      const orderDate = new Date(order.orderDate)
-      return orderDate >= previousFrom && orderDate < previousTo
-    })
-
-    const previousRevenue = previousOrders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
-    const previousCost = previousOrders.reduce((sum, order) => {
-      return (
-        sum +
-        order.items.reduce((itemSum, item) => {
-          const costPrice = costMap.get(item.sku) || 0
-          return itemSum + costPrice * item.quantity
-        }, 0)
-      )
-    }, 0)
-    const previousProfit = previousRevenue - previousCost
-
-    // Calculate percentage changes
-    const revenueChange = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0
-    const profitChange = previousProfit > 0 ? ((totalProfit - previousProfit) / previousProfit) * 100 : 0
-    const ordersChange =
-      previousOrders.length > 0 ? ((currentOrders.length - previousOrders.length) / previousOrders.length) * 100 : 0
-
-    return {
-      totalRevenue,
-      totalProfit,
-      totalOrders: currentOrders.length,
-      totalCost,
-      profitMargin,
-      revenueChange,
-      profitChange,
-      ordersChange,
-    }
-  }
-
-  const calculateProductPerformance = (orders: ShopifyOrder[], costMap: Map<string, number>): ProductPerformance[] => {
-    const productMap = new Map<string, ProductPerformance>()
-
-    orders.forEach((order) => {
-      order.items.forEach((item) => {
-        const costPrice = costMap.get(item.sku) || 0
-        const revenue = item.total_price || 0
-        const cost = costPrice * item.quantity
-        const profit = revenue - cost
-
-        if (productMap.has(item.sku)) {
-          const existing = productMap.get(item.sku)!
-          existing.revenue += revenue
-          existing.profit += profit
-          existing.quantity += item.quantity
-          existing.margin = existing.revenue > 0 ? (existing.profit / existing.revenue) * 100 : 0
-        } else {
-          productMap.set(item.sku, {
-            sku: item.sku,
-            name: item.product_name,
-            revenue,
-            profit,
-            quantity: item.quantity,
-            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
-          })
-        }
+      const previousOrders = allOrders.filter((order) => {
+        const orderDate = new Date(order.orderDate)
+        return orderDate >= previousFrom && orderDate < previousTo
       })
-    })
 
-    return Array.from(productMap.values())
-      .filter((product) => !isNaN(product.profit) && !isNaN(product.revenue))
-      .sort((a, b) => b.profit - a.profit)
-      .slice(0, 10)
-  }
+      const previousRevenue = previousOrders.reduce((sum, order) => sum + (order.totalAmount - order.taxAmount), 0)
+      const previousCost = previousOrders.reduce((sum, order) => {
+        return (
+          sum +
+          order.items.reduce((itemSum, item) => {
+            const costPrice = costMap.get(item.sku) || 0
+            return itemSum + costPrice * item.quantity
+          }, 0)
+        )
+      }, 0)
+      const previousProfit = previousRevenue - previousCost
 
-  const calculateMonthlyTrends = (orders: ShopifyOrder[], costMap: Map<string, number>): MonthlyTrend[] => {
+      // Calculate percentage changes
+      const revenueChange = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0
+      const profitChange = previousProfit > 0 ? ((totalProfit - previousProfit) / previousProfit) * 100 : 0
+      const ordersChange =
+        previousOrders.length > 0 ? ((currentOrders.length - previousOrders.length) / previousOrders.length) * 100 : 0
+
+      return {
+        totalRevenue,
+        totalProfit,
+        totalOrders: currentOrders.length,
+        totalCost,
+        profitMargin,
+        revenueChange,
+        profitChange,
+        ordersChange,
+      }
+    },
+    [dateRange],
+  )
+
+  const calculateProductPerformance = useCallback(
+    (orders: ShopifyOrder[], costMap: Map<string, number>): ProductPerformance[] => {
+      const productMap = new Map<string, ProductPerformance>()
+
+      orders.forEach((order) => {
+        order.items.forEach((item) => {
+          const costPrice = costMap.get(item.sku) || 0
+          const revenue = item.total_price || 0
+          const cost = costPrice * item.quantity
+          const profit = revenue - cost
+
+          if (productMap.has(item.sku)) {
+            const existing = productMap.get(item.sku)!
+            existing.revenue += revenue
+            existing.profit += profit
+            existing.quantity += item.quantity
+            existing.margin = existing.revenue > 0 ? (existing.profit / existing.revenue) * 100 : 0
+          } else {
+            productMap.set(item.sku, {
+              sku: item.sku,
+              name: item.product_name,
+              revenue,
+              profit,
+              quantity: item.quantity,
+              margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+            })
+          }
+        })
+      })
+
+      return Array.from(productMap.values())
+        .filter((product) => !isNaN(product.profit) && !isNaN(product.revenue))
+        .sort((a, b) => b.profit - a.profit)
+        .slice(0, 10)
+    },
+    [],
+  )
+
+  const calculateMonthlyTrends = useCallback((orders: ShopifyOrder[], costMap: Map<string, number>): MonthlyTrend[] => {
     const monthlyMap = new Map<string, MonthlyTrend>()
 
     orders.forEach((order) => {
@@ -280,42 +265,97 @@ export default function Reports() {
     return Array.from(monthlyMap.values())
       .filter((trend) => !isNaN(trend.revenue) && !isNaN(trend.profit))
       .sort((a, b) => a.month.localeCompare(b.month))
-  }
+  }, [])
 
-  const calculateStorePerformance = (orders: ShopifyOrder[], costMap: Map<string, number>): StorePerformance[] => {
-    const storeMap = new Map<string, StorePerformance>()
+  const calculateStorePerformance = useCallback(
+    (orders: ShopifyOrder[], costMap: Map<string, number>): StorePerformance[] => {
+      const storeMap = new Map<string, StorePerformance>()
 
-    orders.forEach((order) => {
-      const revenue = order.totalAmount - order.taxAmount
-      const cost = order.items.reduce((sum, item) => {
-        const costPrice = costMap.get(item.sku) || 0
-        return sum + costPrice * item.quantity
-      }, 0)
-      const profit = revenue - cost
+      orders.forEach((order) => {
+        const revenue = order.totalAmount - order.taxAmount
+        const cost = order.items.reduce((sum, item) => {
+          const costPrice = costMap.get(item.sku) || 0
+          return sum + costPrice * item.quantity
+        }, 0)
+        const profit = revenue - cost
 
-      if (storeMap.has(order.storeName)) {
-        const existing = storeMap.get(order.storeName)!
-        existing.revenue += revenue
-        existing.profit += profit
-        existing.orders += 1
-        existing.margin = existing.revenue > 0 ? (existing.profit / existing.revenue) * 100 : 0
-      } else {
-        storeMap.set(order.storeName, {
-          storeName: order.storeName,
-          revenue,
-          profit,
-          orders: 1,
-          margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+        if (storeMap.has(order.storeName)) {
+          const existing = storeMap.get(order.storeName)!
+          existing.revenue += revenue
+          existing.profit += profit
+          existing.orders += 1
+          existing.margin = existing.revenue > 0 ? (existing.profit / existing.revenue) * 100 : 0
+        } else {
+          storeMap.set(order.storeName, {
+            storeName: order.storeName,
+            revenue,
+            profit,
+            orders: 1,
+            margin: revenue > 0 ? (profit / revenue) * 100 : 0,
+          })
+        }
+      })
+
+      return Array.from(storeMap.values())
+        .filter((store) => !isNaN(store.profit) && !isNaN(store.revenue))
+        .sort((a, b) => b.profit - a.profit)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const loadReportData = async () => {
+      try {
+        setLoading(true)
+
+        const [orders, purchaseOrders, inventory] = await Promise.all([
+          supabaseStore.getShopifyOrders(),
+          supabaseStore.getPurchaseOrders(),
+          supabaseStore.getInventory(),
+        ])
+
+        // Filter orders by date range
+        const filteredOrders = orders.filter((order) => {
+          const orderDate = new Date(order.orderDate)
+          return orderDate >= dateRange.from && orderDate <= dateRange.to
         })
+
+        // Build cost map from delivered purchase orders
+        const costMap = buildCostMap(purchaseOrders)
+
+        // Calculate report data
+        const data = calculateReportData(filteredOrders, orders, costMap)
+        setReportData(data)
+
+        // Calculate product performance
+        const products = calculateProductPerformance(filteredOrders, costMap)
+        setProductPerformance(products)
+
+        // Calculate monthly trends
+        const trends = calculateMonthlyTrends(filteredOrders, costMap)
+        setMonthlyTrends(trends)
+
+        // Calculate store performance
+        const stores = calculateStorePerformance(filteredOrders, costMap)
+        setStorePerformance(stores)
+      } catch (error) {
+        console.error("Error loading report data:", error)
+      } finally {
+        setLoading(false)
       }
-    })
+    }
 
-    return Array.from(storeMap.values())
-      .filter((store) => !isNaN(store.profit) && !isNaN(store.revenue))
-      .sort((a, b) => b.profit - a.profit)
-  }
+    loadReportData()
+  }, [
+    dateRange,
+    buildCostMap,
+    calculateReportData,
+    calculateProductPerformance,
+    calculateMonthlyTrends,
+    calculateStorePerformance,
+  ])
 
-  const handleExport = () => {
+  const handleExport = useCallback(() => {
     let csvContent = ""
     let filename = ""
 
@@ -394,35 +434,9 @@ export default function Reports() {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
-  }
+  }, [reportType, reportData, productPerformance, storePerformance, monthlyTrends])
 
   const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"]
-
-  if (loading) {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
-          <SidebarTrigger className="-ml-1 lg:hidden" />
-          <h1 className="text-lg font-semibold">Reports</h1>
-        </header>
-        <div className="p-6 ml-16 lg:ml-0">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-24 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-            <div className="space-y-4">
-              {[...Array(2)].map((_, i) => (
-                <div key={i} className="h-64 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -458,131 +472,151 @@ export default function Reports() {
 
         {/* Key Metrics */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Revenue (excl. tax)</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{reportData.totalRevenue.toLocaleString()} лв</div>
-              <div className="flex items-center text-xs text-muted-foreground">
-                {reportData.revenueChange >= 0 ? (
-                  <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
-                ) : (
-                  <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
-                )}
-                <span className={reportData.revenueChange >= 0 ? "text-green-600" : "text-red-600"}>
-                  {Math.abs(reportData.revenueChange).toFixed(1)}%
-                </span>
-                <span className="ml-1">vs previous period</span>
-              </div>
-            </CardContent>
-          </Card>
+          {loading ? (
+            <>
+              <MetricCardSkeleton />
+              <MetricCardSkeleton />
+              <MetricCardSkeleton />
+              <MetricCardSkeleton />
+            </>
+          ) : (
+            <>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Revenue (excl. tax)</CardTitle>
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{reportData.totalRevenue.toLocaleString()} лв</div>
+                  <div className="flex items-center text-xs text-muted-foreground">
+                    {reportData.revenueChange >= 0 ? (
+                      <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
+                    ) : (
+                      <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
+                    )}
+                    <span className={reportData.revenueChange >= 0 ? "text-green-600" : "text-red-600"}>
+                      {Math.abs(reportData.revenueChange).toFixed(1)}%
+                    </span>
+                    <span className="ml-1">vs previous period</span>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{reportData.totalProfit.toLocaleString()} лв</div>
-              <div className="flex items-center text-xs text-muted-foreground">
-                {reportData.profitChange >= 0 ? (
-                  <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
-                ) : (
-                  <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
-                )}
-                <span className={reportData.profitChange >= 0 ? "text-green-600" : "text-red-600"}>
-                  {Math.abs(reportData.profitChange).toFixed(1)}%
-                </span>
-                <span className="ml-1">vs previous period</span>
-              </div>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">{reportData.totalProfit.toLocaleString()} лв</div>
+                  <div className="flex items-center text-xs text-muted-foreground">
+                    {reportData.profitChange >= 0 ? (
+                      <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
+                    ) : (
+                      <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
+                    )}
+                    <span className={reportData.profitChange >= 0 ? "text-green-600" : "text-red-600"}>
+                      {Math.abs(reportData.profitChange).toFixed(1)}%
+                    </span>
+                    <span className="ml-1">vs previous period</span>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Orders</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{reportData.totalOrders}</div>
-              <div className="flex items-center text-xs text-muted-foreground">
-                {reportData.ordersChange >= 0 ? (
-                  <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
-                ) : (
-                  <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
-                )}
-                <span className={reportData.ordersChange >= 0 ? "text-green-600" : "text-red-600"}>
-                  {Math.abs(reportData.ordersChange).toFixed(1)}%
-                </span>
-                <span className="ml-1">vs previous period</span>
-              </div>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Orders</CardTitle>
+                  <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{reportData.totalOrders}</div>
+                  <div className="flex items-center text-xs text-muted-foreground">
+                    {reportData.ordersChange >= 0 ? (
+                      <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
+                    ) : (
+                      <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
+                    )}
+                    <span className={reportData.ordersChange >= 0 ? "text-green-600" : "text-red-600"}>
+                      {Math.abs(reportData.ordersChange).toFixed(1)}%
+                    </span>
+                    <span className="ml-1">vs previous period</span>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Profit Margin</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{reportData.profitMargin.toFixed(1)}%</div>
-              <p className="text-xs text-muted-foreground">Gross profit margin</p>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Profit Margin</CardTitle>
+                  <Package className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{reportData.profitMargin.toFixed(1)}%</div>
+                  <p className="text-xs text-muted-foreground">Gross profit margin</p>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
         {/* Report Content */}
         {reportType === "overview" && (
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Revenue vs Profit Trend</CardTitle>
-                <CardDescription>Monthly comparison of revenue and profit</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={monthlyTrends}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
-                    <Legend />
-                    <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Revenue" />
-                    <Line type="monotone" dataKey="profit" stroke="#82ca9d" name="Profit" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+            {loading ? (
+              <>
+                <ChartSkeleton />
+                <ChartSkeleton />
+              </>
+            ) : (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Revenue vs Profit Trend</CardTitle>
+                    <CardDescription>Monthly comparison of revenue and profit</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={monthlyTrends}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
+                        <Legend />
+                        <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Revenue" />
+                        <Line type="monotone" dataKey="profit" stroke="#82ca9d" name="Profit" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Store Performance</CardTitle>
-                <CardDescription>Revenue distribution by store</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={storePerformance}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="revenue"
-                    >
-                      {storePerformance.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Store Performance</CardTitle>
+                    <CardDescription>Revenue distribution by store</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={storePerformance}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="revenue"
+                        >
+                          {storePerformance.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </div>
         )}
 
@@ -593,50 +627,54 @@ export default function Reports() {
               <CardDescription>Best performing products in the selected period</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={productPerformance.slice(0, 10)}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="sku" />
-                    <YAxis />
-                    <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
-                    <Bar dataKey="profit" fill="#8884d8" />
-                  </BarChart>
-                </ResponsiveContainer>
+              {loading ? (
+                <ChartSkeleton />
+              ) : (
+                <div className="space-y-4">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={productPerformance.slice(0, 10)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="sku" />
+                      <YAxis />
+                      <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
+                      <Bar dataKey="profit" fill="#8884d8" />
+                    </BarChart>
+                  </ResponsiveContainer>
 
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Product Name</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Profit</TableHead>
-                      <TableHead className="text-right">Quantity</TableHead>
-                      <TableHead className="text-right">Margin</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {productPerformance.map((product) => (
-                      <TableRow key={product.sku}>
-                        <TableCell className="font-mono">{product.sku}</TableCell>
-                        <TableCell>{product.name}</TableCell>
-                        <TableCell className="text-right">{product.revenue.toFixed(2)} лв</TableCell>
-                        <TableCell className="text-right text-green-600">{product.profit.toFixed(2)} лв</TableCell>
-                        <TableCell className="text-right">{product.quantity}</TableCell>
-                        <TableCell className="text-right">
-                          <Badge
-                            variant={
-                              product.margin >= 20 ? "default" : product.margin >= 10 ? "secondary" : "destructive"
-                            }
-                          >
-                            {product.margin.toFixed(1)}%
-                          </Badge>
-                        </TableCell>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>Product Name</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                        <TableHead className="text-right">Profit</TableHead>
+                        <TableHead className="text-right">Quantity</TableHead>
+                        <TableHead className="text-right">Margin</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {productPerformance.map((product) => (
+                        <TableRow key={product.sku}>
+                          <TableCell className="font-mono">{product.sku}</TableCell>
+                          <TableCell>{product.name}</TableCell>
+                          <TableCell className="text-right">{product.revenue.toFixed(2)} лв</TableCell>
+                          <TableCell className="text-right text-green-600">{product.profit.toFixed(2)} лв</TableCell>
+                          <TableCell className="text-right">{product.quantity}</TableCell>
+                          <TableCell className="text-right">
+                            <Badge
+                              variant={
+                                product.margin >= 20 ? "default" : product.margin >= 10 ? "secondary" : "destructive"
+                              }
+                            >
+                              {product.margin.toFixed(1)}%
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -648,52 +686,58 @@ export default function Reports() {
               <CardDescription>Revenue and profit breakdown by store</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={storePerformance}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="storeName" />
-                    <YAxis />
-                    <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
-                    <Legend />
-                    <Bar dataKey="revenue" fill="#8884d8" name="Revenue" />
-                    <Bar dataKey="profit" fill="#82ca9d" name="Profit" />
-                  </BarChart>
-                </ResponsiveContainer>
+              {loading ? (
+                <ChartSkeleton />
+              ) : (
+                <div className="space-y-4">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={storePerformance}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="storeName" />
+                      <YAxis />
+                      <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
+                      <Legend />
+                      <Bar dataKey="revenue" fill="#8884d8" name="Revenue" />
+                      <Bar dataKey="profit" fill="#82ca9d" name="Profit" />
+                    </BarChart>
+                  </ResponsiveContainer>
 
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Store Name</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Profit</TableHead>
-                      <TableHead className="text-right">Orders</TableHead>
-                      <TableHead className="text-right">Avg Order Value</TableHead>
-                      <TableHead className="text-right">Margin</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {storePerformance.map((store) => (
-                      <TableRow key={store.storeName}>
-                        <TableCell className="font-medium">{store.storeName}</TableCell>
-                        <TableCell className="text-right">{store.revenue.toFixed(2)} лв</TableCell>
-                        <TableCell className="text-right text-green-600">{store.profit.toFixed(2)} лв</TableCell>
-                        <TableCell className="text-right">{store.orders}</TableCell>
-                        <TableCell className="text-right">
-                          {store.orders > 0 ? (store.revenue / store.orders).toFixed(2) : "0.00"} лв
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge
-                            variant={store.margin >= 20 ? "default" : store.margin >= 10 ? "secondary" : "destructive"}
-                          >
-                            {store.margin.toFixed(1)}%
-                          </Badge>
-                        </TableCell>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Store Name</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                        <TableHead className="text-right">Profit</TableHead>
+                        <TableHead className="text-right">Orders</TableHead>
+                        <TableHead className="text-right">Avg Order Value</TableHead>
+                        <TableHead className="text-right">Margin</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {storePerformance.map((store) => (
+                        <TableRow key={store.storeName}>
+                          <TableCell className="font-medium">{store.storeName}</TableCell>
+                          <TableCell className="text-right">{store.revenue.toFixed(2)} лв</TableCell>
+                          <TableCell className="text-right text-green-600">{store.profit.toFixed(2)} лв</TableCell>
+                          <TableCell className="text-right">{store.orders}</TableCell>
+                          <TableCell className="text-right">
+                            {store.orders > 0 ? (store.revenue / store.orders).toFixed(2) : "0.00"} лв
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge
+                              variant={
+                                store.margin >= 20 ? "default" : store.margin >= 10 ? "secondary" : "destructive"
+                              }
+                            >
+                              {store.margin.toFixed(1)}%
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -706,56 +750,60 @@ export default function Reports() {
                 <CardDescription>Detailed monthly performance metrics</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <ResponsiveContainer width="100%" height={400}>
-                    <LineChart data={monthlyTrends}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
-                      <Legend />
-                      <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Revenue" strokeWidth={2} />
-                      <Line type="monotone" dataKey="profit" stroke="#82ca9d" name="Profit" strokeWidth={2} />
-                      <Line type="monotone" dataKey="cost" stroke="#ff7300" name="Cost" strokeWidth={2} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                {loading ? (
+                  <ChartSkeleton />
+                ) : (
+                  <div className="space-y-4">
+                    <ResponsiveContainer width="100%" height={400}>
+                      <LineChart data={monthlyTrends}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip formatter={(value: number) => `${value.toLocaleString()} лв`} />
+                        <Legend />
+                        <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Revenue" strokeWidth={2} />
+                        <Line type="monotone" dataKey="profit" stroke="#82ca9d" name="Profit" strokeWidth={2} />
+                        <Line type="monotone" dataKey="cost" stroke="#ff7300" name="Cost" strokeWidth={2} />
+                      </LineChart>
+                    </ResponsiveContainer>
 
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Month</TableHead>
-                        <TableHead className="text-right">Revenue</TableHead>
-                        <TableHead className="text-right">Cost</TableHead>
-                        <TableHead className="text-right">Profit</TableHead>
-                        <TableHead className="text-right">Orders</TableHead>
-                        <TableHead className="text-right">Avg Order Value</TableHead>
-                        <TableHead className="text-right">Margin</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {monthlyTrends.map((trend) => {
-                        const margin = trend.revenue > 0 ? (trend.profit / trend.revenue) * 100 : 0
-                        const avgOrderValue = trend.orders > 0 ? trend.revenue / trend.orders : 0
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Month</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead className="text-right">Profit</TableHead>
+                          <TableHead className="text-right">Orders</TableHead>
+                          <TableHead className="text-right">Avg Order Value</TableHead>
+                          <TableHead className="text-right">Margin</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {monthlyTrends.map((trend) => {
+                          const margin = trend.revenue > 0 ? (trend.profit / trend.revenue) * 100 : 0
+                          const avgOrderValue = trend.orders > 0 ? trend.revenue / trend.orders : 0
 
-                        return (
-                          <TableRow key={trend.month}>
-                            <TableCell className="font-medium">{trend.month}</TableCell>
-                            <TableCell className="text-right">{trend.revenue.toFixed(2)} лв</TableCell>
-                            <TableCell className="text-right">{trend.cost.toFixed(2)} лв</TableCell>
-                            <TableCell className="text-right text-green-600">{trend.profit.toFixed(2)} лв</TableCell>
-                            <TableCell className="text-right">{trend.orders}</TableCell>
-                            <TableCell className="text-right">{avgOrderValue.toFixed(2)} лв</TableCell>
-                            <TableCell className="text-right">
-                              <Badge variant={margin >= 20 ? "default" : margin >= 10 ? "secondary" : "destructive"}>
-                                {margin.toFixed(1)}%
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                          return (
+                            <TableRow key={trend.month}>
+                              <TableCell className="font-medium">{trend.month}</TableCell>
+                              <TableCell className="text-right">{trend.revenue.toFixed(2)} лв</TableCell>
+                              <TableCell className="text-right">{trend.cost.toFixed(2)} лв</TableCell>
+                              <TableCell className="text-right text-green-600">{trend.profit.toFixed(2)} лв</TableCell>
+                              <TableCell className="text-right">{trend.orders}</TableCell>
+                              <TableCell className="text-right">{avgOrderValue.toFixed(2)} лв</TableCell>
+                              <TableCell className="text-right">
+                                <Badge variant={margin >= 20 ? "default" : margin >= 10 ? "secondary" : "destructive"}>
+                                  {margin.toFixed(1)}%
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
