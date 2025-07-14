@@ -42,7 +42,7 @@ const menuItems = [
     icon: Package,
   },
   {
-    title: "Shopify Orders",
+    title: "Orders",
     url: "/shopify-orders",
     icon: ShoppingCart,
   },
