@@ -201,6 +201,18 @@ export default function Returns() {
     }
   }
 
+  const handleStatusChange = async (returnId: string, newStatus: string) => {
+    try {
+      await supabaseStore.updateReturn(returnId, {
+        status: newStatus as "Pending" | "Processing" | "Accepted" | "Rejected",
+      })
+      setReturns(await supabaseStore.getReturns())
+    } catch (e) {
+      console.error(e)
+      alert("Unable to update return status.")
+    }
+  }
+
   /* ------------------------------------------------------------------------ */
   /*                               UI RENDER                                  */
   /* ------------------------------------------------------------------------ */
@@ -264,7 +276,7 @@ export default function Returns() {
                 <TableHead>Status</TableHead>
                 <TableHead>Items</TableHead>
                 <TableHead>Refund</TableHead>
-                <TableHead />
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -275,7 +287,27 @@ export default function Returns() {
                   <TableCell>{r.order_number || "—"}</TableCell>
                   <TableCell>{new Date(r.return_date).toLocaleDateString()}</TableCell>
                   <TableCell>
-                    <Badge className={statusColor(r.status)}>{r.status}</Badge>
+                    <Select value={r.status} onValueChange={(value) => handleStatusChange(r.id, value)}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue>
+                          <Badge className={statusColor(r.status)}>{r.status}</Badge>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pending">
+                          <Badge className={statusColor("Pending")}>Pending</Badge>
+                        </SelectItem>
+                        <SelectItem value="Processing">
+                          <Badge className={statusColor("Processing")}>Processing</Badge>
+                        </SelectItem>
+                        <SelectItem value="Accepted">
+                          <Badge className={statusColor("Accepted")}>Accepted</Badge>
+                        </SelectItem>
+                        <SelectItem value="Rejected">
+                          <Badge className={statusColor("Rejected")}>Rejected</Badge>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell>{r.return_items.length}</TableCell>
                   <TableCell>${(r.total_refund || 0).toFixed(2)}</TableCell>

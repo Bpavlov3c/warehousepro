@@ -55,29 +55,34 @@ export function DatePickerWithRange({ className }: React.HTMLAttributes<HTMLDivE
 }
 
 // ---------- NEW: Controlled date-range picker ----------
-export interface DateRangePickerProps extends React.HTMLAttributes<HTMLDivElement> {
-  from: Date
-  to: Date
-  onUpdate: (range: { from: Date; to: Date }) => void
+export interface DateRangePickerProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
+  /**
+   * Controlled date range coming from the parent.
+   */
+  date: { from: Date; to: Date }
+  /**
+   * Callback fired when the user picks a complete range.
+   */
+  onDateChange?: (range: { from: Date; to: Date }) => void
 }
 
-export function DateRangePicker({ from, to, onUpdate, className, ...props }: DateRangePickerProps) {
-  const [range, setRange] = React.useState<DateRange | undefined>({ from, to })
+export function DateRangePicker({ date, onDateChange, className, ...divProps }: DateRangePickerProps) {
+  const [range, setRange] = React.useState<DateRange | undefined>(date)
 
-  // keep local state in sync when parent updates
+  // Keep local state in sync with the controlled `date` prop.
   React.useEffect(() => {
-    setRange({ from, to })
-  }, [from, to])
+    setRange(date)
+  }, [date])
 
   const handleSelect = (r: DateRange | undefined) => {
     setRange(r)
-    if (r?.from && r?.to) {
-      onUpdate({ from: r.from, to: r.to })
+    if (r?.from && r?.to && onDateChange) {
+      onDateChange({ from: r.from, to: r.to })
     }
   }
 
   return (
-    <div className={cn("grid gap-2", className)} {...props}>
+    <div className={cn("grid gap-2", className)} {...divProps}>
       <Popover>
         <PopoverTrigger asChild>
           <Button

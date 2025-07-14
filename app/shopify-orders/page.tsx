@@ -10,6 +10,11 @@ import { Search, ShoppingCart, DollarSign, TrendingUp, Users, Eye, Download } fr
 import { supabaseStore, type ShopifyOrder } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import dynamic from "next/dynamic"
+
+const ShopifyOrdersClientComponent = dynamic(() => import("@/components/shopify-orders-client"), {
+  ssr: false,
+})
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -92,33 +97,22 @@ const TableSkeleton = () => (
   </Card>
 )
 
-export default function ShopifyOrders() {
-  const [orders, setOrders] = useState<ShopifyOrder[]>([])
+export default async function ShopifyOrdersPage() {
+  const orders = await supabaseStore.getShopifyOrders()
+  return <ShopifyOrdersClientComponent initialOrders={orders} />
+}
+
+// Client Component
+const ShopifyOrdersClient = ({ initialOrders }: { initialOrders: ShopifyOrder[] }) => {
+  const [orders, setOrders] = useState<ShopifyOrder[]>(initialOrders)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
   const [isViewOrderOpen, setIsViewOrderOpen] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Debounced search term
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
-
-  // Load data on component mount
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const ordersData = await supabaseStore.getShopifyOrders()
-      setOrders(ordersData)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load orders")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadData()
-  }, [loadData])
 
   // Memoized filtered orders
   const filteredOrders = useMemo(() => {
@@ -220,13 +214,13 @@ export default function ShopifyOrders() {
       <div className="flex flex-col min-h-screen">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
           <SidebarTrigger className="-ml-1 lg:hidden" />
-          <h1 className="text-lg font-semibold">Shopify Orders</h1>
+          <h1 className="text-lg font-semibold">Orders</h1>
         </header>
         <div className="p-6 ml-16 lg:ml-0">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <h3 className="text-red-800 font-medium">Error loading orders</h3>
             <p className="text-red-600 mt-1">{error}</p>
-            <Button onClick={loadData} className="mt-3 bg-transparent" variant="outline">
+            <Button onClick={() => {}} className="mt-3 bg-transparent" variant="outline">
               Try Again
             </Button>
           </div>
@@ -240,7 +234,7 @@ export default function ShopifyOrders() {
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
-          <h1 className="text-lg font-semibold">Shopify Orders</h1>
+          <h1 className="text-lg font-semibold">Orders</h1>
           <Button onClick={exportToCSV} size="sm" className="lg:hidden" disabled={loading}>
             <Download className="w-4 h-4" />
           </Button>
@@ -249,7 +243,7 @@ export default function ShopifyOrders() {
 
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold hidden lg:block">Shopify Orders</h1>
+          <h1 className="text-2xl font-bold hidden lg:block">Orders</h1>
           <Button onClick={exportToCSV} size="sm" className="hidden lg:flex" disabled={loading}>
             <Download className="w-4 h-4 mr-2" />
             Export CSV

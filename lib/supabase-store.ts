@@ -443,13 +443,15 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
 }
 
 /**
- * Return order items with an extra `cost_price` field (latest cost from inventory).
- * Missing SKUs get cost_price 0.
+ * Attach `cost_price` to order items.
+ * If a pre-loaded `costsMap` is supplied it’s used directly, otherwise
+ * the function fetches the map from Supabase.
  */
 async function getOrderItemsWithCosts(
   orderItems: ShopifyOrderItem[],
+  costsMap?: Map<string, number>,
 ): Promise<(ShopifyOrderItem & { cost_price: number })[]> {
-  const latestCosts = await getLatestUnitCosts()
+  const latestCosts = costsMap ?? (await getLatestUnitCosts())
 
   return orderItems.map((item) => ({
     ...item,
@@ -460,9 +462,8 @@ async function getOrderItemsWithCosts(
 /**
  * Calculate profit for an order using actual inventory costs
  */
-async function calculateOrderProfit(order: ShopifyOrder): Promise<number> {
-  const itemsWithCosts = await getOrderItemsWithCosts(order.items)
-  const itemsCost = itemsWithCosts.reduce((sum, i) => sum + i.cost_price * i.quantity, 0)
+function calculateOrderProfit(order: ShopifyOrder, costsMap: Map<string, number>): number {
+  const itemsCost = order.items.reduce((sum, it) => sum + (costsMap.get(it.sku) ?? 0) * it.quantity, 0)
 
   // Profit = revenue – tax – shipping – item costs
   return (order.total_amount || 0) - (order.tax_amount || 0) - (order.shipping_cost || 0) - itemsCost
@@ -1004,7 +1005,7 @@ async function updateStore(id: string, updates: Partial<StoreData>): Promise<Sto
       url: data.shopify_domain,
       api_key: data.access_token,
       api_secret: data.webhook_url,
-      status: data.status === "Connected" ? "Active" : data.status === "Error" ? "Error" : "Inactive",
+      status: data.status === "Active" ? "Connected" : data.status === "Error" ? "Error" : "Inactive",
       notes: data.notes,
       created_at: data.created_at,
       updated_at: data.updated_at,
@@ -1171,70 +1172,72 @@ async function deleteShopifyStore(id: string): Promise<void> {
 
 async function getShopifyOrders(): Promise<ShopifyOrder[]> {
   try {
+    /* 1 ▸ Grab all orders + items in a single call */
     const { data, error } = await supabase
       .from("shopify_orders")
-      .select(`
-        *,
-        shopify_stores!inner(store_name),
-        shopify_order_items (
-          id,
-          sku,
-          product_name,
-          quantity,
-          unit_price,
-          total_price
-        )
-      `)
+      .select(
+        `*,
+         shopify_stores!inner(store_name),
+         shopify_order_items (
+           id,
+           sku,
+           product_name,
+           quantity,
+           unit_price,
+           total_price
+         )`,
+      )
       .order("order_date", { ascending: false })
 
     if (error) throw error
 
-    // Process orders and calculate actual profits
-    const ordersWithProfits = await Promise.all(
-      (data || []).map(async (order) => {
-        const orderObj = {
-          id: order.id,
-          storeId: order.store_id,
-          storeName: order.shopify_stores.store_name,
-          shopifyOrderId: order.shopify_order_id,
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          customerEmail: order.customer_email,
-          orderDate: order.order_date,
-          status: order.status,
-          totalAmount: order.total_amount || 0,
-          shippingCost: order.shipping_cost || 0,
-          taxAmount: order.tax_amount || 0,
-          items: order.shopify_order_items || [],
-          shippingAddress: order.shipping_address,
-          profit: 0, // Will be calculated
-          createdAt: order.created_at,
-          shipping_address: order.shipping_address,
-          total_amount: order.total_amount || 0,
-          shipping_cost: order.shipping_cost || 0,
-          tax_amount: order.tax_amount || 0,
-        }
+    /* 2 ▸ Pull the latest unit-cost map ONCE */
+    const latestCosts = await getLatestUnitCosts()
 
-        // Calculate actual profit using inventory costs
-        const itemsWithCosts = await getOrderItemsWithCosts(order.shopify_order_items || [])
-        const actualProfit = await calculateOrderProfit({
-          ...orderObj,
+    /* 3 ▸ Enrich items with costs + compute profit */
+    return (data || []).map((row) => {
+      const itemsWithCosts = (row.shopify_order_items || []).map((it) => ({
+        ...it,
+        cost_price: latestCosts.get(it.sku) ?? 0,
+      }))
+
+      const profit = calculateOrderProfit(
+        {
+          ...row,
           items: itemsWithCosts,
-        })
+          total_amount: row.total_amount ?? 0,
+          tax_amount: row.tax_amount ?? 0,
+          shipping_cost: row.shipping_cost ?? 0,
+        } as unknown as ShopifyOrder,
+        latestCosts,
+      )
 
-        return {
-          ...orderObj,
-          profit: actualProfit,
-          // expose cost‐enriched items to the UI
-          shopify_order_items: itemsWithCosts,
-        }
-      }),
-    )
-
-    return ordersWithProfits
-  } catch (error) {
-    console.error("Error fetching Shopify orders:", error)
-    throw error
+      return {
+        id: row.id,
+        storeId: row.store_id,
+        storeName: row.shopify_stores.store_name,
+        shopifyOrderId: row.shopify_order_id,
+        orderNumber: row.order_number,
+        customerName: row.customer_name,
+        customerEmail: row.customer_email,
+        orderDate: row.order_date,
+        status: row.status,
+        totalAmount: row.total_amount ?? 0,
+        shippingCost: row.shipping_cost ?? 0,
+        taxAmount: row.tax_amount ?? 0,
+        items: itemsWithCosts,
+        shippingAddress: row.shipping_address,
+        profit,
+        createdAt: row.created_at,
+        shipping_address: row.shipping_address,
+        total_amount: row.total_amount ?? 0,
+        shipping_cost: row.shipping_cost ?? 0,
+        tax_amount: row.tax_amount ?? 0,
+      }
+    })
+  } catch (err) {
+    console.error("Error fetching Shopify orders:", err)
+    throw err
   }
 }
 
