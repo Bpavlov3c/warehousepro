@@ -1,0 +1,6 @@
+Order ID,Order Number,Customer,Email,Date,Status,SKU,Product,Quantity,Price,Total,Shipping,Tax,Address
+ORD001,#1001,John Smith,john@email.com,2024-01-20,pending,SKU001,Widget A,2,15.99,31.98,5.99,2.56,"123 Main St, City, State 12345"
+ORD002,#1002,Jane Doe,jane@email.com,2024-01-21,processing,SKU002,Widget B,1,25.50,25.50,7.99,2.04,"456 Oak Ave, City, State 12345"
+ORD003,#1003,Bob Johnson,bob@email.com,2024-01-22,shipped,SKU003,Gadget C,3,18.75,56.25,8.99,4.50,"789 Pine St, City, State 12345"
+ORD004,#1004,Alice Brown,alice@email.com,2024-01-23,delivered,SKU004,Office Chair,1,199.99,199.99,15.99,16.00,"321 Elm St, City, State 12345"
+ORD005,#1005,Charlie Wilson,charlie@email.com,2024-01-24,pending,SKU005,Drill Bit Set,2,49.99,99.98,9.99,8.00,"654 Maple Dr, City, State 12345"

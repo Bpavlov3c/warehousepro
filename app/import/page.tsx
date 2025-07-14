@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Upload, FileText, Package, ShoppingCart, AlertCircle, CheckCircle, X } from "lucide-react"
+import { Upload, FileText, Package, ShoppingCart, AlertCircle, CheckCircle, X, RotateCcw, Download } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -24,7 +24,7 @@ interface ImportResult {
 interface PreviewData {
   headers: string[]
   rows: string[][]
-  type: "purchase-orders" | "inventory" | "orders" | null
+  type: "purchase-orders" | "inventory" | "orders" | "returns" | null
 }
 
 export default function ImportPage() {
@@ -32,7 +32,9 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [preview, setPreview] = useState<PreviewData | null>(null)
-  const [importType, setImportType] = useState<"purchase-orders" | "inventory" | "orders">("purchase-orders")
+  const [importType, setImportType] = useState<"purchase-orders" | "inventory" | "orders" | "returns">(
+    "purchase-orders",
+  )
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0]
@@ -57,7 +59,7 @@ export default function ImportPage() {
       const rows = lines.slice(1, 6).map((line) => line.split(",").map((cell) => cell.replace(/"/g, "").trim()))
 
       // Auto-detect import type based on headers
-      let detectedType: "purchase-orders" | "inventory" | "orders" | null = null
+      let detectedType: "purchase-orders" | "inventory" | "orders" | "returns" | null = null
 
       if (headers.some((h) => h.toLowerCase().includes("supplier") || h.toLowerCase().includes("po"))) {
         detectedType = "purchase-orders"
@@ -65,6 +67,8 @@ export default function ImportPage() {
         detectedType = "inventory"
       } else if (headers.some((h) => h.toLowerCase().includes("order") && h.toLowerCase().includes("customer"))) {
         detectedType = "orders"
+      } else if (headers.some((h) => h.toLowerCase().includes("return") || h.toLowerCase().includes("refund"))) {
+        detectedType = "returns"
       }
 
       setPreview({
@@ -228,6 +232,53 @@ export default function ImportPage() {
             errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
           }
         }
+      } else if (importType === "returns") {
+        // Import returns
+        for (let i = 0; i < dataRows.length; i++) {
+          try {
+            const row = dataRows[i]
+            if (row.length < headers.length) continue
+
+            const returnData = {
+              customer_name:
+                row[headers.indexOf("Customer")] || row[headers.indexOf("customer")] || `Customer ${i + 1}`,
+              customer_email: row[headers.indexOf("Email")] || row[headers.indexOf("email")] || "",
+              order_number: row[headers.indexOf("Order Number")] || row[headers.indexOf("order_number")] || "",
+              return_date:
+                row[headers.indexOf("Date")] || row[headers.indexOf("date")] || new Date().toISOString().split("T")[0],
+              status: (row[headers.indexOf("Status")] || row[headers.indexOf("status")] || "Pending") as
+                | "Pending"
+                | "Processing"
+                | "Accepted"
+                | "Rejected",
+              total_refund: Number.parseFloat(row[headers.indexOf("Refund")] || row[headers.indexOf("refund")] || "0"),
+              notes: row[headers.indexOf("Notes")] || row[headers.indexOf("notes")] || "",
+              items: [
+                {
+                  sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
+                  product_name:
+                    row[headers.indexOf("Product")] || row[headers.indexOf("product")] || `Product ${i + 1}`,
+                  quantity: Number.parseInt(
+                    row[headers.indexOf("Quantity")] || row[headers.indexOf("quantity")] || "1",
+                  ),
+                  condition: row[headers.indexOf("Condition")] || row[headers.indexOf("condition")] || "Good",
+                  reason: row[headers.indexOf("Reason")] || row[headers.indexOf("reason")] || "Other",
+                  total_refund: Number.parseFloat(
+                    row[headers.indexOf("Refund")] || row[headers.indexOf("refund")] || "0",
+                  ),
+                  unit_price: Number.parseFloat(
+                    row[headers.indexOf("Unit Price")] || row[headers.indexOf("unit_price")] || "0",
+                  ),
+                },
+              ],
+            }
+
+            await supabaseStore.createReturn(returnData)
+            imported++
+          } catch (error) {
+            errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
       }
 
       setResult({
@@ -254,6 +305,15 @@ export default function ImportPage() {
     setResult(null)
   }, [])
 
+  const downloadSample = useCallback((type: string) => {
+    const link = document.createElement("a")
+    link.href = `/samples/sample-${type}.csv`
+    link.download = `sample-${type}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [])
+
   return (
     <div className="flex flex-col min-h-screen">
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
@@ -262,7 +322,7 @@ export default function ImportPage() {
       </header>
 
       <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -271,10 +331,14 @@ export default function ImportPage() {
               </CardTitle>
               <CardDescription>Import purchase orders with supplier information, items, and costs</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
                 Expected columns: Supplier, Date, Status, SKU, Product, Quantity, Unit Cost, Delivery Cost, Notes
               </p>
+              <Button variant="outline" size="sm" onClick={() => downloadSample("purchase-orders")} className="w-full">
+                <Download className="h-4 w-4 mr-2" />
+                Download Sample
+              </Button>
             </CardContent>
           </Card>
 
@@ -286,10 +350,14 @@ export default function ImportPage() {
               </CardTitle>
               <CardDescription>Import inventory items with stock levels and costs</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
                 Expected columns: SKU, Name/Product, Quantity/Stock, Unit Cost/Cost
               </p>
+              <Button variant="outline" size="sm" onClick={() => downloadSample("inventory")} className="w-full">
+                <Download className="h-4 w-4 mr-2" />
+                Download Sample
+              </Button>
             </CardContent>
           </Card>
 
@@ -301,11 +369,35 @@ export default function ImportPage() {
               </CardTitle>
               <CardDescription>Import customer orders with items and shipping information</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
                 Expected columns: Order ID, Order Number, Customer, Email, Date, Status, SKU, Product, Quantity, Price,
                 Total, Shipping, Tax, Address
               </p>
+              <Button variant="outline" size="sm" onClick={() => downloadSample("orders")} className="w-full">
+                <Download className="h-4 w-4 mr-2" />
+                Download Sample
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <RotateCcw className="h-5 w-5" />
+                Returns
+              </CardTitle>
+              <CardDescription>Import customer returns with items and refund information</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Expected columns: Return Number, Customer, Email, Order Number, Date, Status, SKU, Product, Quantity,
+                Condition, Reason, Refund
+              </p>
+              <Button variant="outline" size="sm" onClick={() => downloadSample("returns")} className="w-full">
+                <Download className="h-4 w-4 mr-2" />
+                Download Sample
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -329,6 +421,7 @@ export default function ImportPage() {
                 <option value="purchase-orders">Purchase Orders</option>
                 <option value="inventory">Inventory</option>
                 <option value="orders">Orders</option>
+                <option value="returns">Returns</option>
               </select>
             </div>
 
@@ -460,6 +553,16 @@ export default function ImportPage() {
                   <li>• Partial imports are possible if some rows are valid</li>
                   <li>• Check the error log for specific issues</li>
                   <li>• Fix errors and re-import if needed</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-2">Sample Files</h4>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• Download sample files to see the expected format</li>
+                  <li>• Use sample files as templates for your data</li>
+                  <li>• Column names are case-insensitive</li>
+                  <li>• Additional columns will be ignored</li>
                 </ul>
               </div>
             </div>

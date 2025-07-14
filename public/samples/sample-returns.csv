@@ -1,0 +1,6 @@
+Return Number,Customer,Email,Order Number,Date,Status,SKU,Product,Quantity,Condition,Reason,Refund,Unit Price
+R001,John Smith,john@email.com,#1001,2024-01-25,Pending,SKU001,Widget A,1,Defective,Defective,15.99,15.99
+R002,Jane Doe,jane@email.com,#1002,2024-01-26,Processing,SKU002,Widget B,1,Good,Changed Mind,25.50,25.50
+R003,Bob Johnson,bob@email.com,#1003,2024-01-27,Accepted,SKU003,Gadget C,2,Damaged,Damaged in Transit,37.50,18.75
+R004,Alice Brown,alice@email.com,#1004,2024-01-28,Rejected,SKU004,Office Chair,1,Used,Not as Described,0.00,199.99
+R005,Charlie Wilson,charlie@email.com,#1005,2024-01-29,Pending,SKU005,Drill Bit Set,1,Good,Wrong Item,49.99,49.99
