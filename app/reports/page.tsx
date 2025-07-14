@@ -401,7 +401,7 @@ export default function Reports() {
   if (loading) {
     return (
       <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-64">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
           <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Reports</h1>
         </header>
