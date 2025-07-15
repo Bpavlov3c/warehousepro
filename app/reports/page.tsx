@@ -68,13 +68,13 @@ export default function Reports() {
       setLoading(true)
 
       // Load critical data first
-      const [inventoryData, ordersData] = await Promise.all([
+      const [inventoryData, ordersArray] = await Promise.all([
         supabaseStore.getInventory(),
-        supabaseStore.getShopifyOrders(),
+        supabaseStore.getAllShopifyOrders(), // returns ShopifyOrder[]
       ])
 
       setInventory(inventoryData)
-      setShopifyOrders(ordersData)
+      setShopifyOrders(ordersArray)
 
       // Load secondary data
       const [poData, returnsData] = await Promise.all([supabaseStore.getPurchaseOrders(), supabaseStore.getReturns()])

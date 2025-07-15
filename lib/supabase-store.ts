@@ -106,6 +106,13 @@ export interface ShopifyOrder {
   tax_amount: number
 }
 
+export interface ShopifyOrderStats {
+  totalOrders: number
+  totalRevenue: number
+  totalProfit: number
+  avgOrderValue: number
+}
+
 export interface ReturnItem {
   id: string
   return_id: string
@@ -1272,6 +1279,80 @@ async function getShopifyOrders(options: PaginationOptions = {}): Promise<Pagina
   }
 }
 
+/**
+ * Get summary statistics for all Shopify orders
+ */
+async function getShopifyOrderStats(): Promise<ShopifyOrderStats> {
+  try {
+    console.log("Calculating Shopify order statistics...")
+
+    // Get all orders with their items for profit calculation
+    const { data, error } = await supabase.from("shopify_orders").select(`
+        total_amount,
+        tax_amount,
+        shipping_cost,
+        shopify_order_items (
+          sku,
+          quantity
+        )
+      `)
+
+    if (error) throw error
+
+    const orders = data || []
+    const totalOrders = orders.length
+
+    if (totalOrders === 0) {
+      return {
+        totalOrders: 0,
+        totalRevenue: 0,
+        totalProfit: 0,
+        avgOrderValue: 0,
+      }
+    }
+
+    // Get latest unit costs for profit calculation
+    const latestCosts = await getLatestUnitCosts()
+
+    let totalRevenue = 0
+    let totalProfit = 0
+
+    orders.forEach((order) => {
+      const revenue = order.total_amount || 0
+      totalRevenue += revenue
+
+      // Calculate cost of goods sold for this order
+      const itemsCost = (order.shopify_order_items || []).reduce((sum, item) => {
+        const unitCost = latestCosts.get(item.sku) || 0
+        return sum + unitCost * item.quantity
+      }, 0)
+
+      // Profit = revenue - tax - shipping - cost of goods
+      const profit = revenue - (order.tax_amount || 0) - (order.shipping_cost || 0) - itemsCost
+      totalProfit += profit
+    })
+
+    const avgOrderValue = totalRevenue / totalOrders
+
+    console.log("Order statistics calculated:", {
+      totalOrders,
+      totalRevenue,
+      totalProfit,
+      avgOrderValue,
+    })
+
+    return {
+      totalOrders,
+      totalRevenue,
+      totalProfit,
+      avgOrderValue,
+    }
+  } catch (error) {
+    console.error("Error calculating order statistics:", error)
+    throw error
+  }
+}
+
 // Legacy function for backward compatibility
 async function getAllShopifyOrders(): Promise<ShopifyOrder[]> {
   const result = await getShopifyOrders({ limit: 1000, offset: 0 })
@@ -1763,6 +1844,7 @@ export const supabaseStore = {
 
   /* Shopify Orders */
   getShopifyOrders,
+  getShopifyOrderStats, // New function for global stats
   getAllShopifyOrders, // Legacy function
   addShopifyOrders,
 

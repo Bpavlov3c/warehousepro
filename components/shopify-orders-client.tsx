@@ -19,7 +19,7 @@ import {
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import type { ShopifyOrder } from "@/lib/supabase-store"
+import type { ShopifyOrder, ShopifyOrderStats } from "@/lib/supabase-store"
 
 /* ------------------------------ helpers ------------------------------- */
 
@@ -115,8 +115,40 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
   const [error, setError] = useState<string | null>(null)
   const [total, setTotal] = useState<number>(initialTotal)
   const [hasMore, setHasMore] = useState<boolean>(initialHasMore)
+  const [globalStats, setGlobalStats] = useState<ShopifyOrderStats | null>(null)
+  const [statsLoading, setStatsLoading] = useState(true)
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
+
+  // Load global statistics on component mount
+  useEffect(() => {
+    const loadGlobalStats = async () => {
+      try {
+        setStatsLoading(true)
+        const response = await fetch("/api/shopify-orders/stats")
+        if (!response.ok) throw new Error("Failed to load stats")
+
+        const stats = await response.json()
+        setGlobalStats(stats)
+      } catch (err) {
+        console.error("Error loading global stats:", err)
+        // Fallback to calculating from loaded orders if stats API fails
+        setGlobalStats({
+          totalOrders: initialTotal,
+          totalRevenue: initialOrders.reduce((sum, order) => sum + order.totalAmount, 0),
+          totalProfit: initialOrders.reduce((sum, order) => sum + order.profit, 0),
+          avgOrderValue:
+            initialOrders.length > 0
+              ? initialOrders.reduce((sum, order) => sum + order.totalAmount, 0) / initialOrders.length
+              : 0,
+        })
+      } finally {
+        setStatsLoading(false)
+      }
+    }
+
+    loadGlobalStats()
+  }, [initialTotal, initialOrders])
 
   // Load more orders
   const loadMoreOrders = useCallback(async () => {
@@ -138,18 +170,26 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     }
   }, [orders.length, hasMore, loadingMore])
 
-  // Refresh orders
+  // Refresh orders and stats
   const refreshOrders = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/shopify-orders/list?limit=20&offset=0")
-      if (!response.ok) throw new Error("Failed to refresh orders")
+      // Refresh both orders and stats
+      const [ordersResponse, statsResponse] = await Promise.all([
+        fetch("/api/shopify-orders/list?limit=20&offset=0"),
+        fetch("/api/shopify-orders/stats"),
+      ])
 
-      const result = await response.json()
-      setOrders(result.data)
-      setTotal(result.total)
-      setHasMore(result.hasMore)
+      if (!ordersResponse.ok) throw new Error("Failed to refresh orders")
+      if (!statsResponse.ok) throw new Error("Failed to refresh stats")
+
+      const [ordersResult, statsResult] = await Promise.all([ordersResponse.json(), statsResponse.json()])
+
+      setOrders(ordersResult.data)
+      setTotal(ordersResult.total)
+      setHasMore(ordersResult.hasMore)
+      setGlobalStats(statsResult)
     } catch (err) {
       console.error("Error refreshing orders:", err)
       setError("Failed to refresh orders")
@@ -158,7 +198,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     }
   }, [])
 
-  // Filtered orders
+  // Filtered orders (only affects display, not stats)
   const filteredOrders = useMemo(() => {
     if (!debouncedSearchTerm) return orders
 
@@ -170,21 +210,6 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
         order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
     )
   }, [orders, debouncedSearchTerm])
-
-  // Metrics
-  const metrics = useMemo(() => {
-    const totalOrders = filteredOrders.length
-    const totalRevenue = filteredOrders.reduce((sum, order) => sum + order.totalAmount, 0)
-    const totalProfit = filteredOrders.reduce((sum, order) => sum + order.profit, 0)
-    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
-
-    return {
-      totalOrders,
-      totalRevenue,
-      totalProfit,
-      avgOrderValue,
-    }
-  }, [filteredOrders])
 
   const getStatusColor = useCallback((status: string) => {
     switch (status.toLowerCase()) {
@@ -297,22 +322,22 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Global Stats Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {loading && orders.length === 0 ? (
+          {statsLoading ? (
             <>
               <StatCardSkeleton />
               <StatCardSkeleton />
               <StatCardSkeleton />
               <StatCardSkeleton />
             </>
-          ) : (
+          ) : globalStats ? (
             <>
               <Card className="p-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Total Orders</p>
-                    <p className="text-lg font-bold">{metrics.totalOrders}</p>
+                    <p className="text-lg font-bold">{globalStats.totalOrders.toLocaleString()}</p>
                   </div>
                   <ShoppingCart className="w-5 h-5 text-blue-600" />
                 </div>
@@ -322,7 +347,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Total Revenue</p>
-                    <p className="text-lg font-bold">${metrics.totalRevenue.toLocaleString()}</p>
+                    <p className="text-lg font-bold">${globalStats.totalRevenue.toLocaleString()}</p>
                   </div>
                   <DollarSign className="w-5 h-5 text-green-600" />
                 </div>
@@ -332,7 +357,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Total Profit</p>
-                    <p className="text-lg font-bold">${metrics.totalProfit.toLocaleString()}</p>
+                    <p className="text-lg font-bold">${globalStats.totalProfit.toLocaleString()}</p>
                   </div>
                   <TrendingUp className="w-5 h-5 text-green-600" />
                 </div>
@@ -342,11 +367,18 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Avg Order Value</p>
-                    <p className="text-lg font-bold">${metrics.avgOrderValue.toFixed(2)}</p>
+                    <p className="text-lg font-bold">${globalStats.avgOrderValue.toFixed(2)}</p>
                   </div>
                   <Users className="w-5 h-5 text-purple-600" />
                 </div>
               </Card>
+            </>
+          ) : (
+            <>
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
             </>
           )}
         </div>
