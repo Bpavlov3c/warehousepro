@@ -399,6 +399,65 @@ async function addManualInventory(item: {
 }
 
 /**
+ * Update an existing inventory item (manual inventory only).
+ */
+async function updateInventoryItem(
+  id: string,
+  updates: {
+    sku: string
+    name: string
+    quantity: number
+    unitCost: number
+  },
+): Promise<InventoryItem> {
+  try {
+    // For summary items (id starts with "summary-"), we need to find the actual inventory record
+    let actualId = id
+    if (id.startsWith("summary-")) {
+      const sku = id.replace("summary-", "")
+
+      // Find the most recent inventory record for this SKU
+      const { data: inventoryRecord, error: findError } = await supabase
+        .from("inventory")
+        .select("id")
+        .eq("sku", sku)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single()
+
+      if (findError || !inventoryRecord) {
+        throw new Error(`No inventory record found for SKU: ${sku}`)
+      }
+
+      actualId = inventoryRecord.id
+    }
+
+    const { data, error } = await supabase
+      .from("inventory")
+      .update({
+        sku: updates.sku,
+        product_name: updates.name,
+        quantity_available: updates.quantity,
+        unit_cost_with_delivery: updates.unitCost,
+      })
+      .eq("id", actualId)
+      .select("id, sku, name:product_name, inStock:quantity_available, unitCost:unit_cost_with_delivery")
+      .single()
+
+    if (error) throw error
+
+    return {
+      ...data,
+      incoming: 0,
+      reserved: 0,
+    }
+  } catch (error) {
+    console.error("Error updating inventory item:", error)
+    throw error
+  }
+}
+
+/**
  * Add inventory from a delivered purchase order
  */
 async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
@@ -1813,6 +1872,7 @@ export const supabaseStore = {
   /* Inventory */
   getInventory,
   addManualInventory,
+  updateInventoryItem, // Add this line
   addInventoryFromPO,
 
   /* Inventory helpers that other screens use */

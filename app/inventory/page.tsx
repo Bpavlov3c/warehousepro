@@ -55,6 +55,7 @@ const TableSkeleton = () => (
             <TableHead className="w-[100px]">Unit Cost</TableHead>
             <TableHead className="w-[100px]">Total Value</TableHead>
             <TableHead className="w-[80px]">Status</TableHead>
+            <TableHead className="w-[80px]">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -104,6 +105,15 @@ export default function Inventory() {
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const [isEditItemOpen, setIsEditItemOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+  const [editFormData, setEditFormData] = useState({
+    sku: "",
+    name: "",
+    quantity: "",
+    unitCost: "",
+  })
 
   // Debounced search term
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
@@ -192,6 +202,59 @@ export default function Inventory() {
       alert("Error adding item. Please try again.")
     }
   }, [formData, loadData])
+
+  const handleEditItem = useCallback(async () => {
+    if (!editingItem || !editFormData.sku || !editFormData.name || !editFormData.quantity || !editFormData.unitCost) {
+      alert("Please fill in all fields")
+      return
+    }
+
+    const quantity = Number.parseInt(editFormData.quantity)
+    const unitCost = Number.parseFloat(editFormData.unitCost)
+
+    if (isNaN(quantity) || quantity < 0) {
+      alert("Please enter a valid quantity")
+      return
+    }
+
+    if (isNaN(unitCost) || unitCost < 0) {
+      alert("Please enter a valid unit cost")
+      return
+    }
+
+    try {
+      await supabaseStore.updateInventoryItem(editingItem.id, {
+        sku: editFormData.sku,
+        name: editFormData.name,
+        quantity,
+        unitCost,
+      })
+
+      // Refresh inventory data
+      await loadData()
+
+      // Reset form
+      setEditFormData({ sku: "", name: "", quantity: "", unitCost: "" })
+      setEditingItem(null)
+      setIsEditItemOpen(false)
+
+      alert(`Item ${editFormData.sku} updated successfully!`)
+    } catch (error) {
+      console.error("Error updating inventory item:", error)
+      alert("Error updating item. Please try again.")
+    }
+  }, [editFormData, editingItem, loadData])
+
+  const openEditDialog = useCallback((item: InventoryItem) => {
+    setEditingItem(item)
+    setEditFormData({
+      sku: item.sku,
+      name: item.name,
+      quantity: item.inStock.toString(),
+      unitCost: item.unitCost.toString(),
+    })
+    setIsEditItemOpen(true)
+  }, [])
 
   const getStockStatus = useCallback((item: InventoryItem) => {
     if (item.inStock === 0) {
@@ -369,9 +432,19 @@ export default function Inventory() {
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-3 border-t flex justify-between text-sm">
+                  <div className="mt-3 pt-3 border-t flex justify-between items-center text-sm">
                     <span>Unit Cost: ${item.unitCost.toFixed(2)}</span>
-                    <span className="font-medium">Value: ${(item.inStock * item.unitCost).toLocaleString()}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">Value: ${(item.inStock * item.unitCost).toLocaleString()}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openEditDialog(item)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        Edit
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               )
@@ -398,6 +471,7 @@ export default function Inventory() {
                     <TableHead className="w-[100px]">Unit Cost</TableHead>
                     <TableHead className="w-[100px]">Total Value</TableHead>
                     <TableHead className="w-[80px]">Status</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -428,6 +502,16 @@ export default function Inventory() {
                           <TableCell>${(item.inStock * item.unitCost).toLocaleString()}</TableCell>
                           <TableCell>
                             <Badge className={`${status.color} text-xs px-2 py-1`}>{status.label}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditDialog(item)}
+                              className="h-8 px-3"
+                            >
+                              Edit
+                            </Button>
                           </TableCell>
                         </TableRow>
                       )
@@ -501,6 +585,72 @@ export default function Inventory() {
                 Cancel
               </Button>
               <Button onClick={handleAddItem}>Add Item</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Item Dialog */}
+        <Dialog open={isEditItemOpen} onOpenChange={setIsEditItemOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Inventory Item</DialogTitle>
+              <DialogDescription>Update the inventory item details</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="edit-sku">SKU *</label>
+                  <Input
+                    id="edit-sku"
+                    placeholder="WH-001"
+                    value={editFormData.sku}
+                    onChange={(e) => setEditFormData({ ...editFormData, sku: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="edit-name">Product Name *</label>
+                  <Input
+                    id="edit-name"
+                    placeholder="Wireless Headphones"
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="edit-quantity">Quantity *</label>
+                  <Input
+                    id="edit-quantity"
+                    type="number"
+                    placeholder="50"
+                    value={editFormData.quantity}
+                    onChange={(e) => setEditFormData({ ...editFormData, quantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="edit-unitCost">Unit Cost *</label>
+                  <Input
+                    id="edit-unitCost"
+                    type="number"
+                    step="0.01"
+                    placeholder="75.00"
+                    value={editFormData.unitCost}
+                    onChange={(e) => setEditFormData({ ...editFormData, unitCost: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2">
+              <Button variant="outline" onClick={() => setIsEditItemOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleEditItem}>Update Item</Button>
             </div>
           </DialogContent>
         </Dialog>
