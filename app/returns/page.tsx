@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { SelectValue } from "@/components/ui/select"
 
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
@@ -10,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Search, Plus, Package, DollarSign, TrendingUp, Calendar, Trash2, Eye, Edit } from "lucide-react"
 import { supabaseStore, type Return } from "@/lib/supabase-store"
@@ -228,171 +229,181 @@ export default function Returns() {
   )
 
   return (
-    <div className="flex-1 space-y-4 p-8 pt-6">
-      {/* header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <SidebarTrigger />
-          <h2 className="text-3xl font-bold">Returns</h2>
+    <div className="flex flex-col min-h-screen">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
+        <SidebarTrigger className="-ml-1 lg:hidden" />
+        <div className="flex items-center justify-between w-full">
+          <h1 className="text-lg font-semibold">Returns</h1>
+          <Button onClick={() => setIsNewOpen(true)} size="sm" className="lg:hidden">
+            <Plus className="w-4 h-4" />
+          </Button>
         </div>
-        <Button onClick={() => setIsNewOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" /> New Return
-        </Button>
-      </div>
+      </header>
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold hidden lg:block">Returns</h1>
+          <Button onClick={() => setIsNewOpen(true)} size="sm" className="hidden lg:flex">
+            <Plus className="h-4 w-4 mr-2" /> New Return
+          </Button>
+        </div>
 
-      {/* metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Metric icon={Package} label="Total Returns" value={returns.length} />
-        <Metric icon={TrendingUp} label="Pending" value={returns.filter((r) => r.status === "Pending").length} />
-        <Metric icon={Calendar} label="Processing" value={returns.filter((r) => r.status === "Processing").length} />
-        <Metric
-          icon={DollarSign}
-          label="Total Refunds"
-          value={`$${returns.reduce((s, r) => s + (r.total_refund || 0), 0).toFixed(2)}`}
-        />
-      </div>
+        {/* metrics */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Metric icon={Package} label="Total Returns" value={returns.length} />
+          <Metric icon={TrendingUp} label="Pending" value={returns.filter((r) => r.status === "Pending").length} />
+          <Metric icon={Calendar} label="Processing" value={returns.filter((r) => r.status === "Processing").length} />
+          <Metric
+            icon={DollarSign}
+            label="Total Refunds"
+            value={`$${returns.reduce((s, r) => s + (r.total_refund || 0), 0).toFixed(2)}`}
+          />
+        </div>
 
-      {/* search */}
-      <div className="relative">
-        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search returns…"
-          className="pl-8"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
+        {/* search */}
+        <div className="relative">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search returns…"
+            className="pl-8"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
 
-      {/* table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Return #</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Order #</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Refund</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium">{r.return_number}</TableCell>
-                  <TableCell>{r.customer_name}</TableCell>
-                  <TableCell>{r.order_number || "—"}</TableCell>
-                  <TableCell>{new Date(r.return_date).toLocaleDateString()}</TableCell>
-                  <TableCell>
-                    <Select value={r.status} onValueChange={(value) => handleStatusChange(r.id, value)}>
-                      <SelectTrigger className="w-32">
-                        <SelectValue>
-                          <Badge className={statusColor(r.status)}>{r.status}</Badge>
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Pending">
-                          <Badge className={statusColor("Pending")}>Pending</Badge>
-                        </SelectItem>
-                        <SelectItem value="Processing">
-                          <Badge className={statusColor("Processing")}>Processing</Badge>
-                        </SelectItem>
-                        <SelectItem value="Accepted">
-                          <Badge className={statusColor("Accepted")}>Accepted</Badge>
-                        </SelectItem>
-                        <SelectItem value="Rejected">
-                          <Badge className={statusColor("Rejected")}>Rejected</Badge>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>{r.return_items.length}</TableCell>
-                  <TableCell>${(r.total_refund || 0).toFixed(2)}</TableCell>
-                  <TableCell>
-                    <div className="flex space-x-2">
-                      <IconBtn
-                        icon={Eye}
-                        onClick={() => {
-                          setSelectedReturn(r)
-                          setIsViewOpen(true)
-                        }}
-                      />
-                      <IconBtn
-                        icon={Edit}
-                        onClick={() => {
-                          setEditingReturn(r)
-                          setForm({
-                            customerName: r.customer_name,
-                            customerEmail: r.customer_email || "",
-                            orderNumber: r.order_number || "",
-                            returnDate: r.return_date,
-                            notes: r.notes || "",
-                          })
-                          setItems(
-                            r.return_items.map((it) => ({
-                              sku: it.sku,
-                              productName: it.product_name,
-                              quantity: it.quantity.toString(),
-                              reason: it.reason || "Other",
-                              condition: it.condition || "Good",
-                              unitPrice: (it.unit_price || 0).toString(),
-                              totalRefund: (it.total_refund || 0).toString(),
-                            })),
-                          )
-                          setIsEditOpen(true)
-                        }}
-                      />
-                      <IconBtn
-                        icon={Trash2}
-                        onClick={async () => {
-                          if (confirm(`Delete return ${r.return_number}?  This cannot be undone.`)) {
-                            await supabaseStore.deleteReturn(r.id)
-                            setReturns(await supabaseStore.getReturns())
-                          }
-                        }}
-                      />
-                    </div>
-                  </TableCell>
+        {/* table */}
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Return #</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Order #</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Refund</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.return_number}</TableCell>
+                    <TableCell>{r.customer_name}</TableCell>
+                    <TableCell>{r.order_number || "—"}</TableCell>
+                    <TableCell>{new Date(r.return_date).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <Select value={r.status} onValueChange={(value) => handleStatusChange(r.id, value)}>
+                        <SelectTrigger className="w-32">
+                          <Badge className={statusColor(r.status)}>{r.status}</Badge>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Pending">
+                            <Badge className={statusColor("Pending")}>Pending</Badge>
+                          </SelectItem>
+                          <SelectItem value="Processing">
+                            <Badge className={statusColor("Processing")}>Processing</Badge>
+                          </SelectItem>
+                          <SelectItem value="Accepted">
+                            <Badge className={statusColor("Accepted")}>Accepted</Badge>
+                          </SelectItem>
+                          <SelectItem value="Rejected">
+                            <Badge className={statusColor("Rejected")}>Rejected</Badge>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>{r.return_items.length}</TableCell>
+                    <TableCell>${(r.total_refund || 0).toFixed(2)}</TableCell>
+                    <TableCell>
+                      <div className="flex space-x-2">
+                        <IconBtn
+                          icon={Eye}
+                          onClick={() => {
+                            setSelectedReturn(r)
+                            setIsViewOpen(true)
+                          }}
+                        />
+                        <IconBtn
+                          icon={Edit}
+                          onClick={() => {
+                            setEditingReturn(r)
+                            setForm({
+                              customerName: r.customer_name,
+                              customerEmail: r.customer_email || "",
+                              orderNumber: r.order_number || "",
+                              returnDate: r.return_date,
+                              notes: r.notes || "",
+                            })
+                            setItems(
+                              r.return_items.map((it) => ({
+                                sku: it.sku,
+                                productName: it.product_name,
+                                quantity: it.quantity.toString(),
+                                reason: it.reason || "Other",
+                                condition: it.condition || "Good",
+                                unitPrice: (it.unit_price || 0).toString(),
+                                totalRefund: (it.total_refund || 0).toString(),
+                              })),
+                            )
+                            setIsEditOpen(true)
+                          }}
+                        />
+                        <IconBtn
+                          icon={Trash2}
+                          onClick={async () => {
+                            if (confirm(`Delete return ${r.return_number}?  This cannot be undone.`)) {
+                              await supabaseStore.deleteReturn(r.id)
+                              setReturns(await supabaseStore.getReturns())
+                            }
+                          }}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
 
-      {/* dialogs */}
-      <ReturnDialog
-        title="Create New Return"
-        open={isNewOpen}
-        setOpen={setIsNewOpen}
-        form={form}
-        setForm={setForm}
-        items={items}
-        updateItem={updateItem}
-        addItem={addItem}
-        removeItem={removeItem}
-        onSave={handleCreate}
-      />
-      {editingReturn && (
+        {/* dialogs */}
         <ReturnDialog
-          title="Edit Return"
-          open={isEditOpen}
-          setOpen={setIsEditOpen}
+          title="Create New Return"
+          open={isNewOpen}
+          setOpen={setIsNewOpen}
           form={form}
           setForm={setForm}
           items={items}
           updateItem={updateItem}
           addItem={addItem}
           removeItem={removeItem}
-          onSave={handleUpdate}
+          onSave={handleCreate}
         />
-      )}
-      {selectedReturn && (
-        <ViewDialog open={isViewOpen} setOpen={setIsViewOpen} returnOrder={selectedReturn} statusColor={statusColor} />
-      )}
+        {editingReturn && (
+          <ReturnDialog
+            title="Edit Return"
+            open={isEditOpen}
+            setOpen={setIsEditOpen}
+            form={form}
+            setForm={setForm}
+            items={items}
+            updateItem={updateItem}
+            addItem={addItem}
+            removeItem={removeItem}
+            onSave={handleUpdate}
+          />
+        )}
+        {selectedReturn && (
+          <ViewDialog
+            open={isViewOpen}
+            setOpen={setIsViewOpen}
+            returnOrder={selectedReturn}
+            statusColor={statusColor}
+          />
+        )}
+      </div>
     </div>
   )
 }
