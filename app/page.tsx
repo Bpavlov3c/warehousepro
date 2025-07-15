@@ -58,7 +58,7 @@ export default function Dashboard() {
       // Load critical data first (inventory and recent orders)
       const [inventoryData, ordersData] = await Promise.all([
         supabaseStore.getInventory(),
-        supabaseStore.getShopifyOrders(),
+        supabaseStore.getAllShopifyOrders(),
       ])
 
       setInventory(inventoryData)

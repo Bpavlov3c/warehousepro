@@ -6,7 +6,17 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, ShoppingCart, DollarSign, TrendingUp, Users, Eye, Download, RefreshCw } from "lucide-react"
+import {
+  Search,
+  ShoppingCart,
+  DollarSign,
+  TrendingUp,
+  Users,
+  Eye,
+  Download,
+  RefreshCw,
+  ChevronDown,
+} from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { ShopifyOrder } from "@/lib/supabase-store"
@@ -28,10 +38,10 @@ const StatCardSkeleton = () => (
   <Card className="p-3">
     <div className="flex items-center justify-between">
       <div>
-        <div className="h-3 bg-gray-200 rounded w-16 mb-1 animate-pulse" />
-        <div className="h-6 bg-gray-200 rounded w-12 animate-pulse" />
+        <div className="h-3 bg-gray-200 rounded w-16 mb-1 animate-pulse"></div>
+        <div className="h-6 bg-gray-200 rounded w-12 animate-pulse"></div>
       </div>
-      <div className="h-5 w-5 bg-gray-200 rounded animate-pulse" />
+      <div className="h-5 w-5 bg-gray-200 rounded animate-pulse"></div>
     </div>
   </Card>
 )
@@ -42,19 +52,43 @@ const TableSkeleton = () => (
       <Table>
         <TableHeader>
           <TableRow className="h-10">
-            {["Order #", "Customer", "Store", "Date", "Status", "Total", "Profit", "Actions"].map((h) => (
-              <TableHead key={h}>{h}</TableHead>
-            ))}
+            <TableHead>Order #</TableHead>
+            <TableHead>Customer</TableHead>
+            <TableHead>Store</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Total</TableHead>
+            <TableHead>Profit</TableHead>
+            <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {Array.from({ length: 10 }).map((_, i) => (
+          {[...Array(10)].map((_, i) => (
             <TableRow key={i} className="h-12">
-              {Array.from({ length: 8 }).map((__, j) => (
-                <TableCell key={j}>
-                  <div className="h-4 bg-gray-200 rounded animate-pulse" />
-                </TableCell>
-              ))}
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-24 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-20 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-6 bg-gray-200 rounded w-16 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-12 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-4 bg-gray-200 rounded w-12 animate-pulse"></div>
+              </TableCell>
+              <TableCell>
+                <div className="h-8 bg-gray-200 rounded w-8 animate-pulse"></div>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -63,48 +97,96 @@ const TableSkeleton = () => (
   </Card>
 )
 
-/* --------------------------- main component --------------------------- */
+/* ------------------------------ main component ------------------------ */
 
 interface Props {
   initialOrders: ShopifyOrder[]
+  initialTotal: number
+  initialHasMore: boolean
 }
 
-export default function ShopifyOrdersClient({ initialOrders }: Props) {
+export default function ShopifyOrdersClient({ initialOrders, initialTotal, initialHasMore }: Props) {
   const [orders, setOrders] = useState<ShopifyOrder[]>(initialOrders)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const debouncedSearch = useDebounce(searchTerm)
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isViewOrderOpen, setIsViewOrderOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [total, setTotal] = useState<number>(initialTotal)
+  const [hasMore, setHasMore] = useState<boolean>(initialHasMore)
 
-  /* ------------------------- helpers / derived ------------------------ */
+  const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
-  const filtered = useMemo(() => {
-    if (!debouncedSearch) return orders
-    const lo = debouncedSearch.toLowerCase()
-    return orders.filter(
-      (o) =>
-        o.orderNumber?.toLowerCase().includes(lo) ||
-        o.customerName?.toLowerCase().includes(lo) ||
-        o.customerEmail?.toLowerCase().includes(lo) ||
-        o.storeName?.toLowerCase().includes(lo),
-    )
-  }, [orders, debouncedSearch])
+  // Load more orders
+  const loadMoreOrders = useCallback(async () => {
+    if (loadingMore || !hasMore) return
 
-  const stats = useMemo(() => {
-    const totalRevenue = filtered.reduce((s, o) => s + (o.totalAmount || 0), 0)
-    const totalProfit = filtered.reduce((s, o) => s + (o.profit || 0), 0)
-    const avg = filtered.length ? totalRevenue / filtered.length : 0
-    return {
-      count: filtered.length,
-      revenue: totalRevenue,
-      profit: totalProfit,
-      avg,
+    setLoadingMore(true)
+    try {
+      const response = await fetch(`/api/shopify-orders/list?limit=20&offset=${orders.length}`)
+      if (!response.ok) throw new Error("Failed to load more orders")
+
+      const result = await response.json()
+      setOrders((prev) => [...prev, ...result.data])
+      setHasMore(result.hasMore)
+    } catch (err) {
+      console.error("Error loading more orders:", err)
+      setError("Failed to load more orders")
+    } finally {
+      setLoadingMore(false)
     }
-  }, [filtered])
+  }, [orders.length, hasMore, loadingMore])
 
-  const statusColor = useCallback((status: string) => {
+  // Refresh orders
+  const refreshOrders = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch("/api/shopify-orders/list?limit=20&offset=0")
+      if (!response.ok) throw new Error("Failed to refresh orders")
+
+      const result = await response.json()
+      setOrders(result.data)
+      setTotal(result.total)
+      setHasMore(result.hasMore)
+    } catch (err) {
+      console.error("Error refreshing orders:", err)
+      setError("Failed to refresh orders")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Filtered orders
+  const filteredOrders = useMemo(() => {
+    if (!debouncedSearchTerm) return orders
+
+    return orders.filter(
+      (order) =>
+        order.orderNumber.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        order.customerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        order.customerEmail.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
+    )
+  }, [orders, debouncedSearchTerm])
+
+  // Metrics
+  const metrics = useMemo(() => {
+    const totalOrders = filteredOrders.length
+    const totalRevenue = filteredOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+    const totalProfit = filteredOrders.reduce((sum, order) => sum + order.profit, 0)
+    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+
+    return {
+      totalOrders,
+      totalRevenue,
+      totalProfit,
+      avgOrderValue,
+    }
+  }, [filteredOrders])
+
+  const getStatusColor = useCallback((status: string) => {
     switch (status.toLowerCase()) {
       case "fulfilled":
       case "shipped":
@@ -120,114 +202,158 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
     }
   }, [])
 
-  /* ---------------------------- actions ------------------------------- */
+  const exportToCSV = useCallback(() => {
+    const headers = [
+      "Order Number",
+      "Customer Name",
+      "Customer Email",
+      "Store",
+      "Date",
+      "Status",
+      "Total Amount",
+      "Shipping Cost",
+      "Tax Amount",
+      "Profit",
+      "Items Count",
+    ]
 
-  const refreshOrders = useCallback(async () => {
-    try {
-      setLoading(true)
-      const res = await fetch("/api/shopify-orders/list")
-      if (!res.ok) throw new Error("Failed to fetch")
-      const data: ShopifyOrder[] = await res.json()
-      setOrders(data)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  const exportCsv = useCallback(() => {
-    const headers = ["Order #", "Customer", "Email", "Store", "Date", "Status", "Total", "Profit", "Items"]
-    const rows = filtered.map((o) => [
-      o.orderNumber,
-      o.customerName,
-      o.customerEmail,
-      o.storeName,
-      new Date(o.orderDate).toLocaleDateString(),
-      o.status,
-      o.totalAmount.toFixed(2),
-      o.profit.toFixed(2),
-      o.items.length,
+    const csvData = filteredOrders.map((order) => [
+      order.orderNumber,
+      order.customerName,
+      order.customerEmail,
+      order.storeName,
+      new Date(order.orderDate).toLocaleDateString(),
+      order.status,
+      order.totalAmount.toFixed(2),
+      order.shippingCost.toFixed(2),
+      order.taxAmount.toFixed(2),
+      order.profit.toFixed(2),
+      order.items.length,
     ])
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n")
-    const blob = new Blob([csv], { type: "text/csv" })
+
+    const csvContent = [headers, ...csvData].map((row) => row.join(",")).join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
     const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "shopify-orders.csv"
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [filtered])
+    link.setAttribute("href", url)
+    link.setAttribute("download", `shopify-orders-${new Date().toISOString().split("T")[0]}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [filteredOrders])
 
-  /* ------------------------------ UI ---------------------------------- */
-
-  if (error) {
+  if (error && orders.length === 0) {
     return (
-      <div className="p-8">
-        <p className="text-red-600">Error: {error}</p>
-        <Button onClick={refreshOrders} className="mt-4">
-          Retry
-        </Button>
+      <div className="flex flex-col min-h-screen">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
+          <SidebarTrigger className="-ml-1 lg:hidden" />
+          <h1 className="text-lg font-semibold">Orders</h1>
+        </header>
+        <div className="p-6 ml-16 lg:ml-0">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h3 className="text-red-800 font-medium">Error loading orders</h3>
+            <p className="text-red-600 mt-1">{error}</p>
+            <Button onClick={refreshOrders} className="mt-3 bg-transparent" variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Try Again
+            </Button>
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="flex flex-col min-h-screen">
-      {/* header */}
-      <header className="flex h-16 items-center gap-2 border-b px-4">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
         <SidebarTrigger className="-ml-1 lg:hidden" />
-        <h1 className="text-lg font-semibold flex-1">Shopify Orders</h1>
-        <Button variant="ghost" size="icon" onClick={refreshOrders} disabled={loading}>
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-        </Button>
-        <Button variant="ghost" size="icon" onClick={exportCsv} disabled={loading}>
-          <Download />
-        </Button>
+        <div className="flex items-center justify-between w-full">
+          <h1 className="text-lg font-semibold">Orders</h1>
+          <div className="flex items-center gap-2">
+            <Button onClick={refreshOrders} size="sm" variant="outline" disabled={loading}>
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+            <Button onClick={exportToCSV} size="sm" className="lg:hidden" disabled={loading}>
+              <Download className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
       </header>
 
-      <div className="flex-1 space-y-4 p-4 md:p-8">
-        {/* stats */}
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold hidden lg:block">Orders</h1>
+          <div className="hidden lg:flex items-center gap-2">
+            <Button onClick={refreshOrders} size="sm" variant="outline" disabled={loading}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+            <Button onClick={exportToCSV} size="sm" disabled={loading}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {loading ? (
-            Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+          {loading && orders.length === 0 ? (
+            <>
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+            </>
           ) : (
             <>
-              <Card className="p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-600">Orders</p>
-                  <p className="text-lg font-bold">{stats.count}</p>
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Orders</p>
+                    <p className="text-lg font-bold">{metrics.totalOrders}</p>
+                  </div>
+                  <ShoppingCart className="w-5 h-5 text-blue-600" />
                 </div>
-                <ShoppingCart className="w-5 h-5 text-blue-600" />
               </Card>
-              <Card className="p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-600">Revenue</p>
-                  <p className="text-lg font-bold">${stats.revenue.toFixed(2)}</p>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Revenue</p>
+                    <p className="text-lg font-bold">${metrics.totalRevenue.toLocaleString()}</p>
+                  </div>
+                  <DollarSign className="w-5 h-5 text-green-600" />
                 </div>
-                <DollarSign className="w-5 h-5 text-green-600" />
               </Card>
-              <Card className="p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-600">Profit</p>
-                  <p className="text-lg font-bold">${stats.profit.toFixed(2)}</p>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Total Profit</p>
+                    <p className="text-lg font-bold">${metrics.totalProfit.toLocaleString()}</p>
+                  </div>
+                  <TrendingUp className="w-5 h-5 text-green-600" />
                 </div>
-                <TrendingUp className="w-5 h-5 text-green-600" />
               </Card>
-              <Card className="p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-600">Avg Order</p>
-                  <p className="text-lg font-bold">${stats.avg.toFixed(2)}</p>
+
+              <Card className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Avg Order Value</p>
+                    <p className="text-lg font-bold">${metrics.avgOrderValue.toFixed(2)}</p>
+                  </div>
+                  <Users className="w-5 h-5 text-purple-600" />
                 </div>
-                <Users className="w-5 h-5 text-purple-600" />
               </Card>
             </>
           )}
         </div>
 
-        {/* search */}
+        {/* Search */}
         <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           <Input
             placeholder="Search orders..."
             value={searchTerm}
@@ -238,7 +364,7 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
 
         {/* Mobile Card View */}
         <div className="lg:hidden space-y-3">
-          {loading ? (
+          {loading && orders.length === 0 ? (
             [...Array(5)].map((_, i) => (
               <Card key={i} className="p-4">
                 <div className="space-y-3">
@@ -256,63 +382,84 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                 </div>
               </Card>
             ))
-          ) : filtered.length === 0 ? (
+          ) : filteredOrders.length === 0 ? (
             <Card className="p-6 text-center">
               <ShoppingCart className="w-8 h-8 text-gray-400 mx-auto mb-2" />
               <p className="text-gray-500">{searchTerm ? "No orders found." : "No orders yet."}</p>
             </Card>
           ) : (
-            filtered.map((order) => (
-              <Card key={order.id} className="p-4">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-medium">{order.orderNumber}</h3>
-                    <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
-                    <p className="text-xs text-gray-500">{order.storeName}</p>
+            <>
+              {filteredOrders.map((order) => (
+                <Card key={order.id} className="p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="font-medium">{order.orderNumber}</h3>
+                      <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
+                      <p className="text-xs text-gray-500">{order.storeName}</p>
+                    </div>
+                    <Badge className={`${getStatusColor(order.status)} text-xs`}>{order.status}</Badge>
                   </div>
-                  <Badge className={`${statusColor(order.status)} text-xs`}>{order.status}</Badge>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                  <div>
-                    <span className="text-gray-600">Total:</span>
-                    <p className="font-medium">${order.totalAmount.toFixed(2)}</p>
+                  <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                    <div>
+                      <span className="text-gray-600">Total:</span>
+                      <p className="font-medium">${order.totalAmount.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Profit:</span>
+                      <p className={`font-medium ${order.profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        ${order.profit.toFixed(2)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Date:</span>
+                      <p>{new Date(order.orderDate).toLocaleDateString()}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Items:</span>
+                      <p>{order.items.length}</p>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Profit:</span>
-                    <p className={`font-medium ${order.profit >= 0 ? "text-green-600" : "text-red-600"}`}>
-                      ${order.profit.toFixed(2)}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Date:</span>
-                    <p>{new Date(order.orderDate).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Items:</span>
-                    <p>{order.items.length}</p>
-                  </div>
-                </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedOrder(order)
-                    setIsDialogOpen(true)
-                  }}
-                  className="w-full"
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  View Details
-                </Button>
-              </Card>
-            ))
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedOrder(order)
+                      setIsViewOrderOpen(true)
+                    }}
+                    className="w-full"
+                  >
+                    <Eye className="w-4 h-4 mr-2" />
+                    View Details
+                  </Button>
+                </Card>
+              ))}
+
+              {/* Load More Button for Mobile */}
+              {hasMore && !searchTerm && (
+                <div className="flex justify-center pt-4">
+                  <Button
+                    onClick={loadMoreOrders}
+                    disabled={loadingMore}
+                    variant="outline"
+                    className="w-full bg-transparent"
+                  >
+                    {loadingMore ? (
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 mr-2" />
+                    )}
+                    {loadingMore ? "Loading..." : `Load More (${total - orders.length} remaining)`}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Desktop Table */}
-        {loading ? (
+        {/* Desktop Table View */}
+        {loading && orders.length === 0 ? (
           <div className="hidden lg:block">
             <TableSkeleton />
           </div>
@@ -321,14 +468,19 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    {["Order #", "Customer", "Store", "Date", "Status", "Total", "Profit", "Actions"].map((h) => (
-                      <TableHead key={h}>{h}</TableHead>
-                    ))}
+                  <TableRow className="h-10">
+                    <TableHead>Order #</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Store</TableHead>
+                    <TableHead className="w-[100px]">Date</TableHead>
+                    <TableHead className="w-[80px]">Status</TableHead>
+                    <TableHead className="w-[100px]">Total</TableHead>
+                    <TableHead className="w-[100px]">Profit</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.length === 0 ? (
+                  {filteredOrders.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center py-8">
                         <ShoppingCart className="w-8 h-8 text-gray-400 mx-auto mb-2" />
@@ -336,37 +488,61 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filtered.map((o) => (
-                      <TableRow key={o.id}>
-                        <TableCell className="font-medium">{o.orderNumber}</TableCell>
-                        <TableCell>
-                          <div className="font-medium">{o.customerName}</div>
-                          <div className="text-sm text-gray-500 truncate max-w-[150px]">{o.customerEmail}</div>
-                        </TableCell>
-                        <TableCell>{o.storeName}</TableCell>
-                        <TableCell>{new Date(o.orderDate).toLocaleDateString()}</TableCell>
-                        <TableCell>
-                          <Badge className={`${statusColor(o.status)} text-xs`}>{o.status}</Badge>
-                        </TableCell>
-                        <TableCell>${o.totalAmount.toFixed(2)}</TableCell>
-                        <TableCell className={o.profit >= 0 ? "text-green-600" : "text-red-600"}>
-                          ${o.profit.toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="View"
-                            onClick={() => {
-                              setSelectedOrder(o)
-                              setIsDialogOpen(true)
-                            }}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    <>
+                      {filteredOrders.map((order) => (
+                        <TableRow key={order.id} className="h-12">
+                          <TableCell className="font-medium">{order.orderNumber}</TableCell>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">{order.customerName}</div>
+                              <div className="text-sm text-gray-500 truncate max-w-[150px]">{order.customerEmail}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{order.storeName}</TableCell>
+                          <TableCell className="text-sm">{new Date(order.orderDate).toLocaleDateString()}</TableCell>
+                          <TableCell>
+                            <Badge className={`${getStatusColor(order.status)} text-xs px-2 py-1`}>
+                              {order.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>${order.totalAmount.toFixed(2)}</TableCell>
+                          <TableCell>
+                            <span className={order.profit >= 0 ? "text-green-600" : "text-red-600"}>
+                              ${order.profit.toFixed(2)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedOrder(order)
+                                setIsViewOrderOpen(true)
+                              }}
+                              title="View Order Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+
+                      {/* Load More Row for Desktop */}
+                      {hasMore && !searchTerm && (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-4">
+                            <Button onClick={loadMoreOrders} disabled={loadingMore} variant="outline" size="sm">
+                              {loadingMore ? (
+                                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 mr-2" />
+                              )}
+                              {loadingMore ? "Loading..." : `Load More (${total - orders.length} remaining)`}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
                   )}
                 </TableBody>
               </Table>
@@ -374,8 +550,8 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
           </Card>
         )}
 
-        {/* Order Details Dialog */}
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        {/* View Order Dialog */}
+        <Dialog open={isViewOrderOpen} onOpenChange={setIsViewOrderOpen}>
           <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Order Details - {selectedOrder?.orderNumber}</DialogTitle>
@@ -415,7 +591,7 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                         </p>
                         <p>
                           <strong>Status:</strong>
-                          <Badge className={`${statusColor(selectedOrder.status)} text-xs ml-2`}>
+                          <Badge className={`${getStatusColor(selectedOrder.status)} text-xs ml-2`}>
                             {selectedOrder.status}
                           </Badge>
                         </p>
@@ -436,14 +612,14 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                           <TableHead className="w-[80px]">Qty</TableHead>
                           <TableHead className="w-[100px]">Unit Price</TableHead>
                           <TableHead className="w-[100px]">Unit Cost</TableHead>
-                          <TableHead className="w-[100px]">Total</TableHead>
                           <TableHead className="w-[100px]">Item Profit</TableHead>
+                          <TableHead className="w-[100px]">Total</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {selectedOrder.items.map((item, index) => {
-                          const costPrice = (item as any).cost_price || 0
-                          const itemProfit = (item.total_price || 0) - costPrice * (item.quantity || 0)
+                          const itemCost = (item as any).cost_price || 0
+                          const itemProfit = (item.unit_price - itemCost) * item.quantity
 
                           return (
                             <TableRow key={index}>
@@ -451,11 +627,11 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                               <TableCell>{item.product_name}</TableCell>
                               <TableCell className="text-center">{item.quantity}</TableCell>
                               <TableCell>${item.unit_price.toFixed(2)}</TableCell>
-                              <TableCell className="text-orange-600 font-medium">${costPrice.toFixed(2)}</TableCell>
-                              <TableCell>${item.total_price.toFixed(2)}</TableCell>
+                              <TableCell className="text-orange-600">${itemCost.toFixed(2)}</TableCell>
                               <TableCell className={itemProfit >= 0 ? "text-green-600" : "text-red-600"}>
                                 ${itemProfit.toFixed(2)}
                               </TableCell>
+                              <TableCell>${item.total_price.toFixed(2)}</TableCell>
                             </TableRow>
                           )
                         })}
@@ -486,11 +662,7 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                         <span>Tax:</span>
                         <span>${selectedOrder.taxAmount.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between font-medium text-base border-t pt-2">
-                        <span>Total:</span>
-                        <span>${selectedOrder.totalAmount.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-medium text-base">
+                      <div className="flex justify-between">
                         <span>Total Cost:</span>
                         <span className="text-orange-600">
                           $
@@ -498,6 +670,10 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                             .reduce((sum, item) => sum + ((item as any).cost_price || 0) * item.quantity, 0)
                             .toFixed(2)}
                         </span>
+                      </div>
+                      <div className="flex justify-between font-medium text-base border-t pt-2">
+                        <span>Total:</span>
+                        <span>${selectedOrder.totalAmount.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between font-medium text-base">
                         <span>Profit:</span>
@@ -510,10 +686,6 @@ export default function ShopifyOrdersClient({ initialOrders }: Props) {
                 </div>
               </div>
             )}
-
-            <div className="flex justify-end mt-6">
-              <Button onClick={() => setIsDialogOpen(false)}>Close</Button>
-            </div>
           </DialogContent>
         </Dialog>
       </div>

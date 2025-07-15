@@ -1,12 +1,19 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { supabaseStore } from "@/lib/supabase-store"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const orders = await supabaseStore.getShopifyOrders()
-    return NextResponse.json(orders)
+    const { searchParams } = new URL(request.url)
+    const limit = Number.parseInt(searchParams.get("limit") || "20")
+    const offset = Number.parseInt(searchParams.get("offset") || "0")
+
+    console.log(`API: Fetching orders with limit=${limit}, offset=${offset}`)
+
+    const result = await supabaseStore.getShopifyOrders({ limit, offset })
+
+    return NextResponse.json(result)
   } catch (error) {
-    console.error("Error fetching orders:", error)
+    console.error("Error in shopify-orders/list API:", error)
     return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 })
   }
 }

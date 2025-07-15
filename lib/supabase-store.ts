@@ -444,7 +444,7 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
 
 /**
  * Attach `cost_price` to order items.
- * If a pre-loaded `costsMap` is supplied it’s used directly, otherwise
+ * If a pre-loaded `costsMap` is supplied it's used directly, otherwise
  * the function fetches the map from Supabase.
  */
 async function getOrderItemsWithCosts(
@@ -1170,9 +1170,33 @@ async function deleteShopifyStore(id: string): Promise<void> {
 /*                               Shopify Orders APIs                           */
 /* -------------------------------------------------------------------------- */
 
-async function getShopifyOrders(): Promise<ShopifyOrder[]> {
+interface PaginationOptions {
+  limit?: number
+  offset?: number
+}
+
+interface PaginatedResult<T> {
+  data: T[]
+  total: number
+  hasMore: boolean
+}
+
+async function getShopifyOrders(options: PaginationOptions = {}): Promise<PaginatedResult<ShopifyOrder>> {
   try {
-    /* 1 ▸ Grab all orders + items in a single call */
+    const { limit = 20, offset = 0 } = options
+
+    console.log(`Fetching Shopify orders with limit: ${limit}, offset: ${offset}`)
+
+    /* 1 ▸ Get total count first */
+    const { count, error: countError } = await supabase
+      .from("shopify_orders")
+      .select("*", { count: "exact", head: true })
+
+    if (countError) throw countError
+
+    const total = count || 0
+
+    /* 2 ▸ Grab paginated orders + items in a single call */
     const { data, error } = await supabase
       .from("shopify_orders")
       .select(
@@ -1188,14 +1212,15 @@ async function getShopifyOrders(): Promise<ShopifyOrder[]> {
          )`,
       )
       .order("order_date", { ascending: false })
+      .range(offset, offset + limit - 1)
 
     if (error) throw error
 
-    /* 2 ▸ Pull the latest unit-cost map ONCE */
+    /* 3 ▸ Pull the latest unit-cost map ONCE */
     const latestCosts = await getLatestUnitCosts()
 
-    /* 3 ▸ Enrich items with costs + compute profit */
-    return (data || []).map((row) => {
+    /* 4 ▸ Enrich items with costs + compute profit */
+    const orders = (data || []).map((row) => {
       const itemsWithCosts = (row.shopify_order_items || []).map((it) => ({
         ...it,
         cost_price: latestCosts.get(it.sku) ?? 0,
@@ -1235,10 +1260,22 @@ async function getShopifyOrders(): Promise<ShopifyOrder[]> {
         tax_amount: row.tax_amount ?? 0,
       }
     })
+
+    return {
+      data: orders,
+      total,
+      hasMore: offset + limit < total,
+    }
   } catch (err) {
     console.error("Error fetching Shopify orders:", err)
     throw err
   }
+}
+
+// Legacy function for backward compatibility
+async function getAllShopifyOrders(): Promise<ShopifyOrder[]> {
+  const result = await getShopifyOrders({ limit: 1000, offset: 0 })
+  return result.data
 }
 
 /**
@@ -1726,6 +1763,7 @@ export const supabaseStore = {
 
   /* Shopify Orders */
   getShopifyOrders,
+  getAllShopifyOrders, // Legacy function
   addShopifyOrders,
 
   /* Minimal stubs (unchanged logic) so other pages keep compiling */
