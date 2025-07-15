@@ -971,7 +971,7 @@ async function createStore(storeData: {
       url: data.shopify_domain,
       api_key: data.access_token,
       api_secret: data.webhook_url,
-      status: data.status === "Connected" ? "Active" : data.status === "Error" ? "Error" : "Inactive",
+      status: data.status === "Active" ? "Active" : data.status === "Error" ? "Error" : "Inactive",
       notes: data.notes,
       created_at: data.created_at,
       updated_at: data.updated_at,
@@ -1012,7 +1012,7 @@ async function updateStore(id: string, updates: Partial<StoreData>): Promise<Sto
       url: data.shopify_domain,
       api_key: data.access_token,
       api_secret: data.webhook_url,
-      status: data.status === "Active" ? "Connected" : data.status === "Error" ? "Error" : "Inactive",
+      status: data.status === "Active" ? "Active" : data.status === "Error" ? "Error" : "Inactive",
       notes: data.notes,
       created_at: data.created_at,
       updated_at: data.updated_at,
@@ -1852,17 +1852,29 @@ export const supabaseStore = {
   getReports: () => Promise.resolve([]),
 }
 
+/**
+ * Generate a unique, chronologically sortable Purchase-Order number.
+ * Format: POYYYYMMDDHHMMSSmmmRR  (RR = random 00-99 suffix)
+ *
+ * Example: PO202507151653099450
+ */
 function generatePONumber(): string {
   const now = new Date()
+
   const pad = (n: number, len = 2) => n.toString().padStart(len, "0")
-  const ts =
+
+  const timestamp =
     now.getFullYear().toString() +
     pad(now.getMonth() + 1) +
     pad(now.getDate()) +
     pad(now.getHours()) +
     pad(now.getMinutes()) +
-    pad(now.getSeconds())
-  return `PO${ts}`
+    pad(now.getSeconds()) +
+    pad(now.getMilliseconds(), 3) // millisecond precision
+
+  const randomSuffix = pad(Math.floor(Math.random() * 100)) // 00-99
+
+  return `PO${timestamp}${randomSuffix}`
 }
 
 /**

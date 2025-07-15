@@ -14,6 +14,54 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { supabaseStore } from "@/lib/supabase-store"
 
+/**
+ * Safely parse integers / floats.
+ * Returns the provided fallback (default = 0) when the value is
+ * undefined, empty, or NaN so we never pass `null` to Postgres.
+ */
+function safeInt(value: string | undefined, fallback = 0): number {
+  const n = Number.parseInt(value ?? "", 10)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function safeFloat(value: string | undefined, fallback = 0): number {
+  const n = Number.parseFloat(value ?? "")
+  return Number.isFinite(n) ? n : fallback
+}
+
+/**
+ * Converts various date formats (DD-MM-YYYY, DD/MM/YYYY, YY-MM-DD, etc.)
+ * to the canonical YYYY-MM-DD format accepted by Postgres.
+ */
+function normalizeDate(input: string | undefined): string {
+  if (!input || !input.trim()) {
+    return new Date().toISOString().split("T")[0]
+  }
+
+  const raw = input.trim().replace(/\//g, "-")
+
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+
+  const parts = raw.split("-")
+  if (parts.length === 3) {
+    const [a, b, c] = parts
+
+    // Case 1: YY-MM-DD  → prepend 20 to year
+    if (a.length === 2 && b.length === 2 && c.length === 2) {
+      return `20${a}-${b.padStart(2, "0")}-${c.padStart(2, "0")}`
+    }
+
+    // Case 2: DD-MM-YYYY or DD-MM-YY
+    if (c.length === 4) {
+      return `${c}-${b.padStart(2, "0")}-${a.padStart(2, "0")}`
+    }
+  }
+
+  // Fallback
+  return new Date().toISOString().split("T")[0]
+}
+
 interface ImportResult {
   success: boolean
   message: string
@@ -113,45 +161,91 @@ export default function ImportPage() {
       const errors: string[] = []
 
       if (importType === "purchase-orders") {
-        // Import purchase orders
+        // Group rows by PO identifier (supplier + date + status combination)
+        const poGroups = new Map<
+          string,
+          {
+            supplier_name: string
+            po_date: string
+            status: "Draft" | "Pending" | "In Transit" | "Delivered"
+            delivery_cost: number
+            notes: string
+            items: Array<{
+              sku: string
+              product_name: string
+              quantity: number
+              unit_cost: number
+            }>
+          }
+        >()
+
+        // Find column indices once
+        const supplierIndex = headers.findIndex((h) => h.toLowerCase() === "supplier")
+        const dateIndex = headers.findIndex((h) => h.toLowerCase() === "date")
+        const statusIndex = headers.findIndex((h) => h.toLowerCase() === "status")
+        const deliveryCostIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "delivery cost" || h.toLowerCase() === "delivery_cost",
+        )
+        const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
+        const productIndex = headers.findIndex((h) => h.toLowerCase() === "product")
+        const quantityIndex = headers.findIndex((h) => h.toLowerCase() === "quantity")
+        const unitCostIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "unit cost" || h.toLowerCase() === "unit_cost",
+        )
+        const notesIndex = headers.findIndex((h) => h.toLowerCase() === "notes")
+
+        // Process each row and group by PO
         for (let i = 0; i < dataRows.length; i++) {
           try {
             const row = dataRows[i]
-            if (row.length < headers.length) continue
+            if (row.length === 0 || row.every((cell) => !cell.trim())) continue
 
-            const poData = {
-              supplier_name:
-                row[headers.indexOf("Supplier")] || row[headers.indexOf("supplier")] || `Supplier ${i + 1}`,
-              po_date:
-                row[headers.indexOf("Date")] || row[headers.indexOf("date")] || new Date().toISOString().split("T")[0],
-              status: (row[headers.indexOf("Status")] || row[headers.indexOf("status")] || "Draft") as
-                | "Draft"
-                | "Pending"
-                | "In Transit"
-                | "Delivered",
-              delivery_cost: Number.parseFloat(
-                row[headers.indexOf("Delivery Cost")] || row[headers.indexOf("delivery_cost")] || "0",
-              ),
-              items: [
-                {
-                  sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
-                  product_name:
-                    row[headers.indexOf("Product")] || row[headers.indexOf("product")] || `Product ${i + 1}`,
-                  quantity: Number.parseInt(
-                    row[headers.indexOf("Quantity")] || row[headers.indexOf("quantity")] || "1",
-                  ),
-                  unit_cost: Number.parseFloat(
-                    row[headers.indexOf("Unit Cost")] || row[headers.indexOf("unit_cost")] || "0",
-                  ),
-                },
-              ],
-              notes: row[headers.indexOf("Notes")] || row[headers.indexOf("notes")] || "",
+            const supplier = row[supplierIndex] || `Supplier ${i + 1}`
+            const date = normalizeDate(row[dateIndex])
+            const status = (row[statusIndex] || "Draft") as "Draft" | "Pending" | "In Transit" | "Delivered"
+            const deliveryCost = safeFloat(row[deliveryCostIndex])
+            const notes = row[notesIndex] || ""
+
+            // Create a unique key for this PO (supplier + date + status)
+            const poKey = `${supplier}|${date}|${status}`
+
+            // Get or create PO group
+            if (!poGroups.has(poKey)) {
+              poGroups.set(poKey, {
+                supplier_name: supplier,
+                po_date: date,
+                status: status,
+                delivery_cost: deliveryCost,
+                notes: notes,
+                items: [],
+              })
             }
 
-            await supabaseStore.createPurchaseOrder(poData)
-            imported++
+            const poGroup = poGroups.get(poKey)!
+
+            // Add item to this PO
+            const item = {
+              sku: row[skuIndex] || `SKU-${i + 1}`,
+              product_name: row[productIndex] || `Product ${i + 1}`,
+              quantity: safeInt(row[quantityIndex], 1),
+              unit_cost: safeFloat(row[unitCostIndex]),
+            }
+
+            poGroup.items.push(item)
           } catch (error) {
             errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
+
+        // Create POs from grouped data
+        for (const [poKey, poData] of poGroups) {
+          try {
+            if (poData.items.length > 0) {
+              await supabaseStore.createPurchaseOrder(poData)
+              imported++
+            }
+          } catch (error) {
+            errors.push(`PO ${poKey}: ${error instanceof Error ? error.message : "Unknown error"}`)
           }
         }
       } else if (importType === "inventory") {
@@ -159,27 +253,22 @@ export default function ImportPage() {
         for (let i = 0; i < dataRows.length; i++) {
           try {
             const row = dataRows[i]
-            if (row.length < headers.length) continue
+            if (row.length === 0 || row.every((cell) => !cell.trim())) continue
+
+            const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
+            const nameIndex = headers.findIndex((h) => h.toLowerCase() === "name" || h.toLowerCase() === "product")
+            const quantityIndex = headers.findIndex(
+              (h) => h.toLowerCase() === "quantity" || h.toLowerCase() === "stock",
+            )
+            const unitCostIndex = headers.findIndex(
+              (h) => h.toLowerCase() === "unit cost" || h.toLowerCase() === "unit_cost" || h.toLowerCase() === "cost",
+            )
 
             const inventoryData = {
-              sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
-              name:
-                row[headers.indexOf("Name")] ||
-                row[headers.indexOf("name")] ||
-                row[headers.indexOf("Product")] ||
-                `Product ${i + 1}`,
-              quantity: Number.parseInt(
-                row[headers.indexOf("Quantity")] ||
-                  row[headers.indexOf("quantity")] ||
-                  row[headers.indexOf("Stock")] ||
-                  "0",
-              ),
-              unitCost: Number.parseFloat(
-                row[headers.indexOf("Unit Cost")] ||
-                  row[headers.indexOf("unit_cost")] ||
-                  row[headers.indexOf("Cost")] ||
-                  "0",
-              ),
+              sku: row[skuIndex] || `SKU-${i + 1}`,
+              name: row[nameIndex] || `Product ${i + 1}`,
+              quantity: safeInt(row[quantityIndex]),
+              unitCost: safeFloat(row[unitCostIndex]),
             }
 
             if (inventoryData.quantity > 0) {
@@ -191,92 +280,210 @@ export default function ImportPage() {
           }
         }
       } else if (importType === "orders") {
-        // Import orders (simplified - would need more complex mapping for real Shopify orders)
+        // Group rows by order identifier (order_id or order_number)
+        const orderGroups = new Map<
+          string,
+          {
+            store_id: string
+            shopify_order_id: string
+            order_number: string
+            customer_name: string
+            customer_email: string
+            order_date: string
+            status: string
+            total_amount: number
+            shipping_cost: number
+            tax_amount: number
+            shipping_address: string
+            items: Array<{
+              sku: string
+              product_name: string
+              quantity: number
+              unit_price: number
+              total_price: number
+            }>
+          }
+        >()
+
+        // Find column indices
+        const orderIdIndex = headers.findIndex((h) => h.toLowerCase() === "order id" || h.toLowerCase() === "order_id")
+        const orderNumberIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "order number" || h.toLowerCase() === "order_number",
+        )
+        const customerIndex = headers.findIndex((h) => h.toLowerCase() === "customer")
+        const emailIndex = headers.findIndex((h) => h.toLowerCase() === "email")
+        const dateIndex = headers.findIndex((h) => h.toLowerCase() === "date")
+        const statusIndex = headers.findIndex((h) => h.toLowerCase() === "status")
+        const totalIndex = headers.findIndex((h) => h.toLowerCase() === "total")
+        const shippingIndex = headers.findIndex((h) => h.toLowerCase() === "shipping")
+        const taxIndex = headers.findIndex((h) => h.toLowerCase() === "tax")
+        const addressIndex = headers.findIndex((h) => h.toLowerCase() === "address")
+        const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
+        const productIndex = headers.findIndex((h) => h.toLowerCase() === "product")
+        const quantityIndex = headers.findIndex((h) => h.toLowerCase() === "quantity")
+        const priceIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "price" || h.toLowerCase() === "unit price" || h.toLowerCase() === "unit_price",
+        )
+
+        // Process each row and group by order
         for (let i = 0; i < dataRows.length; i++) {
           try {
             const row = dataRows[i]
-            if (row.length < headers.length) continue
+            if (row.length === 0 || row.every((cell) => !cell.trim())) continue
 
-            const orderData = {
-              store_id: "1", // Default store
-              shopify_order_id: row[headers.indexOf("Order ID")] || `ORDER-${Date.now()}-${i}`,
-              order_number: row[headers.indexOf("Order Number")] || `#${1000 + i}`,
-              customer_name:
-                row[headers.indexOf("Customer")] || row[headers.indexOf("customer")] || `Customer ${i + 1}`,
-              customer_email: row[headers.indexOf("Email")] || row[headers.indexOf("email")] || "",
-              order_date: row[headers.indexOf("Date")] || row[headers.indexOf("date")] || new Date().toISOString(),
-              status: row[headers.indexOf("Status")] || row[headers.indexOf("status")] || "pending",
-              total_amount: Number.parseFloat(row[headers.indexOf("Total")] || row[headers.indexOf("total")] || "0"),
-              shipping_cost: Number.parseFloat(
-                row[headers.indexOf("Shipping")] || row[headers.indexOf("shipping")] || "0",
-              ),
-              tax_amount: Number.parseFloat(row[headers.indexOf("Tax")] || row[headers.indexOf("tax")] || "0"),
-              shipping_address: row[headers.indexOf("Address")] || row[headers.indexOf("address")] || "",
-              items: [
-                {
-                  sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
-                  product_name:
-                    row[headers.indexOf("Product")] || row[headers.indexOf("product")] || `Product ${i + 1}`,
-                  quantity: Number.parseInt(
-                    row[headers.indexOf("Quantity")] || row[headers.indexOf("quantity")] || "1",
-                  ),
-                  unit_price: Number.parseFloat(row[headers.indexOf("Price")] || row[headers.indexOf("price")] || "0"),
-                  total_price: Number.parseFloat(row[headers.indexOf("Total")] || row[headers.indexOf("total")] || "0"),
-                },
-              ],
+            const orderId = row[orderIdIndex] || `ORDER-${Date.now()}-${i}`
+            const orderNumber = row[orderNumberIndex] || `#${1000 + i}`
+
+            // Use order ID as the key, fallback to order number
+            const orderKey = orderId !== `ORDER-${Date.now()}-${i}` ? orderId : orderNumber
+
+            // Get or create order group
+            if (!orderGroups.has(orderKey)) {
+              orderGroups.set(orderKey, {
+                store_id: "1", // Default store
+                shopify_order_id: orderId,
+                order_number: orderNumber,
+                customer_name: row[customerIndex] || `Customer ${i + 1}`,
+                customer_email: row[emailIndex] || "",
+                order_date: normalizeDate(row[dateIndex]),
+                status: row[statusIndex] || "pending",
+                total_amount: safeFloat(row[totalIndex]),
+                shipping_cost: safeFloat(row[shippingIndex]),
+                tax_amount: safeFloat(row[taxIndex]),
+                shipping_address: row[addressIndex] || "",
+                items: [],
+              })
             }
 
-            await supabaseStore.addShopifyOrders([orderData])
-            imported++
+            const orderGroup = orderGroups.get(orderKey)!
+
+            // Add item to this order
+            const item = {
+              sku: row[skuIndex] || `SKU-${i + 1}`,
+              product_name: row[productIndex] || `Product ${i + 1}`,
+              quantity: safeInt(row[quantityIndex], 1),
+              unit_price: safeFloat(row[priceIndex]),
+              total_price: safeFloat(row[totalIndex]),
+            }
+
+            orderGroup.items.push(item)
           } catch (error) {
             errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
           }
         }
+
+        // Create orders from grouped data
+        for (const [orderKey, orderData] of orderGroups) {
+          try {
+            if (orderData.items.length > 0) {
+              await supabaseStore.addShopifyOrders([orderData])
+              imported++
+            }
+          } catch (error) {
+            errors.push(`Order ${orderKey}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
       } else if (importType === "returns") {
-        // Import returns
+        // Group rows by return identifier
+        const returnGroups = new Map<
+          string,
+          {
+            customer_name: string
+            customer_email?: string
+            order_number?: string
+            return_date: string
+            status: "Pending" | "Processing" | "Accepted" | "Rejected"
+            total_refund: number
+            notes?: string
+            items: Array<{
+              sku: string
+              product_name: string
+              quantity: number
+              condition: string
+              reason: string
+              total_refund: number
+              unit_price?: number
+            }>
+          }
+        >()
+
+        // Find column indices
+        const returnNumberIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "return number" || h.toLowerCase() === "return_number",
+        )
+        const customerIndex = headers.findIndex((h) => h.toLowerCase() === "customer")
+        const emailIndex = headers.findIndex((h) => h.toLowerCase() === "email")
+        const orderNumberIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "order number" || h.toLowerCase() === "order_number",
+        )
+        const dateIndex = headers.findIndex((h) => h.toLowerCase() === "date")
+        const statusIndex = headers.findIndex((h) => h.toLowerCase() === "status")
+        const refundIndex = headers.findIndex((h) => h.toLowerCase() === "refund")
+        const notesIndex = headers.findIndex((h) => h.toLowerCase() === "notes")
+        const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
+        const productIndex = headers.findIndex((h) => h.toLowerCase() === "product")
+        const quantityIndex = headers.findIndex((h) => h.toLowerCase() === "quantity")
+        const conditionIndex = headers.findIndex((h) => h.toLowerCase() === "condition")
+        const reasonIndex = headers.findIndex((h) => h.toLowerCase() === "reason")
+        const unitPriceIndex = headers.findIndex(
+          (h) => h.toLowerCase() === "unit price" || h.toLowerCase() === "unit_price",
+        )
+
+        // Process each row and group by return
         for (let i = 0; i < dataRows.length; i++) {
           try {
             const row = dataRows[i]
-            if (row.length < headers.length) continue
+            if (row.length === 0 || row.every((cell) => !cell.trim())) continue
 
-            const returnData = {
-              customer_name:
-                row[headers.indexOf("Customer")] || row[headers.indexOf("customer")] || `Customer ${i + 1}`,
-              customer_email: row[headers.indexOf("Email")] || row[headers.indexOf("email")] || "",
-              order_number: row[headers.indexOf("Order Number")] || row[headers.indexOf("order_number")] || "",
-              return_date:
-                row[headers.indexOf("Date")] || row[headers.indexOf("date")] || new Date().toISOString().split("T")[0],
-              status: (row[headers.indexOf("Status")] || row[headers.indexOf("status")] || "Pending") as
-                | "Pending"
-                | "Processing"
-                | "Accepted"
-                | "Rejected",
-              total_refund: Number.parseFloat(row[headers.indexOf("Refund")] || row[headers.indexOf("refund")] || "0"),
-              notes: row[headers.indexOf("Notes")] || row[headers.indexOf("notes")] || "",
-              items: [
-                {
-                  sku: row[headers.indexOf("SKU")] || row[headers.indexOf("sku")] || `SKU-${i + 1}`,
-                  product_name:
-                    row[headers.indexOf("Product")] || row[headers.indexOf("product")] || `Product ${i + 1}`,
-                  quantity: Number.parseInt(
-                    row[headers.indexOf("Quantity")] || row[headers.indexOf("quantity")] || "1",
-                  ),
-                  condition: row[headers.indexOf("Condition")] || row[headers.indexOf("condition")] || "Good",
-                  reason: row[headers.indexOf("Reason")] || row[headers.indexOf("reason")] || "Other",
-                  total_refund: Number.parseFloat(
-                    row[headers.indexOf("Refund")] || row[headers.indexOf("refund")] || "0",
-                  ),
-                  unit_price: Number.parseFloat(
-                    row[headers.indexOf("Unit Price")] || row[headers.indexOf("unit_price")] || "0",
-                  ),
-                },
-              ],
+            const returnNumber = row[returnNumberIndex] || `RETURN-${i + 1}`
+            const customer = row[customerIndex] || `Customer ${i + 1}`
+            const orderNumber = row[orderNumberIndex] || ""
+
+            // Use return number + customer + order as the key
+            const returnKey = `${returnNumber}|${customer}|${orderNumber}`
+
+            // Get or create return group
+            if (!returnGroups.has(returnKey)) {
+              returnGroups.set(returnKey, {
+                customer_name: customer,
+                customer_email: row[emailIndex] || "",
+                order_number: orderNumber || undefined,
+                return_date: normalizeDate(row[dateIndex]),
+                status: (row[statusIndex] || "Pending") as "Pending" | "Processing" | "Accepted" | "Rejected",
+                total_refund: safeFloat(row[refundIndex]),
+                notes: row[notesIndex] || "",
+                items: [],
+              })
             }
 
-            await supabaseStore.createReturn(returnData)
-            imported++
+            const returnGroup = returnGroups.get(returnKey)!
+
+            // Add item to this return
+            const item = {
+              sku: row[skuIndex] || `SKU-${i + 1}`,
+              product_name: row[productIndex] || `Product ${i + 1}`,
+              quantity: safeInt(row[quantityIndex], 1),
+              condition: row[conditionIndex] || "Good",
+              reason: row[reasonIndex] || "Other",
+              total_refund: safeFloat(row[refundIndex]),
+              unit_price: safeFloat(row[unitPriceIndex]),
+            }
+
+            returnGroup.items.push(item)
           } catch (error) {
             errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "Unknown error"}`)
+          }
+        }
+
+        // Create returns from grouped data
+        for (const [returnKey, returnData] of returnGroups) {
+          try {
+            if (returnData.items.length > 0) {
+              await supabaseStore.createReturn(returnData)
+              imported++
+            }
+          } catch (error) {
+            errors.push(`Return ${returnKey}: ${error instanceof Error ? error.message : "Unknown error"}`)
           }
         }
       }
@@ -335,6 +542,9 @@ export default function ImportPage() {
               <p className="text-sm text-muted-foreground">
                 Expected columns: Supplier, Date, Status, SKU, Product, Quantity, Unit Cost, Delivery Cost, Notes
               </p>
+              <p className="text-xs text-blue-600">
+                Multiple rows with the same Supplier + Date + Status will be grouped into one PO with multiple items.
+              </p>
               <Button variant="outline" size="sm" onClick={() => downloadSample("purchase-orders")} className="w-full">
                 <Download className="h-4 w-4 mr-2" />
                 Download Sample
@@ -374,6 +584,9 @@ export default function ImportPage() {
                 Expected columns: Order ID, Order Number, Customer, Email, Date, Status, SKU, Product, Quantity, Price,
                 Total, Shipping, Tax, Address
               </p>
+              <p className="text-xs text-blue-600">
+                Multiple rows with the same Order ID will be grouped into one order with multiple items.
+              </p>
               <Button variant="outline" size="sm" onClick={() => downloadSample("orders")} className="w-full">
                 <Download className="h-4 w-4 mr-2" />
                 Download Sample
@@ -394,6 +607,9 @@ export default function ImportPage() {
                 Expected columns: Return Number, Customer, Email, Order Number, Date, Status, SKU, Product, Quantity,
                 Condition, Reason, Refund
               </p>
+              <p className="text-xs text-blue-600">
+                Multiple rows with the same Return Number will be grouped into one return with multiple items.
+              </p>
               <Button variant="outline" size="sm" onClick={() => downloadSample("returns")} className="w-full">
                 <Download className="h-4 w-4 mr-2" />
                 Download Sample
@@ -406,7 +622,8 @@ export default function ImportPage() {
           <CardHeader>
             <CardTitle>Upload CSV File</CardTitle>
             <CardDescription>
-              Select a CSV file to import data. The system will auto-detect the data type based on column headers.
+              Select a CSV file to import data. The system will auto-detect the data type based on column headers and
+              group related rows together.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -537,9 +754,19 @@ export default function ImportPage() {
               </div>
 
               <div>
+                <h4 className="font-medium mb-2">Data Grouping</h4>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• Purchase Orders: Rows with same Supplier + Date + Status are grouped together</li>
+                  <li>• Orders: Rows with same Order ID are grouped together</li>
+                  <li>• Returns: Rows with same Return Number are grouped together</li>
+                  <li>• Inventory: Each row creates a separate inventory entry</li>
+                </ul>
+              </div>
+
+              <div>
                 <h4 className="font-medium mb-2">Data Validation</h4>
                 <ul className="space-y-1 text-muted-foreground">
-                  <li>• SKUs should be unique within the file</li>
+                  <li>• SKUs should be unique within each group</li>
                   <li>• Quantities and costs must be positive numbers</li>
                   <li>• Dates should be in YYYY-MM-DD format</li>
                   <li>• Status values must match predefined options</li>
@@ -550,7 +777,7 @@ export default function ImportPage() {
                 <h4 className="font-medium mb-2">Error Handling</h4>
                 <ul className="space-y-1 text-muted-foreground">
                   <li>• Invalid rows will be skipped and reported</li>
-                  <li>• Partial imports are possible if some rows are valid</li>
+                  <li>• Partial imports are possible if some groups are valid</li>
                   <li>• Check the error log for specific issues</li>
                   <li>• Fix errors and re-import if needed</li>
                 </ul>
