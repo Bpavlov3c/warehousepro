@@ -121,7 +121,14 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
-  // Load global statistics on component mount
+  // Update state when props change (when navigating back to the page)
+  useEffect(() => {
+    setOrders(initialOrders)
+    setTotal(initialTotal)
+    setHasMore(initialHasMore)
+  }, [initialOrders, initialTotal, initialHasMore])
+
+  // Load global statistics on component mount and when orders change
   useEffect(() => {
     const loadGlobalStats = async () => {
       try {
@@ -135,13 +142,11 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
         console.error("Error loading global stats:", err)
         // Fallback to calculating from loaded orders if stats API fails
         setGlobalStats({
-          totalOrders: initialTotal,
-          totalRevenue: initialOrders.reduce((sum, order) => sum + order.totalAmount, 0),
-          totalProfit: initialOrders.reduce((sum, order) => sum + order.profit, 0),
+          totalOrders: total,
+          totalRevenue: orders.reduce((sum, order) => sum + order.totalAmount, 0),
+          totalProfit: orders.reduce((sum, order) => sum + order.profit, 0),
           avgOrderValue:
-            initialOrders.length > 0
-              ? initialOrders.reduce((sum, order) => sum + order.totalAmount, 0) / initialOrders.length
-              : 0,
+            orders.length > 0 ? orders.reduce((sum, order) => sum + order.totalAmount, 0) / orders.length : 0,
         })
       } finally {
         setStatsLoading(false)
@@ -149,7 +154,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     }
 
     loadGlobalStats()
-  }, [initialTotal, initialOrders])
+  }, [orders, total])
 
   // Load more orders
   const loadMoreOrders = useCallback(async () => {
@@ -199,7 +204,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     }
   }, [])
 
-  // Add sync function after the refreshOrders function
+  // Sync orders from Shopify
   const syncOrders = useCallback(async () => {
     setSyncing(true)
     setError(null)

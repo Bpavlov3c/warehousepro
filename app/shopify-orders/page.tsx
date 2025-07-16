@@ -1,9 +1,12 @@
 import { supabaseStore } from "@/lib/supabase-store"
 import ShopifyOrdersClientComponent from "@/components/shopify-orders-client"
 
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
 export default async function ShopifyOrdersPage() {
   try {
-    // Load initial 20 orders for fast page load
+    // Always load fresh data from the database
     const result = await supabaseStore.getShopifyOrders({ limit: 20, offset: 0 })
 
     return (
@@ -16,7 +19,7 @@ export default async function ShopifyOrdersPage() {
   } catch (error) {
     console.error("Error loading initial orders:", error)
 
-    // Return error state component
+    // Return error state component with empty data
     return <ShopifyOrdersClientComponent initialOrders={[]} initialTotal={0} initialHasMore={false} />
   }
 }
