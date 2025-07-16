@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { Search, Plus, Package, TrendingUp, AlertTriangle, DollarSign } from "lucide-react"
+import { Search, Plus, Package, TrendingUp, AlertTriangle, DollarSign, Download } from "lucide-react"
 import { supabaseStore, type InventoryItem } from "@/lib/supabase-store"
 
 // Debounce hook for search
@@ -256,6 +256,45 @@ export default function Inventory() {
     setIsEditItemOpen(true)
   }, [])
 
+  const exportInventoryToCSV = useCallback(() => {
+    if (filteredInventory.length === 0) {
+      alert("No inventory data to export")
+      return
+    }
+
+    // Create CSV headers
+    const headers = ["SKU", "Product Name", "In Stock", "Incoming", "Reserved", "Unit Cost", "Total Value", "Status"]
+
+    // Convert inventory data to CSV rows
+    const csvData = filteredInventory.map((item) => {
+      const status = getStockStatus(item)
+      return [
+        item.sku,
+        `"${item.name}"`, // Wrap in quotes to handle commas in product names
+        item.inStock,
+        item.incoming,
+        item.reserved,
+        item.unitCost.toFixed(2),
+        (item.inStock * item.unitCost).toFixed(2),
+        status.label,
+      ]
+    })
+
+    // Combine headers and data
+    const csvContent = [headers, ...csvData].map((row) => row.join(",")).join("\n")
+
+    // Create and download the file
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `inventory-export-${new Date().toISOString().split("T")[0]}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [filteredInventory])
+
   const getStockStatus = useCallback((item: InventoryItem) => {
     if (item.inStock === 0) {
       return { label: "Out of Stock", color: "bg-red-100 text-red-800" }
@@ -292,19 +331,30 @@ export default function Inventory() {
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Inventory</h1>
-          <Button onClick={() => setIsAddItemOpen(true)} size="sm" className="lg:hidden">
-            <Plus className="w-4 h-4" />
-          </Button>
+          <div className="flex gap-2 lg:hidden">
+            <Button onClick={exportInventoryToCSV} variant="outline" size="sm">
+              <Download className="w-4 h-4" />
+            </Button>
+            <Button onClick={() => setIsAddItemOpen(true)} size="sm">
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Inventory</h1>
-          <Button onClick={() => setIsAddItemOpen(true)} size="sm" className="hidden lg:flex">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Item
-          </Button>
+          <div className="hidden lg:flex gap-2">
+            <Button onClick={exportInventoryToCSV} variant="outline" size="sm">
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button onClick={() => setIsAddItemOpen(true)} size="sm">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Item
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}

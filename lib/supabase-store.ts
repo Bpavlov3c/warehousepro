@@ -3,12 +3,60 @@
  * All pages talk to Supabase through this singleton module.
  */
 
+/* -------------------------------------------------------------------------- */
+/*                        SAFE SUPABASE INITIALISATION 🛡️                    */
+/* -------------------------------------------------------------------------- */
+
 import { createClient } from "@supabase/supabase-js"
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+/**
+ * Build a _very_ lightweight mock Supabase client so the whole code-base can
+ * keep calling `.from(...).select()` etc. without blowing up when the real
+ * credentials are absent (which is the case inside the v0 preview sandbox).
+ */
+function makeMockClient() {
+  /* A single no-op builder object reused for every call chain */
+  const builder = {
+    select: () => builder,
+    insert: () => builder,
+    update: () => builder,
+    upsert: () => builder,
+    delete: () => builder,
+    order: () => builder,
+    range: () => builder,
+    eq: () => builder,
+    not: () => builder,
+    in: () => builder,
+    single: () => ({ data: null, error: null }),
+    head: true,
+    /* always succeed with empty data so callers can keep working */
+    data: [],
+    error: null,
+    count: 0,
+  } as any
+
+  return {
+    from: () => builder,
+  } as any
+}
+
+/**
+ * Export a **real** Supabase client when the env vars are present,
+ * otherwise export the mock so the UI can still mount offline.
+ */
+export const supabase =
+  supabaseUrl && supabaseKey
+    ? createClient(supabaseUrl, supabaseKey)
+    : (() => {
+        console.warn(
+          "[supabase-store] Supabase env vars missing – using in-memory mock client.\n" +
+            "Pages will render with empty data but remain functional.",
+        )
+        return makeMockClient()
+      })()
 
 /* -------------------------------------------------------------------------- */
 /*                                    Types                                   */
@@ -196,13 +244,13 @@ async function calculateReservedQuantities(): Promise<Map<string, number>> {
     const { data: ordersData, error: ordersError } = await supabase
       .from("shopify_orders")
       .select(`
-        id,
-        status,
-        shopify_order_items (
-          sku,
-          quantity
-        )
-      `)
+      id,
+      status,
+      shopify_order_items (
+        sku,
+        quantity
+      )
+    `)
       .not("status", "in", "(fulfilled,shipped,delivered,cancelled)")
 
     if (ordersError) {
@@ -251,13 +299,13 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
     const { data: poData, error: poError } = await supabase
       .from("purchase_orders")
       .select(`
-        status,
-        po_items (
-          sku,
-          product_name,
-          quantity
-        )
-      `)
+      status,
+      po_items (
+        sku,
+        product_name,
+        quantity
+      )
+    `)
       .in("status", ["Pending", "In Transit"])
 
     if (poError) {
@@ -561,11 +609,11 @@ async function debugInventoryCosts(sku: string): Promise<void> {
     const { data: poRecords, error: poError } = await supabase
       .from("purchase_orders")
       .select(`
-        *,
-        po_items!inner (
-          *
-        )
-      `)
+      *,
+      po_items!inner (
+        *
+      )
+    `)
       .eq("po_items.sku", sku)
       .order("created_at", { ascending: false })
 
@@ -647,24 +695,24 @@ async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
     const { data, error } = await supabase
       .from("purchase_orders")
       .select(`
+      id,
+      po_number,
+      supplier_name,
+      po_date,
+      status,
+      delivery_cost,
+      notes,
+      created_at,
+      po_items (
         id,
-        po_number,
-        supplier_name,
-        po_date,
-        status,
-        delivery_cost,
-        notes,
-        created_at,
-        po_items (
-          id,
-          po_id,
-          sku,
-          product_name,
-          quantity,
-          unit_cost,
-          total_cost
-        )
-      `)
+        po_id,
+        sku,
+        product_name,
+        quantity,
+        unit_cost,
+        total_cost
+      )
+    `)
       .order("created_at", { ascending: false })
 
     if (error) {
@@ -793,24 +841,24 @@ async function updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>):
     const { data: currentPO, error: fetchError } = await supabase
       .from("purchase_orders")
       .select(`
+      id,
+      po_number,
+      supplier_name,
+      po_date,
+      status,
+      delivery_cost,
+      notes,
+      created_at,
+      po_items (
         id,
-        po_number,
-        supplier_name,
-        po_date,
-        status,
-        delivery_cost,
-        notes,
-        created_at,
-        po_items (
-          id,
-          po_id,
-          sku,
-          product_name,
-          quantity,
-          unit_cost,
-          total_cost
-        )
-      `)
+        po_id,
+        sku,
+        product_name,
+        quantity,
+        unit_cost,
+        total_cost
+      )
+    `)
       .eq("id", id)
       .single()
 
@@ -828,24 +876,24 @@ async function updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>):
       .update(updates)
       .eq("id", id)
       .select(`
+      id,
+      po_number,
+      supplier_name,
+      po_date,
+      status,
+      delivery_cost,
+      notes,
+      created_at,
+      po_items (
         id,
-        po_number,
-        supplier_name,
-        po_date,
-        status,
-        delivery_cost,
-        notes,
-        created_at,
-        po_items (
-          id,
-          po_id,
-          sku,
-          product_name,
-          quantity,
-          unit_cost,
-          total_cost
-        )
-      `)
+        po_id,
+        sku,
+        product_name,
+        quantity,
+        unit_cost,
+        total_cost
+      )
+    `)
       .single()
 
     if (error) {
@@ -1016,24 +1064,24 @@ async function updatePurchaseOrderWithItems(
     const { data: fullPO, error: fullPOError } = await supabase
       .from("purchase_orders")
       .select(`
+      id,
+      po_number,
+      supplier_name,
+      po_date,
+      status,
+      delivery_cost,
+      notes,
+      created_at,
+      po_items (
         id,
-        po_number,
-        supplier_name,
-        po_date,
-        status,
-        delivery_cost,
-        notes,
-        created_at,
-        po_items (
-          id,
-          po_id,
-          sku,
-          product_name,
-          quantity,
-          unit_cost,
-          total_cost
-        )
-      `)
+        po_id,
+        sku,
+        product_name,
+        quantity,
+        unit_cost,
+        total_cost
+      )
+    `)
       .eq("id", id)
       .single()
 
@@ -1367,15 +1415,15 @@ async function getShopifyOrders(options: PaginationOptions = {}): Promise<Pagina
       .from("shopify_orders")
       .select(
         `*,
-         shopify_stores!inner(store_name),
-         shopify_order_items (
-           id,
-           sku,
-           product_name,
-           quantity,
-           unit_price,
-           total_price
-         )`,
+       shopify_stores!inner(store_name),
+       shopify_order_items (
+         id,
+         sku,
+         product_name,
+         quantity,
+         unit_price,
+         total_price
+       )`,
       )
       .order("order_date", { ascending: false })
       .range(offset, offset + limit - 1)
@@ -1447,14 +1495,14 @@ async function getShopifyOrderStats(): Promise<ShopifyOrderStats> {
 
     // Get all orders with their items for profit calculation
     const { data, error } = await supabase.from("shopify_orders").select(`
-        total_amount,
-        tax_amount,
-        shipping_cost,
-        shopify_order_items (
-          sku,
-          quantity
-        )
-      `)
+      total_amount,
+      tax_amount,
+      shipping_cost,
+      shopify_order_items (
+        sku,
+        quantity
+      )
+    `)
 
     if (error) throw error
 
@@ -1761,25 +1809,25 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
     const { data: currentReturn, error: fetchError } = await supabase
       .from("returns")
       .select(`
+      id,
+      return_number,
+      customer_name,
+      customer_email,
+      order_number,
+      return_date,
+      status,
+      notes,
+      created_at,
+      return_items (
         id,
-        return_number,
-        customer_name,
-        customer_email,
-        order_number,
-        return_date,
-        status,
-        notes,
-        created_at,
-        return_items (
-          id,
-          return_id,
-          sku,
-          product_name,
-          quantity,
-          condition,
-          reason
-        )
-      `)
+        return_id,
+        sku,
+        product_name,
+        quantity,
+        condition,
+        reason
+      )
+    `)
       .eq("id", id)
       .single()
 
@@ -1797,27 +1845,27 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
       .update(updates)
       .eq("id", id)
       .select(`
+      id,
+      return_number,
+      customer_name,
+      customer_email,
+      order_number,
+      return_date,
+      status,
+      notes,
+      created_at,
+      updated_at,
+      return_items (
         id,
-        return_number,
-        customer_name,
-        customer_email,
-        order_number,
-        return_date,
-        status,
-        notes,
-        created_at,
-        updated_at,
-        return_items (
-          id,
-          return_id,
-          sku,
-          product_name,
-          quantity,
-          condition,
-          reason,
-          created_at
-        )
-      `)
+        return_id,
+        sku,
+        product_name,
+        quantity,
+        condition,
+        reason,
+        created_at
+      )
+    `)
       .single()
 
     if (error) {
