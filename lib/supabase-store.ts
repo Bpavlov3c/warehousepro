@@ -4,7 +4,6 @@
  */
 
 import { createClient } from "@supabase/supabase-js"
-import type { PostgrestError } from "@supabase/supabase-js"
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -154,6 +153,7 @@ export interface Return {
 
 /**
  * Get the latest unit cost for each SKU from the most recent inventory record
+ * This uses unit_cost_with_delivery which includes proportional shipping costs
  */
 async function getLatestUnitCosts(): Promise<Map<string, number>> {
   try {
@@ -177,7 +177,7 @@ async function getLatestUnitCosts(): Promise<Map<string, number>> {
       }
     })
 
-    console.log("Latest unit costs:", Array.from(latestCosts.entries()))
+    console.log("Latest unit costs (with delivery):", Array.from(latestCosts.entries()))
     return latestCosts
   } catch (error) {
     console.error("Error in getLatestUnitCosts:", error)
@@ -289,9 +289,9 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
 
     // Create inventory items with latest costs and reserved quantities
     skuTotals.forEach((totals, sku) => {
-      const latestCost = latestCosts.get(sku) || 0
+      const latestCost = latestCosts.get(sku) || 0 // This is already unit_cost_with_delivery
       const reserved = reservedQuantities.get(sku) || 0
-      console.log(`SKU ${sku}: quantity=${totals.totalQuantity}, latest_cost=${latestCost}, reserved=${reserved}`)
+      console.log(`SKU ${sku}: quantity=${totals.totalQuantity}, total_unit_cost=${latestCost}, reserved=${reserved}`)
 
       inventoryMap.set(sku, {
         id: `summary-${sku}`,
@@ -300,7 +300,7 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
         inStock: totals.totalQuantity,
         incoming: 0,
         reserved: reserved,
-        unitCost: latestCost,
+        unitCost: latestCost, // This is the total unit cost including shipping
       })
     })
 
@@ -364,12 +364,13 @@ async function getInventory(): Promise<InventoryItem[]> {
 
 /**
  * Manually add inventory (outside of a purchase-order).
+ * Unit cost should be the total cost including any shipping/handling
  */
 async function addManualInventory(item: {
   sku: string
   name: string
   quantity: number
-  unitCost: number
+  unitCost: number // This should be the total unit cost including shipping
 }): Promise<InventoryItem> {
   try {
     const { data, error } = await supabase
@@ -378,7 +379,7 @@ async function addManualInventory(item: {
         sku: item.sku,
         product_name: item.name,
         quantity_available: item.quantity,
-        unit_cost_with_delivery: item.unitCost,
+        unit_cost_with_delivery: item.unitCost, // Total unit cost including shipping
         po_id: null, // Manual inventory doesn't have a PO
         purchase_date: new Date().toISOString().split("T")[0],
       })
@@ -400,6 +401,7 @@ async function addManualInventory(item: {
 
 /**
  * Update an existing inventory item (manual inventory only).
+ * Unit cost should be the total cost including any shipping/handling
  */
 async function updateInventoryItem(
   id: string,
@@ -407,7 +409,7 @@ async function updateInventoryItem(
     sku: string
     name: string
     quantity: number
-    unitCost: number
+    unitCost: number // This should be the total unit cost including shipping
   },
 ): Promise<InventoryItem> {
   try {
@@ -438,7 +440,7 @@ async function updateInventoryItem(
         sku: updates.sku,
         product_name: updates.name,
         quantity_available: updates.quantity,
-        unit_cost_with_delivery: updates.unitCost,
+        unit_cost_with_delivery: updates.unitCost, // Total unit cost including shipping
       })
       .eq("id", actualId)
       .select("id, sku, name:product_name, inStock:quantity_available, unitCost:unit_cost_with_delivery")
@@ -459,18 +461,44 @@ async function updateInventoryItem(
 
 /**
  * Add inventory from a delivered purchase order
+ * Uses the total unit cost including proportional shipping
  */
 async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
   try {
     console.log("Adding inventory from delivered PO:", po.po_number)
 
-    // Calculate total quantity for shipping cost distribution
-    const totalQuantity = po.items.reduce((sum, item) => sum + item.quantity, 0)
-    const shippingCostPerUnit = totalQuantity > 0 ? po.delivery_cost / totalQuantity : 0
+    // ⚠️ Ignore items that have 0 (or negative) quantity – they should not hit inventory
+    const validItems = po.items.filter((it) => it.quantity > 0)
+    if (!validItems.length) {
+      console.log("No valid (qty>0) PO items to add to inventory – skipping")
+      return
+    }
 
-    // Prepare inventory records for each item
-    const inventoryRecords = po.items.map((item) => {
-      const unitCostWithDelivery = item.unit_cost + shippingCostPerUnit
+    // Calculate subtotal (total cost of all *valid* items before delivery)
+    const subtotal = validItems.reduce((sum, it) => sum + it.total_cost, 0)
+
+    const inventoryRecords = validItems.map((item) => {
+      // Calculate total unit cost including proportional shipping
+      const itemTotal = item.unit_cost * item.quantity
+
+      // Default to base cost; will adjust below if we can apportion shipping safely
+      let unitCostWithDelivery = item.unit_cost
+
+      if (
+        po.delivery_cost > 0 && // there is shipping to spread
+        subtotal > 0 && // subtotal is positive
+        item.quantity > 0 // avoid /0 later
+      ) {
+        const itemProportion = itemTotal / subtotal
+        const shippingForThisItem = po.delivery_cost * itemProportion
+        const shippingPerUnit = shippingForThisItem / item.quantity
+        unitCostWithDelivery = item.unit_cost + shippingPerUnit
+      }
+
+      // Safety net – NaN / Infinity → fall back to base cost
+      if (!Number.isFinite(unitCostWithDelivery)) {
+        unitCostWithDelivery = item.unit_cost
+      }
 
       return {
         sku: item.sku,
@@ -482,7 +510,7 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
       }
     })
 
-    console.log("Inserting inventory records:", inventoryRecords)
+    console.log("Inserting inventory records with total unit costs:", inventoryRecords)
 
     // Insert all inventory records
     const { data, error } = await supabase.from("inventory").insert(inventoryRecords).select()
@@ -505,6 +533,78 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
   } catch (error) {
     console.error("Error in addInventoryFromPO:", error)
     throw error
+  }
+}
+
+/**
+ * Debug function to investigate unit cost discrepancies
+ */
+async function debugInventoryCosts(sku: string): Promise<void> {
+  try {
+    console.log(`=== DEBUG: Investigating costs for SKU ${sku} ===`)
+
+    // Get all inventory records for this SKU
+    const { data: inventoryRecords, error: invError } = await supabase
+      .from("inventory")
+      .select("*")
+      .eq("sku", sku)
+      .order("created_at", { ascending: false })
+
+    if (invError) {
+      console.error("Error fetching inventory records:", invError)
+      return
+    }
+
+    console.log("Inventory records:", inventoryRecords)
+
+    // Get all PO records that contain this SKU
+    const { data: poRecords, error: poError } = await supabase
+      .from("purchase_orders")
+      .select(`
+        *,
+        po_items!inner (
+          *
+        )
+      `)
+      .eq("po_items.sku", sku)
+      .order("created_at", { ascending: false })
+
+    if (poError) {
+      console.error("Error fetching PO records:", poError)
+      return
+    }
+
+    console.log("PO records containing this SKU:", poRecords)
+
+    // Calculate what the unit cost should be for each PO
+    poRecords?.forEach((po) => {
+      const subtotal = po.po_items.reduce((sum: number, item: any) => sum + item.unit_cost * item.quantity, 0)
+      const targetItem = po.po_items.find((item: any) => item.sku === sku)
+
+      if (targetItem) {
+        const itemTotal = targetItem.unit_cost * targetItem.quantity
+        const itemProportion = itemTotal / subtotal
+        const shippingForThisItem = po.delivery_cost * itemProportion
+        const shippingPerUnit = shippingForThisItem / targetItem.quantity
+        const totalUnitCost = targetItem.unit_cost + shippingPerUnit
+
+        console.log(`PO ${po.po_number}:`)
+        console.log(`  - Base unit cost: ${targetItem.unit_cost}`)
+        console.log(`  - Item total: ${itemTotal}`)
+        console.log(`  - Subtotal: ${subtotal}`)
+        console.log(`  - Delivery cost: ${po.delivery_cost}`)
+        console.log(`  - Item proportion: ${itemProportion}`)
+        console.log(`  - Shipping for this item: ${shippingForThisItem}`)
+        console.log(`  - Shipping per unit: ${shippingPerUnit}`)
+        console.log(`  - Total unit cost: ${totalUnitCost}`)
+      }
+    })
+
+    // Get the latest unit cost being used
+    const latestCosts = await getLatestUnitCosts()
+    console.log(`Current unit cost in system: ${latestCosts.get(sku)}`)
+  } catch (error) {
+    console.error("Error in debugInventoryCosts:", error)
   }
 }
 
@@ -1387,7 +1487,7 @@ async function getShopifyOrderStats(): Promise<ShopifyOrderStats> {
       }, 0)
 
       // Profit = revenue - tax - shipping - cost of goods
-      const profit = revenue - (order.tax_amount || 0) - (order.shipping_cost || 0) - itemsCost
+      const profit = revenue - (order.tax_amount || 0) - itemsCost
       totalProfit += profit
     })
 
@@ -1872,7 +1972,7 @@ export const supabaseStore = {
   /* Inventory */
   getInventory,
   addManualInventory,
-  updateInventoryItem, // Add this line
+  updateInventoryItem,
   addInventoryFromPO,
 
   /* Inventory helpers that other screens use */
@@ -1904,9 +2004,12 @@ export const supabaseStore = {
 
   /* Shopify Orders */
   getShopifyOrders,
-  getShopifyOrderStats, // New function for global stats
-  getAllShopifyOrders, // Legacy function
+  getShopifyOrderStats,
+  getAllShopifyOrders,
   addShopifyOrders,
+
+  /* Debug functions */
+  debugInventoryCosts,
 
   /* Minimal stubs (unchanged logic) so other pages keep compiling */
   getReports: () => Promise.resolve([]),
@@ -1914,54 +2017,30 @@ export const supabaseStore = {
 
 /**
  * Generate a unique, chronologically sortable Purchase-Order number.
- * Format: POYYYYMMDDHHMMSSmmmRR  (RR = random 00-99 suffix)
- *
- * Example: PO202507151653099450
+ * Format: POYYYYMMDDHHMM (e.g., PO202412151430)
  */
 function generatePONumber(): string {
   const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  const hour = String(now.getHours()).padStart(2, "0")
+  const minute = String(now.getMinutes()).padStart(2, "0")
 
-  const pad = (n: number, len = 2) => n.toString().padStart(len, "0")
-
-  const timestamp =
-    now.getFullYear().toString() +
-    pad(now.getMonth() + 1) +
-    pad(now.getDate()) +
-    pad(now.getHours()) +
-    pad(now.getMinutes()) +
-    pad(now.getSeconds()) +
-    pad(now.getMilliseconds(), 3) // millisecond precision
-
-  const randomSuffix = pad(Math.floor(Math.random() * 100)) // 00-99
-
-  return `PO${timestamp}${randomSuffix}`
+  return `PO${year}${month}${day}${hour}${minute}`
 }
 
 /**
  * Generate a unique, chronologically sortable Return number.
- * Format: RYYYYMMDDHHMMSSmmmRR  (R = random 00-99 suffix)
- *
- * Example: R2025071410153012345
+ * Format: RTYYYYMMDDHHMM (e.g., RT202412151430)
  */
 function generateReturnNumber(): string {
   const now = new Date()
-  const pad = (n: number, len = 2) => n.toString().padStart(len, "0")
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  const hour = String(now.getHours()).padStart(2, "0")
+  const minute = String(now.getMinutes()).padStart(2, "0")
 
-  const timestamp =
-    now.getFullYear().toString() +
-    pad(now.getMonth() + 1) +
-    pad(now.getDate()) +
-    pad(now.getHours()) +
-    pad(now.getMinutes()) +
-    pad(now.getSeconds()) +
-    pad(now.getMilliseconds(), 3) // millisecond precision
-
-  const randomSuffix = pad(Math.floor(Math.random() * 100)) // 00-99
-
-  return `R${timestamp}${randomSuffix}`
-}
-
-function isMissingRelation(err: PostgrestError | null) {
-  // 42P01 == "relation does not exist" (Postgres) [^3]
-  return err?.code === "42P01" || err?.message.includes("relation") // fallback
+  return `RT${year}${month}${day}${hour}${minute}`
 }

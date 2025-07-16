@@ -117,6 +117,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
   const [hasMore, setHasMore] = useState<boolean>(initialHasMore)
   const [globalStats, setGlobalStats] = useState<ShopifyOrderStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
@@ -197,6 +198,29 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
       setLoading(false)
     }
   }, [])
+
+  // Add sync function after the refreshOrders function
+  const syncOrders = useCallback(async () => {
+    setSyncing(true)
+    setError(null)
+    try {
+      const response = await fetch("/api/shopify-orders", { method: "POST" })
+      if (!response.ok) throw new Error("Failed to sync orders")
+
+      const result = await response.json()
+
+      // After sync, refresh the orders and stats
+      await refreshOrders()
+
+      // You could show a success message here if needed
+      console.log(`Synced ${result.count} orders`)
+    } catch (err) {
+      console.error("Error syncing orders:", err)
+      setError("Failed to sync orders from Shopify")
+    } finally {
+      setSyncing(false)
+    }
+  }, [refreshOrders])
 
   // Filtered orders (only affects display, not stats)
   const filteredOrders = useMemo(() => {
@@ -297,6 +321,9 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Orders</h1>
           <div className="flex items-center gap-2">
+            <Button onClick={syncOrders} size="sm" variant="outline" disabled={syncing}>
+              <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+            </Button>
             <Button onClick={refreshOrders} size="sm" variant="outline" disabled={loading}>
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
@@ -311,6 +338,10 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Orders</h1>
           <div className="hidden lg:flex items-center gap-2">
+            <Button onClick={syncOrders} size="sm" disabled={syncing}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
+              Sync from Shopify
+            </Button>
             <Button onClick={refreshOrders} size="sm" variant="outline" disabled={loading}>
               <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Refresh

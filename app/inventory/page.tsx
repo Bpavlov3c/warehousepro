@@ -433,7 +433,7 @@ export default function Inventory() {
                   </div>
 
                   <div className="mt-3 pt-3 border-t flex justify-between items-center text-sm">
-                    <span>Unit Cost: ${item.unitCost.toFixed(2)}</span>
+                    <span>Total Unit Cost: ${item.unitCost.toFixed(2)}</span>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">Value: ${(item.inStock * item.unitCost).toLocaleString()}</span>
                       <Button
@@ -468,7 +468,7 @@ export default function Inventory() {
                     <TableHead className="w-[80px]">In Stock</TableHead>
                     <TableHead className="w-[80px]">Incoming</TableHead>
                     <TableHead className="w-[80px]">Reserved</TableHead>
-                    <TableHead className="w-[100px]">Unit Cost</TableHead>
+                    <TableHead className="w-[100px]">Total Unit Cost</TableHead>
                     <TableHead className="w-[100px]">Total Value</TableHead>
                     <TableHead className="w-[80px]">Status</TableHead>
                     <TableHead className="w-[80px]">Actions</TableHead>
@@ -567,7 +567,7 @@ export default function Inventory() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label htmlFor="unitCost">Unit Cost *</label>
+                  <label htmlFor="unitCost">Total Unit Cost (incl. shipping) *</label>
                   <Input
                     id="unitCost"
                     type="number"
@@ -633,7 +633,7 @@ export default function Inventory() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label htmlFor="edit-unitCost">Unit Cost *</label>
+                  <label htmlFor="edit-unitCost">Total Unit Cost (incl. shipping) *</label>
                   <Input
                     id="edit-unitCost"
                     type="number"

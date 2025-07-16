@@ -261,15 +261,20 @@ export default function PurchaseOrders() {
       ["Items"],
       ["SKU", "Product Name", "Quantity", "Unit Cost", "Shipping/Unit", "Total Unit Cost", "Line Total"],
       // Items Data
-      ...po.items.map((item) => [
-        item.sku,
-        item.product_name,
-        item.quantity.toString(),
-        `$${item.unit_cost.toFixed(2)}`,
-        `$${(shippingCostPerLineItem / item.quantity).toFixed(2)}`,
-        `$${(item.unit_cost + shippingCostPerLineItem / item.quantity).toFixed(2)}`,
-        `$${item.total_cost.toFixed(2)}`,
-      ]),
+      ...po.items.map((item) => {
+        const subtotal = po.items.reduce((sum, item) => sum + item.unit_cost * item.quantity, 0)
+        const shippingCostPerUnit =
+          subtotal > 0 ? (po.delivery_cost * (item.unit_cost * item.quantity)) / subtotal / item.quantity : 0
+        return [
+          item.sku,
+          item.product_name,
+          item.quantity.toString(),
+          `$${item.unit_cost.toFixed(2)}`,
+          `$${shippingCostPerUnit.toFixed(2)}`,
+          `$${(item.unit_cost + shippingCostPerUnit).toFixed(2)}`,
+          `$${item.total_cost.toFixed(2)}`,
+        ]
+      }),
       [""],
       // Summary
       ["Summary"],
@@ -664,10 +669,11 @@ export default function PurchaseOrders() {
                   {/* Mobile Cards View */}
                   <div className="lg:hidden flex-1 overflow-y-auto space-y-3">
                     {selectedPO.items.map((item, index) => {
-                      const shippingCostPerLineItem =
-                        selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
-                      const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
-                      const totalUnitCost = item.unit_cost + shippingCostPerUnit
+                      const subtotal = selectedPO.items.reduce((sum, item) => sum + item.unit_cost * item.quantity, 0)
+                      const shippingCostPerUnit =
+                        item.quantity > 0 && subtotal > 0
+                          ? (selectedPO.delivery_cost * (item.unit_cost * item.quantity)) / subtotal / item.quantity
+                          : 0
 
                       return (
                         <Card key={item.id || index} className="p-3">
@@ -681,7 +687,7 @@ export default function PurchaseOrders() {
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-xs">
                               <div>
-                                <span className="text-gray-600">Unit Cost:</span>
+                                <span className="text-gray-600">Base Unit Cost:</span>
                                 <p>${item.unit_cost.toFixed(2)}</p>
                               </div>
                               <div>
@@ -689,12 +695,14 @@ export default function PurchaseOrders() {
                                 <p>${shippingCostPerUnit.toFixed(2)}</p>
                               </div>
                               <div>
-                                <span className="text-gray-600">Total Unit:</span>
-                                <p className="font-medium">${totalUnitCost.toFixed(2)}</p>
+                                <span className="text-gray-600">Total Unit Cost:</span>
+                                <p className="font-medium">${(item.unit_cost + shippingCostPerUnit).toFixed(2)}</p>
                               </div>
                               <div>
                                 <span className="text-gray-600">Line Total:</span>
-                                <p className="font-medium">${item.total_cost.toFixed(2)}</p>
+                                <p className="font-medium">
+                                  ${((item.unit_cost + shippingCostPerUnit) * item.quantity).toFixed(2)}
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -712,7 +720,7 @@ export default function PurchaseOrders() {
                             <TableHead className="w-[100px]">SKU</TableHead>
                             <TableHead className="min-w-[200px]">Product</TableHead>
                             <TableHead className="w-[80px] text-right">Qty</TableHead>
-                            <TableHead className="w-[100px] text-right">Unit Cost</TableHead>
+                            <TableHead className="w-[100px] text-right">Base Unit Cost</TableHead>
                             <TableHead className="w-[100px] text-right">Shipping/Unit</TableHead>
                             <TableHead className="w-[120px] text-right">Total Unit Cost</TableHead>
                             <TableHead className="w-[100px] text-right">Line Total</TableHead>
@@ -720,10 +728,16 @@ export default function PurchaseOrders() {
                         </TableHeader>
                         <TableBody>
                           {selectedPO.items.map((item, index) => {
-                            const shippingCostPerLineItem =
-                              selectedPO.items.length > 0 ? selectedPO.delivery_cost / selectedPO.items.length : 0
-                            const shippingCostPerUnit = item.quantity > 0 ? shippingCostPerLineItem / item.quantity : 0
-                            const totalUnitCost = item.unit_cost + shippingCostPerUnit
+                            const subtotal = selectedPO.items.reduce(
+                              (sum, item) => sum + item.unit_cost * item.quantity,
+                              0,
+                            )
+                            const shippingCostPerUnit =
+                              item.quantity > 0 && subtotal > 0
+                                ? (selectedPO.delivery_cost * (item.unit_cost * item.quantity)) /
+                                  subtotal /
+                                  item.quantity
+                                : 0
 
                             return (
                               <TableRow key={item.id || index} className="hover:bg-gray-50">
@@ -736,8 +750,12 @@ export default function PurchaseOrders() {
                                 <TableCell className="text-right">{item.quantity}</TableCell>
                                 <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
                                 <TableCell className="text-right">${shippingCostPerUnit.toFixed(2)}</TableCell>
-                                <TableCell className="text-right font-medium">${totalUnitCost.toFixed(2)}</TableCell>
-                                <TableCell className="text-right">${item.total_cost.toFixed(2)}</TableCell>
+                                <TableCell className="text-right font-medium">
+                                  ${(item.unit_cost + shippingCostPerUnit).toFixed(2)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  ${((item.unit_cost + shippingCostPerUnit) * item.quantity).toFixed(2)}
+                                </TableCell>
                               </TableRow>
                             )
                           })}
