@@ -1,22 +1,35 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Card, CardContent } from "@/components/ui/card"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+
+import type React from "react"
+
+import { useState, useEffect, useMemo, useCallback } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Search, Plus, Package, TrendingUp, AlertTriangle, DollarSign, Download } from "lucide-react"
-import { supabaseStore, type InventoryItem } from "@/lib/supabase-store"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Plus, Package, TrendingUp, AlertTriangle, Search, Edit, Download, RefreshCw } from "lucide-react"
+import { supabaseStore } from "@/lib/supabase-store"
+import type { InventoryItem } from "@/lib/supabase-store"
 
-export default function Inventory() {
+export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
-  const [isNewItemOpen, setIsNewItemOpen] = useState(false)
-  const [isEditItemOpen, setIsEditItemOpen] = useState(false)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [formData, setFormData] = useState({
     sku: "",
@@ -24,88 +37,98 @@ export default function Inventory() {
     quantity: 0,
     unitCost: 0,
   })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
-  // Load data on component mount
+  // Load inventory on component mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        const inventoryData = await supabaseStore.getInventory()
-        setInventory(inventoryData)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load inventory")
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadData()
+    loadInventory()
   }, [])
 
-  const handleCreateItem = async () => {
-    // Validate form data
-    if (!formData.sku || !formData.name) {
-      alert("Please fill in required fields (SKU and Name)")
-      return
+  const loadInventory = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await supabaseStore.getInventory()
+      setInventory(data)
+    } catch (err) {
+      console.error("Error loading inventory:", err)
+      setError("Failed to load inventory")
+    } finally {
+      setLoading(false)
     }
+  }
+
+  // Filter inventory based on search term
+  const filteredInventory = useMemo(() => {
+    if (!searchTerm) return inventory
+
+    return inventory.filter(
+      (item) =>
+        item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.name.toLowerCase().includes(searchTerm.toLowerCase()),
+    )
+  }, [inventory, searchTerm])
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    const totalItems = inventory.length
+    const totalValue = inventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0)
+    const lowStockItems = inventory.filter((item) => item.inStock <= 10).length
+    const outOfStockItems = inventory.filter((item) => item.inStock === 0).length
+
+    return {
+      totalItems,
+      totalValue,
+      lowStockItems,
+      outOfStockItems,
+    }
+  }, [inventory])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
 
     try {
-      await supabaseStore.addManualInventory({
-        sku: formData.sku,
-        name: formData.name,
-        quantity: formData.quantity,
-        unitCost: formData.unitCost,
-      })
-
-      const updatedInventory = await supabaseStore.getInventory()
-      setInventory(updatedInventory)
+      if (editingItem) {
+        // Update existing item
+        await supabaseStore.updateInventoryItem(editingItem.id, {
+          sku: formData.sku,
+          name: formData.name,
+          quantity: formData.quantity,
+          unitCost: formData.unitCost,
+        })
+        setIsEditDialogOpen(false)
+        setEditingItem(null)
+      } else {
+        // Add new item
+        await supabaseStore.addManualInventory({
+          sku: formData.sku,
+          name: formData.name,
+          quantity: formData.quantity,
+          unitCost: formData.unitCost,
+        })
+        setIsAddDialogOpen(false)
+      }
 
       // Reset form
-      setFormData({ sku: "", name: "", quantity: 0, unitCost: 0 })
-      setIsNewItemOpen(false)
-
-      alert(`Item ${formData.sku} added successfully!`)
-    } catch (error) {
-      console.error("Error creating item:", error)
-      alert("Error creating item. Please try again.")
-    }
-  }
-
-  const handleEditItem = async () => {
-    if (!editingItem) return
-
-    // Validate form data
-    if (!formData.sku || !formData.name) {
-      alert("Please fill in required fields (SKU and Name)")
-      return
-    }
-
-    try {
-      await supabaseStore.updateInventoryItem(editingItem.id, {
-        sku: formData.sku,
-        name: formData.name,
-        quantity: formData.quantity,
-        unitCost: formData.unitCost,
+      setFormData({
+        sku: "",
+        name: "",
+        quantity: 0,
+        unitCost: 0,
       })
 
-      // Refresh the inventory list
-      const updatedInventory = await supabaseStore.getInventory()
-      setInventory(updatedInventory)
-
-      // Reset form and close dialog
-      setFormData({ sku: "", name: "", quantity: 0, unitCost: 0 })
-      setIsEditItemOpen(false)
-      setEditingItem(null)
-
-      alert(`Item ${formData.sku} updated successfully!`)
-    } catch (error) {
-      console.error("Error updating item:", error)
-      alert("Error updating item. Please try again.")
+      // Reload inventory
+      await loadInventory()
+    } catch (err) {
+      console.error("Error saving inventory item:", err)
+      setError("Failed to save inventory item")
+    } finally {
+      setSubmitting(false)
     }
   }
 
-  const openEditDialog = (item: InventoryItem) => {
+  const handleEdit = (item: InventoryItem) => {
     setEditingItem(item)
     setFormData({
       sku: item.sku,
@@ -113,30 +136,29 @@ export default function Inventory() {
       quantity: item.inStock,
       unitCost: item.unitCost,
     })
-    setIsEditItemOpen(true)
+    setIsEditDialogOpen(true)
   }
 
-  const exportToCSV = () => {
-    if (filteredInventory.length === 0) {
-      alert("No data to export")
-      return
-    }
+  const getStockStatus = (item: InventoryItem) => {
+    if (item.inStock === 0) return { label: "Out of Stock", color: "bg-red-100 text-red-800" }
+    if (item.inStock <= 10) return { label: "Low Stock", color: "bg-yellow-100 text-yellow-800" }
+    return { label: "In Stock", color: "bg-green-100 text-green-800" }
+  }
 
+  const exportToCSV = useCallback(() => {
     const headers = ["SKU", "Product Name", "In Stock", "Incoming", "Reserved", "Unit Cost", "Total Value", "Status"]
 
     const csvData = filteredInventory.map((item) => {
-      const totalValue = item.inStock * item.unitCost
-      const status = item.inStock <= 0 ? "Out of Stock" : item.inStock <= 10 ? "Low Stock" : "In Stock"
-
+      const status = getStockStatus(item)
       return [
-        item.sku,
-        `"${item.name.replace(/"/g, '""')}"`, // Escape quotes in product names
+        `"${item.sku}"`,
+        `"${item.name}"`,
         item.inStock,
         item.incoming,
         item.reserved,
         item.unitCost.toFixed(2),
-        totalValue.toFixed(2),
-        status,
+        (item.inStock * item.unitCost).toFixed(2),
+        `"${status.label}"`,
       ]
     })
 
@@ -146,32 +168,12 @@ export default function Inventory() {
     const link = document.createElement("a")
     const url = URL.createObjectURL(blob)
     link.setAttribute("href", url)
-    link.setAttribute("download", `inventory-export-${new Date().toISOString().split("T")[0]}.csv`)
+    link.setAttribute("download", `inventory-${new Date().toISOString().split("T")[0]}.csv`)
     link.style.visibility = "hidden"
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-  }
-
-  const getStockStatus = (item: InventoryItem) => {
-    if (item.inStock <= 0) return { label: "Out of Stock", color: "bg-red-100 text-red-800" }
-    if (item.inStock <= 10) return { label: "Low Stock", color: "bg-yellow-100 text-yellow-800" }
-    return { label: "In Stock", color: "bg-green-100 text-green-800" }
-  }
-
-  const filteredInventory = inventory.filter(
-    (item) =>
-      item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  const totalStats = {
-    totalItems: filteredInventory.length,
-    inStock: filteredInventory.filter((item) => item.inStock > 10).length,
-    lowStock: filteredInventory.filter((item) => item.inStock > 0 && item.inStock <= 10).length,
-    outOfStock: filteredInventory.filter((item) => item.inStock <= 0).length,
-    totalValue: filteredInventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0),
-  }
+  }, [filteredInventory])
 
   if (loading) {
     return (
@@ -180,39 +182,9 @@ export default function Inventory() {
           <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Inventory</h1>
         </header>
-        <div className="p-6 ml-16 lg:ml-0">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-24 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-            <div className="space-y-4">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-16 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
-          <SidebarTrigger className="-ml-1 lg:hidden" />
-          <h1 className="text-lg font-semibold">Inventory</h1>
-        </header>
-        <div className="p-6 ml-16 lg:ml-0">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <h3 className="text-red-800 font-medium">Error loading inventory</h3>
-            <p className="text-red-600 mt-1">{error}</p>
-            <Button onClick={() => window.location.reload()} className="mt-3" variant="outline">
-              Try Again
-            </Button>
+        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
+          <div className="flex items-center justify-center h-32">
+            <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         </div>
       </div>
@@ -225,13 +197,21 @@ export default function Inventory() {
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Inventory</h1>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <Button onClick={loadInventory} size="sm" variant="outline">
+              <RefreshCw className="w-4 h-4" />
+            </Button>
             <Button onClick={exportToCSV} size="sm" variant="outline" className="lg:hidden bg-transparent">
               <Download className="w-4 h-4" />
             </Button>
-            <Button onClick={() => setIsNewItemOpen(true)} size="sm" className="lg:hidden">
-              <Plus className="w-4 h-4" />
-            </Button>
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Item
+                </Button>
+              </DialogTrigger>
+            </Dialog>
           </div>
         </div>
       </header>
@@ -239,68 +219,80 @@ export default function Inventory() {
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Inventory</h1>
-          <div className="hidden lg:flex gap-2">
+          <div className="hidden lg:flex items-center gap-2">
+            <Button onClick={loadInventory} size="sm" variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
             <Button onClick={exportToCSV} size="sm" variant="outline">
               <Download className="w-4 h-4 mr-2" />
               Export CSV
             </Button>
-            <Button onClick={() => setIsNewItemOpen(true)} size="sm">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Item
-            </Button>
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Item
+                </Button>
+              </DialogTrigger>
+            </Dialog>
           </div>
         </div>
 
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-600">{error}</p>
+          </div>
+        )}
+
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Total Items</p>
-                <p className="text-lg font-bold">{totalStats.totalItems}</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Items</p>
+                  <p className="text-2xl font-bold">{stats.totalItems}</p>
+                </div>
+                <Package className="w-8 h-8 text-blue-600" />
               </div>
-              <Package className="w-5 h-5 text-blue-600" />
-            </div>
+            </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">In Stock</p>
-                <p className="text-lg font-bold text-green-600">{totalStats.inStock}</p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Value</p>
+                  <p className="text-2xl font-bold">${stats.totalValue.toLocaleString()}</p>
+                </div>
+                <TrendingUp className="w-8 h-8 text-green-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-600" />
-            </div>
+            </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Low Stock</p>
-                <p className="text-lg font-bold text-yellow-600">{totalStats.lowStock}</p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Low Stock</p>
+                  <p className="text-2xl font-bold text-yellow-600">{stats.lowStockItems}</p>
+                </div>
+                <AlertTriangle className="w-8 h-8 text-yellow-600" />
               </div>
-              <AlertTriangle className="w-5 h-5 text-yellow-600" />
-            </div>
+            </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Out of Stock</p>
-                <p className="text-lg font-bold text-red-600">{totalStats.outOfStock}</p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Out of Stock</p>
+                  <p className="text-2xl font-bold text-red-600">{stats.outOfStockItems}</p>
+                </div>
+                <AlertTriangle className="w-8 h-8 text-red-600" />
               </div>
-              <AlertTriangle className="w-5 h-5 text-red-600" />
-            </div>
-          </Card>
-
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Total Value</p>
-                <p className="text-lg font-bold">${totalStats.totalValue.toFixed(2)}</p>
-              </div>
-              <DollarSign className="w-5 h-5 text-blue-600" />
-            </div>
+            </CardContent>
           </Card>
         </div>
 
@@ -311,259 +303,217 @@ export default function Inventory() {
             placeholder="Search inventory..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 h-9"
+            className="pl-10"
           />
         </div>
 
-        {/* Mobile Card View / Desktop Table View */}
-        <div className="lg:hidden space-y-3">
-          {filteredInventory.length === 0 ? (
-            <Card className="p-6 text-center">
-              <Package className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">{searchTerm ? "No items found." : "No inventory items yet."}</p>
-              {!searchTerm && (
-                <Button onClick={() => setIsNewItemOpen(true)} className="mt-2" size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add First Item
-                </Button>
-              )}
-            </Card>
-          ) : (
-            filteredInventory.map((item) => {
-              const status = getStockStatus(item)
-              const totalValue = item.inStock * item.unitCost
-
-              return (
-                <Card key={item.id} className="p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-medium">{item.sku}</h3>
-                      <p className="text-sm text-gray-600 truncate">{item.name}</p>
-                    </div>
-                    <Badge className={`${status.color} text-xs`}>{status.label}</Badge>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                    <div>
-                      <span className="text-gray-600">In Stock:</span>
-                      <p className="font-medium">{item.inStock}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Unit Cost:</span>
-                      <p className="font-medium">${item.unitCost.toFixed(2)}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Incoming:</span>
-                      <p className="font-medium">{item.incoming}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Reserved:</span>
-                      <p className="font-medium">{item.reserved}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="text-sm">
-                      <span className="text-gray-600">Total Value:</span>
-                      <span className="font-medium ml-1">${totalValue.toFixed(2)}</span>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => openEditDialog(item)}>
-                      Edit
-                    </Button>
-                  </div>
-                </Card>
-              )
-            })
-          )}
-        </div>
-
-        {/* Desktop Table View */}
-        <Card className="hidden lg:block">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="h-10">
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead className="w-[80px]">In Stock</TableHead>
-                  <TableHead className="w-[80px]">Incoming</TableHead>
-                  <TableHead className="w-[80px]">Reserved</TableHead>
-                  <TableHead className="w-[100px]">Unit Cost</TableHead>
-                  <TableHead className="w-[100px]">Total Value</TableHead>
-                  <TableHead className="w-[100px]">Status</TableHead>
-                  <TableHead className="w-[80px] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredInventory.length === 0 ? (
+        {/* Inventory Table */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Inventory Items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {filteredInventory.length === 0 ? (
+              <div className="text-center py-8">
+                <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No inventory items</h3>
+                <p className="text-gray-500 mb-4">
+                  {searchTerm ? "No items match your search." : "Add your first inventory item to get started."}
+                </p>
+                {!searchTerm && (
+                  <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add Your First Item
+                      </Button>
+                    </DialogTrigger>
+                  </Dialog>
+                )}
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8">
-                      <Package className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                      <p className="text-gray-500">{searchTerm ? "No items found." : "No inventory items yet."}</p>
-                      {!searchTerm && (
-                        <Button onClick={() => setIsNewItemOpen(true)} className="mt-2" size="sm">
-                          <Plus className="w-4 h-4 mr-2" />
-                          Add First Item
-                        </Button>
-                      )}
-                    </TableCell>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Product Name</TableHead>
+                    <TableHead>In Stock</TableHead>
+                    <TableHead>Incoming</TableHead>
+                    <TableHead>Reserved</TableHead>
+                    <TableHead>Unit Cost</TableHead>
+                    <TableHead>Total Value</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
-                ) : (
-                  filteredInventory.map((item) => {
+                </TableHeader>
+                <TableBody>
+                  {filteredInventory.map((item) => {
                     const status = getStockStatus(item)
-                    const totalValue = item.inStock * item.unitCost
-
                     return (
-                      <TableRow key={item.id} className="h-12">
+                      <TableRow key={item.id}>
                         <TableCell className="font-medium">{item.sku}</TableCell>
-                        <TableCell className="max-w-[200px] truncate">{item.name}</TableCell>
+                        <TableCell>{item.name}</TableCell>
                         <TableCell>{item.inStock}</TableCell>
-                        <TableCell>{item.incoming}</TableCell>
-                        <TableCell>{item.reserved}</TableCell>
+                        <TableCell className="text-blue-600">{item.incoming}</TableCell>
+                        <TableCell className="text-orange-600">{item.reserved}</TableCell>
                         <TableCell>${item.unitCost.toFixed(2)}</TableCell>
-                        <TableCell>${totalValue.toFixed(2)}</TableCell>
+                        <TableCell>${(item.inStock * item.unitCost).toFixed(2)}</TableCell>
                         <TableCell>
-                          <Badge className={`${status.color} text-xs px-2 py-1`}>{status.label}</Badge>
+                          <Badge className={status.color}>{status.label}</Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => openEditDialog(item)} title="Edit Item">
-                            Edit
+                        <TableCell>
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(item)}>
+                            <Edit className="w-4 h-4" />
                           </Button>
                         </TableCell>
                       </TableRow>
                     )
-                  })
-                )}
-              </TableBody>
-            </Table>
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
 
-        {/* Create New Item Dialog */}
-        <Dialog open={isNewItemOpen} onOpenChange={setIsNewItemOpen}>
-          <DialogContent className="max-w-2xl">
+        {/* Add Item Dialog */}
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New Inventory Item</DialogTitle>
-              <DialogDescription>Add a new item to your inventory manually</DialogDescription>
+              <DialogTitle>Add Inventory Item</DialogTitle>
+              <DialogDescription>Add a new item to your inventory manually.</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="sku">SKU *</label>
-                  <Input
-                    id="sku"
-                    placeholder="ITEM-001"
-                    value={formData.sku}
-                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="name">Product Name *</label>
-                  <Input
-                    id="name"
-                    placeholder="Product Name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                  />
-                </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label htmlFor="sku">SKU</Label>
+                <Input
+                  id="sku"
+                  value={formData.sku}
+                  onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                  placeholder="ITEM-001"
+                  required
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="quantity">Quantity</label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    placeholder="0"
-                    value={formData.quantity}
-                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="unit-cost">Unit Cost</label>
-                  <Input
-                    id="unit-cost"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={formData.unitCost}
-                    onChange={(e) => setFormData({ ...formData, unitCost: Number(e.target.value) })}
-                  />
-                </div>
+              <div>
+                <Label htmlFor="name">Product Name</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Product Name"
+                  required
+                />
               </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsNewItemOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateItem}>Add Item</Button>
-            </div>
+
+              <div>
+                <Label htmlFor="quantity">Quantity</Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min="0"
+                  value={formData.quantity}
+                  onChange={(e) => setFormData({ ...formData, quantity: Number.parseInt(e.target.value) || 0 })}
+                  required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="unitCost">Unit Cost</Label>
+                <Input
+                  id="unitCost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.unitCost}
+                  onChange={(e) => setFormData({ ...formData, unitCost: Number.parseFloat(e.target.value) || 0 })}
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Adding..." : "Add Item"}
+                </Button>
+              </div>
+            </form>
           </DialogContent>
         </Dialog>
 
         {/* Edit Item Dialog */}
-        <Dialog open={isEditItemOpen} onOpenChange={setIsEditItemOpen}>
-          <DialogContent className="max-w-2xl">
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>Edit Inventory Item - {editingItem?.sku}</DialogTitle>
-              <DialogDescription>Update inventory item details</DialogDescription>
+              <DialogTitle>Edit Inventory Item</DialogTitle>
+              <DialogDescription>Update the inventory item details.</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="edit-sku">SKU *</label>
-                  <Input
-                    id="edit-sku"
-                    placeholder="ITEM-001"
-                    value={formData.sku}
-                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="edit-name">Product Name *</label>
-                  <Input
-                    id="edit-name"
-                    placeholder="Product Name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                  />
-                </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label htmlFor="edit-sku">SKU</Label>
+                <Input
+                  id="edit-sku"
+                  value={formData.sku}
+                  onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                  placeholder="ITEM-001"
+                  required
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="edit-quantity">Quantity</label>
-                  <Input
-                    id="edit-quantity"
-                    type="number"
-                    placeholder="0"
-                    value={formData.quantity}
-                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="edit-unit-cost">Unit Cost</label>
-                  <Input
-                    id="edit-unit-cost"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={formData.unitCost}
-                    onChange={(e) => setFormData({ ...formData, unitCost: Number(e.target.value) })}
-                  />
-                </div>
+              <div>
+                <Label htmlFor="edit-name">Product Name</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Product Name"
+                  required
+                />
               </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsEditItemOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleEditItem}>Update Item</Button>
-            </div>
+
+              <div>
+                <Label htmlFor="edit-quantity">Quantity</Label>
+                <Input
+                  id="edit-quantity"
+                  type="number"
+                  min="0"
+                  value={formData.quantity}
+                  onChange={(e) => setFormData({ ...formData, quantity: Number.parseInt(e.target.value) || 0 })}
+                  required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="edit-unitCost">Unit Cost</Label>
+                <Input
+                  id="edit-unitCost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.unitCost}
+                  onChange={(e) => setFormData({ ...formData, unitCost: Number.parseFloat(e.target.value) || 0 })}
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditDialogOpen(false)
+                    setEditingItem(null)
+                  }}
+                  disabled={submitting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Updating..." : "Update Item"}
+                </Button>
+              </div>
+            </form>
           </DialogContent>
         </Dialog>
       </div>

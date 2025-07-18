@@ -16,10 +16,13 @@ import {
   Download,
   RefreshCw,
   ChevronDown,
+  Filter,
+  X,
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { ShopifyOrder, ShopifyOrderStats } from "@/lib/supabase-store"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 /* ------------------------------ helpers ------------------------------- */
 
@@ -118,6 +121,11 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
   const [globalStats, setGlobalStats] = useState<ShopifyOrderStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+
+  const [storeFilter, setStoreFilter] = useState<string>("all")
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [dateFromFilter, setDateFromFilter] = useState<string>("")
+  const [dateToFilter, setDateToFilter] = useState<string>("")
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
@@ -227,19 +235,6 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     }
   }, [refreshOrders])
 
-  // Filtered orders (only affects display, not stats)
-  const filteredOrders = useMemo(() => {
-    if (!debouncedSearchTerm) return orders
-
-    return orders.filter(
-      (order) =>
-        order.orderNumber.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        order.customerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        order.customerEmail.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
-    )
-  }, [orders, debouncedSearchTerm])
-
   const getStatusColor = useCallback((status: string) => {
     switch (status.toLowerCase()) {
       case "fulfilled":
@@ -255,6 +250,68 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
         return "bg-gray-100 text-gray-800"
     }
   }, [])
+
+  // Get unique stores for filter dropdown
+  const uniqueStores = useMemo(() => {
+    const stores = Array.from(new Set(orders.map((order) => order.storeName)))
+    return stores.sort()
+  }, [orders])
+
+  // Get unique statuses for filter dropdown
+  const uniqueStatuses = useMemo(() => {
+    const statuses = Array.from(new Set(orders.map((order) => order.status)))
+    return statuses.sort()
+  }, [orders])
+
+  // Clear all filters
+  const clearFilters = useCallback(() => {
+    setStoreFilter("all")
+    setStatusFilter("all")
+    setDateFromFilter("")
+    setDateToFilter("")
+    setSearchTerm("")
+  }, [])
+
+  // Check if any filters are active
+  const hasActiveFilters =
+    storeFilter !== "all" || statusFilter !== "all" || dateFromFilter || dateToFilter || searchTerm
+
+  // Filtered orders (applies search + filters)
+  const filteredOrders = useMemo(() => {
+    let filtered = orders
+
+    // Apply search filter
+    if (debouncedSearchTerm) {
+      filtered = filtered.filter(
+        (order) =>
+          order.orderNumber.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          order.customerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          order.customerEmail.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
+      )
+    }
+
+    // Apply store filter
+    if (storeFilter !== "all") {
+      filtered = filtered.filter((order) => order.storeName === storeFilter)
+    }
+
+    // Apply status filter
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((order) => order.status.toLowerCase() === statusFilter.toLowerCase())
+    }
+
+    // Apply date range filter
+    if (dateFromFilter) {
+      filtered = filtered.filter((order) => new Date(order.orderDate) >= new Date(dateFromFilter))
+    }
+
+    if (dateToFilter) {
+      filtered = filtered.filter((order) => new Date(order.orderDate) <= new Date(dateToFilter))
+    }
+
+    return filtered
+  }, [orders, debouncedSearchTerm, storeFilter, statusFilter, dateFromFilter, dateToFilter])
 
   const exportToCSV = useCallback(() => {
     const headers = [
@@ -419,15 +476,101 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
           )}
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <Input
-            placeholder="Search orders..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 h-9"
-          />
+        {/* Search and Filters */}
+        <div className="space-y-4">
+          {/* Search */}
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              placeholder="Search orders..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 h-9"
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-gray-500" />
+              <span className="text-sm font-medium text-gray-700">Filters:</span>
+            </div>
+
+            {/* Store Filter */}
+            <Select value={storeFilter} onValueChange={setStoreFilter}>
+              <SelectTrigger className="w-[180px] h-9">
+                <SelectValue placeholder="All Stores" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Stores</SelectItem>
+                {uniqueStores.map((store) => (
+                  <SelectItem key={store} value={store}>
+                    {store}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Status Filter */}
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[150px] h-9">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                {uniqueStatuses.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Date From Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">From:</span>
+              <div className="relative">
+                <Input
+                  type="date"
+                  value={dateFromFilter}
+                  onChange={(e) => setDateFromFilter(e.target.value)}
+                  className="w-[140px] h-9"
+                />
+              </div>
+            </div>
+
+            {/* Date To Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">To:</span>
+              <div className="relative">
+                <Input
+                  type="date"
+                  value={dateToFilter}
+                  onChange={(e) => setDateToFilter(e.target.value)}
+                  className="w-[140px] h-9"
+                />
+              </div>
+            </div>
+
+            {/* Clear Filters */}
+            {hasActiveFilters && (
+              <Button onClick={clearFilters} variant="outline" size="sm" className="h-9 bg-transparent">
+                <X className="w-4 h-4 mr-1" />
+                Clear
+              </Button>
+            )}
+          </div>
+
+          {/* Active Filters Summary */}
+          {hasActiveFilters && (
+            <div className="text-sm text-gray-600">
+              Showing {filteredOrders.length} of {orders.length} orders
+              {storeFilter !== "all" && ` • Store: ${storeFilter}`}
+              {statusFilter !== "all" && ` • Status: ${statusFilter}`}
+              {dateFromFilter && ` • From: ${new Date(dateFromFilter).toLocaleDateString()}`}
+              {dateToFilter && ` • To: ${new Date(dateToFilter).toLocaleDateString()}`}
+            </div>
+          )}
         </div>
 
         {/* Mobile Card View */}

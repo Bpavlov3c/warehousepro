@@ -1,173 +1,202 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect } from "react"
-import { Card, CardContent } from "@/components/ui/card"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Search, Plus, Store, DollarSign, TrendingUp, Calendar, Trash2, Eye, Edit } from "lucide-react"
-import { supabaseStore, type ShopifyStore } from "@/lib/supabase-store"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Plus, Store, Globe, CheckCircle, XCircle, AlertCircle, Edit, Trash2, RefreshCw } from "lucide-react"
+import { supabaseStore } from "@/lib/supabase-store"
+import type { ShopifyStore } from "@/lib/supabase-store"
 
-export default function Stores() {
+export default function StoresPage() {
   const [stores, setStores] = useState<ShopifyStore[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedStore, setSelectedStore] = useState<ShopifyStore | null>(null)
-  const [isNewStoreOpen, setIsNewStoreOpen] = useState(false)
-  const [isViewStoreOpen, setIsViewStoreOpen] = useState(false)
-  const [isEditStoreOpen, setIsEditStoreOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingStore, setEditingStore] = useState<ShopifyStore | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     shopifyDomain: "",
     accessToken: "",
+    status: "Testing" as const,
     webhookUrl: "",
     notes: "",
   })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
 
-  // Load data on component mount
+  // Load stores on component mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        const storeData = await supabaseStore.getShopifyStores()
-        setStores(storeData)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load stores")
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadData()
+    loadStores()
   }, [])
 
-  const handleCreateStore = async () => {
-    // Validate form data
-    if (!formData.name || !formData.shopifyDomain || !formData.accessToken) {
-      alert("Please fill in required fields (Name, Shopify Domain, and Access Token)")
+  const loadStores = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await supabaseStore.getShopifyStores()
+      setStores(data)
+    } catch (err) {
+      console.error("Error loading stores:", err)
+      setError("Failed to load stores")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const validateForm = () => {
+    const errors: Record<string, string> = {}
+
+    if (!formData.name.trim()) {
+      errors.name = "Store name is required"
+    }
+
+    if (!formData.shopifyDomain.trim()) {
+      errors.shopifyDomain = "Shopify domain is required"
+    } else if (!formData.shopifyDomain.includes(".myshopify.com")) {
+      errors.shopifyDomain = "Domain should be in format: yourstore.myshopify.com"
+    }
+
+    if (!formData.accessToken.trim()) {
+      errors.accessToken = "Access token is required"
+    }
+
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!validateForm()) {
       return
     }
 
+    setSubmitting(true)
     try {
-      const newStoreData = {
-        name: formData.name,
-        shopify_domain: formData.shopifyDomain,
-        access_token: formData.accessToken,
-        status: "Testing", // Start with Testing status
-        webhook_url: formData.webhookUrl,
-        notes: formData.notes,
+      if (editingStore) {
+        // Update existing store
+        await supabaseStore.updateShopifyStore(editingStore.id, {
+          name: formData.name,
+          shopifyDomain: formData.shopifyDomain,
+          accessToken: formData.accessToken,
+          status: formData.status,
+          webhookUrl: formData.webhookUrl || undefined,
+          notes: formData.notes || undefined,
+        })
+        setIsEditDialogOpen(false)
+        setEditingStore(null)
+      } else {
+        // Create new store
+        await supabaseStore.createShopifyStore({
+          name: formData.name,
+          shopify_domain: formData.shopifyDomain,
+          access_token: formData.accessToken,
+          status: formData.status,
+          webhook_url: formData.webhookUrl || undefined,
+          notes: formData.notes || undefined,
+        })
+        setIsAddDialogOpen(false)
       }
-
-      await supabaseStore.createShopifyStore(newStoreData)
-      const updatedStores = await supabaseStore.getShopifyStores()
-      setStores(updatedStores)
 
       // Reset form
-      setFormData({ name: "", shopifyDomain: "", accessToken: "", webhookUrl: "", notes: "" })
-      setIsNewStoreOpen(false)
+      setFormData({
+        name: "",
+        shopifyDomain: "",
+        accessToken: "",
+        status: "Testing",
+        webhookUrl: "",
+        notes: "",
+      })
+      setFormErrors({})
 
-      alert(`Store ${formData.name} created successfully!`)
-    } catch (error) {
-      console.error("Error creating store:", error)
-      alert("Error creating store. Please try again.")
+      // Reload stores
+      await loadStores()
+    } catch (err) {
+      console.error("Error saving store:", err)
+      setError("Failed to save store")
+    } finally {
+      setSubmitting(false)
     }
   }
 
-  const handleEditStore = async () => {
-    if (!editingStore) return
-
-    // Validate form data
-    if (!formData.name || !formData.shopifyDomain || !formData.accessToken) {
-      alert("Please fill in required fields (Name, Shopify Domain, and Access Token)")
-      return
-    }
-
-    try {
-      const updateData = {
-        name: formData.name,
-        shopifyDomain: formData.shopifyDomain,
-        accessToken: formData.accessToken,
-        webhookUrl: formData.webhookUrl,
-        notes: formData.notes,
-      }
-
-      await supabaseStore.updateShopifyStore(editingStore.id, updateData)
-
-      // Refresh the stores list
-      const updatedStores = await supabaseStore.getShopifyStores()
-      setStores(updatedStores)
-
-      // Reset form and close dialog
-      setFormData({ name: "", shopifyDomain: "", accessToken: "", webhookUrl: "", notes: "" })
-      setIsEditStoreOpen(false)
-      setEditingStore(null)
-
-      alert(`Store ${formData.name} updated successfully!`)
-    } catch (error) {
-      console.error("Error updating store:", error)
-      alert("Error updating store. Please try again.")
-    }
-  }
-
-  const openEditDialog = (store: ShopifyStore) => {
+  const handleEdit = (store: ShopifyStore) => {
     setEditingStore(store)
     setFormData({
       name: store.name,
       shopifyDomain: store.shopifyDomain,
       accessToken: store.accessToken,
+      status: store.status,
       webhookUrl: store.webhookUrl || "",
       notes: store.notes || "",
     })
-    setIsEditStoreOpen(true)
+    setFormErrors({})
+    setIsEditDialogOpen(true)
   }
 
-  const handleDeleteStore = async (store: ShopifyStore) => {
-    if (!confirm(`Are you sure you want to delete store "${store.name}"?`)) {
+  const handleDelete = async (store: ShopifyStore) => {
+    if (!confirm(`Are you sure you want to delete "${store.name}"? This will also delete all associated orders.`)) {
       return
     }
 
     try {
       await supabaseStore.deleteShopifyStore(store.id)
-      const updatedStores = await supabaseStore.getShopifyStores()
-      setStores(updatedStores)
-      alert(`Store ${store.name} deleted successfully!`)
-    } catch (error) {
-      console.error("Error deleting store:", error)
-      alert("Error deleting store. Please try again.")
+      await loadStores()
+    } catch (err) {
+      console.error("Error deleting store:", err)
+      setError("Failed to delete store")
+    }
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "Connected":
+        return <CheckCircle className="w-4 h-4 text-green-600" />
+      case "Testing":
+        return <AlertCircle className="w-4 h-4 text-yellow-600" />
+      case "Error":
+        return <XCircle className="w-4 h-4 text-red-600" />
+      default:
+        return <XCircle className="w-4 h-4 text-gray-600" />
     }
   }
 
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "connected":
+    switch (status) {
+      case "Connected":
         return "bg-green-100 text-green-800"
-      case "testing":
-        return "bg-blue-100 text-blue-800"
-      case "error":
+      case "Testing":
+        return "bg-yellow-100 text-yellow-800"
+      case "Error":
         return "bg-red-100 text-red-800"
-      case "disconnected":
-        return "bg-gray-100 text-gray-800"
       default:
         return "bg-gray-100 text-gray-800"
     }
   }
 
-  const filteredStores = stores.filter(
-    (store) =>
-      store.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      store.shopifyDomain.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      store.status.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  const totalStats = {
-    totalStores: filteredStores.length,
-    connectedStores: filteredStores.filter((store) => store.status.toLowerCase() === "connected").length,
-    testingStores: filteredStores.filter((store) => store.status.toLowerCase() === "testing").length,
-    errorStores: filteredStores.filter((store) => store.status.toLowerCase() === "error").length,
+  // Calculate stats
+  const stats = {
+    total: stores.length,
+    connected: stores.filter((s) => s.status === "Connected").length,
+    testing: stores.filter((s) => s.status === "Testing").length,
+    error: stores.filter((s) => s.status === "Error").length,
   }
 
   if (loading) {
@@ -177,39 +206,9 @@ export default function Stores() {
           <SidebarTrigger className="-ml-1 lg:hidden" />
           <h1 className="text-lg font-semibold">Stores</h1>
         </header>
-        <div className="p-6 ml-16 lg:ml-0">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-24 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-            <div className="space-y-4">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="h-32 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 ml-16 lg:ml-0">
-          <SidebarTrigger className="-ml-1 lg:hidden" />
-          <h1 className="text-lg font-semibold">Stores</h1>
-        </header>
-        <div className="p-6 ml-16 lg:ml-0">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <h3 className="text-red-800 font-medium">Error loading stores</h3>
-            <p className="text-red-600 mt-1">{error}</p>
-            <Button onClick={() => window.location.reload()} className="mt-3" variant="outline">
-              Try Again
-            </Button>
+        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
+          <div className="flex items-center justify-center h-32">
+            <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         </div>
       </div>
@@ -222,409 +221,483 @@ export default function Stores() {
         <SidebarTrigger className="-ml-1 lg:hidden" />
         <div className="flex items-center justify-between w-full">
           <h1 className="text-lg font-semibold">Stores</h1>
-          <Button onClick={() => setIsNewStoreOpen(true)} size="sm" className="lg:hidden">
-            <Plus className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={loadStores} size="sm" variant="outline">
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Store
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Add New Shopify Store</DialogTitle>
+                  <DialogDescription>
+                    Connect a new Shopify store to sync orders and manage inventory.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <Label htmlFor="name">Store Name *</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="My Shopify Store"
+                      className={formErrors.name ? "border-red-500" : ""}
+                    />
+                    {formErrors.name && <p className="text-sm text-red-600 mt-1">{formErrors.name}</p>}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="shopifyDomain">Shopify Domain *</Label>
+                    <Input
+                      id="shopifyDomain"
+                      value={formData.shopifyDomain}
+                      onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
+                      placeholder="yourstore.myshopify.com"
+                      className={formErrors.shopifyDomain ? "border-red-500" : ""}
+                    />
+                    {formErrors.shopifyDomain && (
+                      <p className="text-sm text-red-600 mt-1">{formErrors.shopifyDomain}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="accessToken">Access Token *</Label>
+                    <Input
+                      id="accessToken"
+                      type="password"
+                      value={formData.accessToken}
+                      onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                      placeholder="shpat_..."
+                      className={formErrors.accessToken ? "border-red-500" : ""}
+                    />
+                    {formErrors.accessToken && <p className="text-sm text-red-600 mt-1">{formErrors.accessToken}</p>}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="status">Status</Label>
+                    <Select
+                      value={formData.status}
+                      onValueChange={(value: any) => setFormData({ ...formData, status: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Testing">Testing</SelectItem>
+                        <SelectItem value="Connected">Connected</SelectItem>
+                        <SelectItem value="Error">Error</SelectItem>
+                        <SelectItem value="Disconnected">Disconnected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="webhookUrl">Webhook URL</Label>
+                    <Input
+                      id="webhookUrl"
+                      value={formData.webhookUrl}
+                      onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                      placeholder="https://your-app.com/webhooks/shopify"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      id="notes"
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Additional notes about this store..."
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsAddDialogOpen(false)}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={submitting}>
+                      {submitting ? "Adding..." : "Add Store"}
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </header>
 
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Stores</h1>
-          <Button onClick={() => setIsNewStoreOpen(true)} size="sm" className="hidden lg:flex">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Store
-          </Button>
+          <div className="hidden lg:flex items-center gap-2">
+            <Button onClick={loadStores} size="sm" variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add New Store
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Add New Shopify Store</DialogTitle>
+                  <DialogDescription>
+                    Connect a new Shopify store to sync orders and manage inventory.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <Label htmlFor="name">Store Name *</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="My Shopify Store"
+                      className={formErrors.name ? "border-red-500" : ""}
+                    />
+                    {formErrors.name && <p className="text-sm text-red-600 mt-1">{formErrors.name}</p>}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="shopifyDomain">Shopify Domain *</Label>
+                    <Input
+                      id="shopifyDomain"
+                      value={formData.shopifyDomain}
+                      onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
+                      placeholder="yourstore.myshopify.com"
+                      className={formErrors.shopifyDomain ? "border-red-500" : ""}
+                    />
+                    {formErrors.shopifyDomain && (
+                      <p className="text-sm text-red-600 mt-1">{formErrors.shopifyDomain}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="accessToken">Access Token *</Label>
+                    <Input
+                      id="accessToken"
+                      type="password"
+                      value={formData.accessToken}
+                      onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                      placeholder="shpat_..."
+                      className={formErrors.accessToken ? "border-red-500" : ""}
+                    />
+                    {formErrors.accessToken && <p className="text-sm text-red-600 mt-1">{formErrors.accessToken}</p>}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="status">Status</Label>
+                    <Select
+                      value={formData.status}
+                      onValueChange={(value: any) => setFormData({ ...formData, status: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Testing">Testing</SelectItem>
+                        <SelectItem value="Connected">Connected</SelectItem>
+                        <SelectItem value="Error">Error</SelectItem>
+                        <SelectItem value="Disconnected">Disconnected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="webhookUrl">Webhook URL</Label>
+                    <Input
+                      id="webhookUrl"
+                      value={formData.webhookUrl}
+                      onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                      placeholder="https://your-app.com/webhooks/shopify"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      id="notes"
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Additional notes about this store..."
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsAddDialogOpen(false)}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={submitting}>
+                      {submitting ? "Adding..." : "Add Store"}
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-600">{error}</p>
+          </div>
+        )}
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Total Stores</p>
-                <p className="text-lg font-bold">{totalStats.totalStores}</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Stores</p>
+                  <p className="text-2xl font-bold">{stats.total}</p>
+                </div>
+                <Store className="w-8 h-8 text-blue-600" />
               </div>
-              <Store className="w-5 h-5 text-blue-600" />
-            </div>
+            </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Connected</p>
-                <p className="text-lg font-bold text-green-600">{totalStats.connectedStores}</p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Connected</p>
+                  <p className="text-2xl font-bold text-green-600">{stats.connected}</p>
+                </div>
+                <CheckCircle className="w-8 h-8 text-green-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-600" />
-            </div>
+            </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Testing</p>
-                <p className="text-lg font-bold text-blue-600">{totalStats.testingStores}</p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Testing</p>
+                  <p className="text-2xl font-bold text-yellow-600">{stats.testing}</p>
+                </div>
+                <AlertCircle className="w-8 h-8 text-yellow-600" />
               </div>
-              <Calendar className="w-5 h-5 text-blue-600" />
-            </div>
+            </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-600">Errors</p>
-                <p className="text-lg font-bold text-red-600">{totalStats.errorStores}</p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Errors</p>
+                  <p className="text-2xl font-bold text-red-600">{stats.error}</p>
+                </div>
+                <XCircle className="w-8 h-8 text-red-600" />
               </div>
-              <DollarSign className="w-5 h-5 text-red-600" />
-            </div>
+            </CardContent>
           </Card>
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <Input
-            placeholder="Search stores..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 h-9"
-          />
-        </div>
-
-        {/* Mobile Card View / Desktop Table View */}
-        <div className="lg:hidden space-y-3">
-          {filteredStores.length === 0 ? (
-            <Card className="p-6 text-center">
-              <Store className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">{searchTerm ? "No stores found." : "No stores yet."}</p>
-              {!searchTerm && (
-                <Button onClick={() => setIsNewStoreOpen(true)} className="mt-2" size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add First Store
-                </Button>
-              )}
-            </Card>
-          ) : (
-            filteredStores.map((store) => (
-              <Card key={store.id} className="p-4">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-medium">{store.name}</h3>
-                    <p className="text-sm text-gray-600 truncate">{store.shopifyDomain}</p>
-                  </div>
-                  <Badge className={`${getStatusColor(store.status)} text-xs`}>{store.status}</Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                  <div>
-                    <span className="text-gray-600">Last Sync:</span>
-                    <p>{store.lastSync}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Orders:</span>
-                    <p>{store.totalOrders}</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => openEditDialog(store)}>
-                    <Edit className="w-4 h-4 mr-1" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedStore(store)
-                      setIsViewStoreOpen(true)
-                    }}
-                  >
-                    <Eye className="w-4 h-4 mr-1" />
-                    View
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => handleDeleteStore(store)}>
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Delete
-                  </Button>
-                </div>
-              </Card>
-            ))
-          )}
-        </div>
-
-        {/* Desktop Table View */}
-        <Card className="hidden lg:block">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="h-10">
-                  <TableHead>Store Name</TableHead>
-                  <TableHead>Shopify Domain</TableHead>
-                  <TableHead className="w-[80px]">Status</TableHead>
-                  <TableHead className="w-[100px]">Last Sync</TableHead>
-                  <TableHead className="w-[80px]">Orders</TableHead>
-                  <TableHead className="w-[160px] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredStores.length === 0 ? (
+        {/* Stores Table */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Shopify Stores</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {stores.length === 0 ? (
+              <div className="text-center py-8">
+                <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No stores connected</h3>
+                <p className="text-gray-500 mb-4">Connect your first Shopify store to start syncing orders.</p>
+                <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Your First Store
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8">
-                      <Store className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                      <p className="text-gray-500">{searchTerm ? "No stores found." : "No stores yet."}</p>
-                      {!searchTerm && (
-                        <Button onClick={() => setIsNewStoreOpen(true)} className="mt-2" size="sm">
-                          <Plus className="w-4 h-4 mr-2" />
-                          Add First Store
-                        </Button>
-                      )}
-                    </TableCell>
+                    <TableHead>Store</TableHead>
+                    <TableHead>Domain</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Last Sync</TableHead>
+                    <TableHead>Orders</TableHead>
+                    <TableHead>Revenue</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
-                ) : (
-                  filteredStores.map((store) => (
-                    <TableRow key={store.id} className="h-12">
-                      <TableCell className="font-medium">{store.name}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{store.shopifyDomain}</TableCell>
+                </TableHeader>
+                <TableBody>
+                  {stores.map((store) => (
+                    <TableRow key={store.id}>
                       <TableCell>
-                        <Badge className={`${getStatusColor(store.status)} text-xs px-2 py-1`}>{store.status}</Badge>
+                        <div>
+                          <div className="font-medium">{store.name}</div>
+                          {store.notes && (
+                            <div className="text-sm text-gray-500 truncate max-w-[200px]">{store.notes}</div>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell className="text-sm">{store.lastSync}</TableCell>
-                      <TableCell className="text-sm">{store.totalOrders}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => openEditDialog(store)} title="Edit Store">
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm">{store.shopifyDomain}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(store.status)}
+                          <Badge className={getStatusColor(store.status)}>{store.status}</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-600">{store.lastSync}</TableCell>
+                      <TableCell>{store.totalOrders.toLocaleString()}</TableCell>
+                      <TableCell>${store.monthlyRevenue.toLocaleString()}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(store)}>
                             <Edit className="w-4 h-4" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setSelectedStore(store)
-                              setIsViewStoreOpen(true)
-                            }}
-                            title="View Details"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteStore(store)}
-                            title="Delete Store"
+                            onClick={() => handleDelete(store)}
+                            className="text-red-600 hover:text-red-700"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
 
-        {/* View Store Dialog */}
-        <Dialog open={isViewStoreOpen} onOpenChange={setIsViewStoreOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Store Details - {selectedStore?.name}</DialogTitle>
-              <DialogDescription>View store configuration and settings</DialogDescription>
-            </DialogHeader>
-
-            {selectedStore && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-600">Store Name</p>
-                    <p className="font-medium">{selectedStore.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Status</p>
-                    <Badge className={getStatusColor(selectedStore.status)}>{selectedStore.status}</Badge>
-                  </div>
-                  <div className="col-span-2">
-                    <p className="text-gray-600">Shopify Domain</p>
-                    <p className="font-medium break-all">{selectedStore.shopifyDomain}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Access Token</p>
-                    <p className="font-medium">{selectedStore.accessToken ? "••••••••" : "Not Set"}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Webhook URL</p>
-                    <p className="font-medium">{selectedStore.webhookUrl ? "••••••••" : "Not Set"}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Last Sync</p>
-                    <p className="font-medium">{selectedStore.lastSync}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Total Orders</p>
-                    <p className="font-medium">{selectedStore.totalOrders}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Created</p>
-                    <p className="font-medium">{new Date(selectedStore.createdAt).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Last Updated</p>
-                    <p className="font-medium">{new Date(selectedStore.updatedAt).toLocaleDateString()}</p>
-                  </div>
-                </div>
-
-                {selectedStore.notes && (
-                  <div>
-                    <p className="text-gray-600 text-sm">Notes</p>
-                    <p className="text-sm bg-gray-50 p-2 rounded">{selectedStore.notes}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Create New Store Dialog */}
-        <Dialog open={isNewStoreOpen} onOpenChange={setIsNewStoreOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Add New Shopify Store</DialogTitle>
-              <DialogDescription>Connect a new Shopify store to your warehouse management system</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="name">Store Name *</label>
-                  <Input
-                    id="name"
-                    placeholder="My Shopify Store"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="shopify-domain">Shopify Domain *</label>
-                  <Input
-                    id="shopify-domain"
-                    placeholder="mystore.myshopify.com"
-                    value={formData.shopifyDomain}
-                    onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="access-token">Access Token *</label>
-                <Input
-                  id="access-token"
-                  type="password"
-                  placeholder="Your Shopify Access Token"
-                  value={formData.accessToken}
-                  onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="webhook-url">Webhook URL</label>
-                <Input
-                  id="webhook-url"
-                  placeholder="https://your-app.com/webhooks/shopify"
-                  value={formData.webhookUrl}
-                  onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="notes">Notes</label>
-                <Input
-                  id="notes"
-                  placeholder="Additional notes about this store..."
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsNewStoreOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateStore}>Add Store</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
         {/* Edit Store Dialog */}
-        <Dialog open={isEditStoreOpen} onOpenChange={setIsEditStoreOpen}>
-          <DialogContent className="max-w-2xl">
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Edit Store - {editingStore?.name}</DialogTitle>
-              <DialogDescription>Update store configuration and settings</DialogDescription>
+              <DialogTitle>Edit Store</DialogTitle>
+              <DialogDescription>Update store information and settings.</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="edit-name">Store Name *</label>
-                  <Input
-                    id="edit-name"
-                    placeholder="My Shopify Store"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="edit-shopify-domain">Shopify Domain *</label>
-                  <Input
-                    id="edit-shopify-domain"
-                    placeholder="mystore.myshopify.com"
-                    value={formData.shopifyDomain}
-                    onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
-                    required
-                  />
-                </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label htmlFor="edit-name">Store Name *</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="My Shopify Store"
+                  className={formErrors.name ? "border-red-500" : ""}
+                />
+                {formErrors.name && <p className="text-sm text-red-600 mt-1">{formErrors.name}</p>}
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="edit-access-token">Access Token *</label>
+              <div>
+                <Label htmlFor="edit-shopifyDomain">Shopify Domain *</Label>
                 <Input
-                  id="edit-access-token"
+                  id="edit-shopifyDomain"
+                  value={formData.shopifyDomain}
+                  onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
+                  placeholder="yourstore.myshopify.com"
+                  className={formErrors.shopifyDomain ? "border-red-500" : ""}
+                />
+                {formErrors.shopifyDomain && <p className="text-sm text-red-600 mt-1">{formErrors.shopifyDomain}</p>}
+              </div>
+
+              <div>
+                <Label htmlFor="edit-accessToken">Access Token *</Label>
+                <Input
+                  id="edit-accessToken"
                   type="password"
-                  placeholder="Your Shopify Access Token"
                   value={formData.accessToken}
                   onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
-                  required
+                  placeholder="shpat_..."
+                  className={formErrors.accessToken ? "border-red-500" : ""}
                 />
+                {formErrors.accessToken && <p className="text-sm text-red-600 mt-1">{formErrors.accessToken}</p>}
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="edit-webhook-url">Webhook URL</label>
+              <div>
+                <Label htmlFor="edit-status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value: any) => setFormData({ ...formData, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Testing">Testing</SelectItem>
+                    <SelectItem value="Connected">Connected</SelectItem>
+                    <SelectItem value="Error">Error</SelectItem>
+                    <SelectItem value="Disconnected">Disconnected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="edit-webhookUrl">Webhook URL</Label>
                 <Input
-                  id="edit-webhook-url"
-                  placeholder="https://your-app.com/webhooks/shopify"
+                  id="edit-webhookUrl"
                   value={formData.webhookUrl}
                   onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                  placeholder="https://your-app.com/webhooks/shopify"
                 />
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="edit-notes">Notes</label>
-                <Input
+              <div>
+                <Label htmlFor="edit-notes">Notes</Label>
+                <Textarea
                   id="edit-notes"
-                  placeholder="Additional notes about this store..."
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Additional notes about this store..."
+                  rows={3}
                 />
               </div>
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsEditStoreOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleEditStore}>Update Store</Button>
-            </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditDialogOpen(false)
+                    setEditingStore(null)
+                  }}
+                  disabled={submitting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Updating..." : "Update Store"}
+                </Button>
+              </div>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
