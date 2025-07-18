@@ -7,23 +7,23 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Search, Plus, Store, DollarSign, TrendingUp, Calendar, Trash2, Eye, Edit } from "lucide-react"
-import { supabaseStore, type StoreData } from "@/lib/supabase-store"
+import { supabaseStore, type ShopifyStore } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 export default function Stores() {
-  const [stores, setStores] = useState<StoreData[]>([])
+  const [stores, setStores] = useState<ShopifyStore[]>([])
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedStore, setSelectedStore] = useState<StoreData | null>(null)
+  const [selectedStore, setSelectedStore] = useState<ShopifyStore | null>(null)
   const [isNewStoreOpen, setIsNewStoreOpen] = useState(false)
   const [isViewStoreOpen, setIsViewStoreOpen] = useState(false)
   const [isEditStoreOpen, setIsEditStoreOpen] = useState(false)
-  const [editingStore, setEditingStore] = useState<StoreData | null>(null)
+  const [editingStore, setEditingStore] = useState<ShopifyStore | null>(null)
   const [formData, setFormData] = useState({
     name: "",
-    url: "",
-    apiKey: "",
-    apiSecret: "",
+    shopifyDomain: "",
+    accessToken: "",
+    webhookUrl: "",
     notes: "",
   })
   const [loading, setLoading] = useState(true)
@@ -34,7 +34,7 @@ export default function Stores() {
     const loadData = async () => {
       try {
         setLoading(true)
-        const storeData = await supabaseStore.getStores()
+        const storeData = await supabaseStore.getShopifyStores()
         setStores(storeData)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load stores")
@@ -47,27 +47,27 @@ export default function Stores() {
 
   const handleCreateStore = async () => {
     // Validate form data
-    if (!formData.name || !formData.url) {
-      alert("Please fill in required fields (Name and URL)")
+    if (!formData.name || !formData.shopifyDomain || !formData.accessToken) {
+      alert("Please fill in required fields (Name, Shopify Domain, and Access Token)")
       return
     }
 
     try {
       const newStoreData = {
         name: formData.name,
-        url: formData.url,
-        api_key: formData.apiKey,
-        api_secret: formData.apiSecret,
+        shopify_domain: formData.shopifyDomain,
+        access_token: formData.accessToken,
+        status: "Testing", // Start with Testing status
+        webhook_url: formData.webhookUrl,
         notes: formData.notes,
-        status: "Active" as const,
       }
 
-      await supabaseStore.createStore(newStoreData)
-      const updatedStores = await supabaseStore.getStores()
+      await supabaseStore.createShopifyStore(newStoreData)
+      const updatedStores = await supabaseStore.getShopifyStores()
       setStores(updatedStores)
 
       // Reset form
-      setFormData({ name: "", url: "", apiKey: "", apiSecret: "", notes: "" })
+      setFormData({ name: "", shopifyDomain: "", accessToken: "", webhookUrl: "", notes: "" })
       setIsNewStoreOpen(false)
 
       alert(`Store ${formData.name} created successfully!`)
@@ -81,28 +81,28 @@ export default function Stores() {
     if (!editingStore) return
 
     // Validate form data
-    if (!formData.name || !formData.url) {
-      alert("Please fill in required fields (Name and URL)")
+    if (!formData.name || !formData.shopifyDomain || !formData.accessToken) {
+      alert("Please fill in required fields (Name, Shopify Domain, and Access Token)")
       return
     }
 
     try {
       const updateData = {
         name: formData.name,
-        url: formData.url,
-        api_key: formData.apiKey,
-        api_secret: formData.apiSecret,
+        shopifyDomain: formData.shopifyDomain,
+        accessToken: formData.accessToken,
+        webhookUrl: formData.webhookUrl,
         notes: formData.notes,
       }
 
-      await supabaseStore.updateStore(editingStore.id, updateData)
+      await supabaseStore.updateShopifyStore(editingStore.id, updateData)
 
       // Refresh the stores list
-      const updatedStores = await supabaseStore.getStores()
+      const updatedStores = await supabaseStore.getShopifyStores()
       setStores(updatedStores)
 
       // Reset form and close dialog
-      setFormData({ name: "", url: "", apiKey: "", apiSecret: "", notes: "" })
+      setFormData({ name: "", shopifyDomain: "", accessToken: "", webhookUrl: "", notes: "" })
       setIsEditStoreOpen(false)
       setEditingStore(null)
 
@@ -113,26 +113,26 @@ export default function Stores() {
     }
   }
 
-  const openEditDialog = (store: StoreData) => {
+  const openEditDialog = (store: ShopifyStore) => {
     setEditingStore(store)
     setFormData({
       name: store.name,
-      url: store.url,
-      apiKey: store.api_key || "",
-      apiSecret: store.api_secret || "",
+      shopifyDomain: store.shopifyDomain,
+      accessToken: store.accessToken,
+      webhookUrl: store.webhookUrl || "",
       notes: store.notes || "",
     })
     setIsEditStoreOpen(true)
   }
 
-  const handleDeleteStore = async (store: StoreData) => {
+  const handleDeleteStore = async (store: ShopifyStore) => {
     if (!confirm(`Are you sure you want to delete store "${store.name}"?`)) {
       return
     }
 
     try {
-      await supabaseStore.deleteStore(store.id)
-      const updatedStores = await supabaseStore.getStores()
+      await supabaseStore.deleteShopifyStore(store.id)
+      const updatedStores = await supabaseStore.getShopifyStores()
       setStores(updatedStores)
       alert(`Store ${store.name} deleted successfully!`)
     } catch (error) {
@@ -143,12 +143,14 @@ export default function Stores() {
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
-      case "active":
+      case "connected":
         return "bg-green-100 text-green-800"
-      case "inactive":
-        return "bg-gray-100 text-gray-800"
+      case "testing":
+        return "bg-blue-100 text-blue-800"
       case "error":
         return "bg-red-100 text-red-800"
+      case "disconnected":
+        return "bg-gray-100 text-gray-800"
       default:
         return "bg-gray-100 text-gray-800"
     }
@@ -157,14 +159,14 @@ export default function Stores() {
   const filteredStores = stores.filter(
     (store) =>
       store.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      store.url.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      store.shopifyDomain.toLowerCase().includes(searchTerm.toLowerCase()) ||
       store.status.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
   const totalStats = {
     totalStores: filteredStores.length,
-    activeStores: filteredStores.filter((store) => store.status.toLowerCase() === "active").length,
-    inactiveStores: filteredStores.filter((store) => store.status.toLowerCase() === "inactive").length,
+    connectedStores: filteredStores.filter((store) => store.status.toLowerCase() === "connected").length,
+    testingStores: filteredStores.filter((store) => store.status.toLowerCase() === "testing").length,
     errorStores: filteredStores.filter((store) => store.status.toLowerCase() === "error").length,
   }
 
@@ -250,8 +252,8 @@ export default function Stores() {
           <Card className="p-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-gray-600">Active</p>
-                <p className="text-lg font-bold text-green-600">{totalStats.activeStores}</p>
+                <p className="text-xs text-gray-600">Connected</p>
+                <p className="text-lg font-bold text-green-600">{totalStats.connectedStores}</p>
               </div>
               <TrendingUp className="w-5 h-5 text-green-600" />
             </div>
@@ -260,10 +262,10 @@ export default function Stores() {
           <Card className="p-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-gray-600">Inactive</p>
-                <p className="text-lg font-bold text-gray-600">{totalStats.inactiveStores}</p>
+                <p className="text-xs text-gray-600">Testing</p>
+                <p className="text-lg font-bold text-blue-600">{totalStats.testingStores}</p>
               </div>
-              <Calendar className="w-5 h-5 text-gray-600" />
+              <Calendar className="w-5 h-5 text-blue-600" />
             </div>
           </Card>
 
@@ -308,19 +310,19 @@ export default function Stores() {
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <h3 className="font-medium">{store.name}</h3>
-                    <p className="text-sm text-gray-600 truncate">{store.url}</p>
+                    <p className="text-sm text-gray-600 truncate">{store.shopifyDomain}</p>
                   </div>
                   <Badge className={`${getStatusColor(store.status)} text-xs`}>{store.status}</Badge>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-sm mb-3">
                   <div>
-                    <span className="text-gray-600">Created:</span>
-                    <p>{new Date(store.created_at).toLocaleDateString()}</p>
+                    <span className="text-gray-600">Last Sync:</span>
+                    <p>{store.lastSync}</p>
                   </div>
                   <div>
-                    <span className="text-gray-600">API Key:</span>
-                    <p>{store.api_key ? "Set" : "Not Set"}</p>
+                    <span className="text-gray-600">Orders:</span>
+                    <p>{store.totalOrders}</p>
                   </div>
                 </div>
 
@@ -357,10 +359,10 @@ export default function Stores() {
               <TableHeader>
                 <TableRow className="h-10">
                   <TableHead>Store Name</TableHead>
-                  <TableHead>URL</TableHead>
+                  <TableHead>Shopify Domain</TableHead>
                   <TableHead className="w-[80px]">Status</TableHead>
-                  <TableHead className="w-[100px]">API Key</TableHead>
-                  <TableHead className="w-[100px]">Created</TableHead>
+                  <TableHead className="w-[100px]">Last Sync</TableHead>
+                  <TableHead className="w-[80px]">Orders</TableHead>
                   <TableHead className="w-[160px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -382,12 +384,12 @@ export default function Stores() {
                   filteredStores.map((store) => (
                     <TableRow key={store.id} className="h-12">
                       <TableCell className="font-medium">{store.name}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{store.url}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{store.shopifyDomain}</TableCell>
                       <TableCell>
                         <Badge className={`${getStatusColor(store.status)} text-xs px-2 py-1`}>{store.status}</Badge>
                       </TableCell>
-                      <TableCell>{store.api_key ? "Set" : "Not Set"}</TableCell>
-                      <TableCell className="text-sm">{new Date(store.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-sm">{store.lastSync}</TableCell>
+                      <TableCell className="text-sm">{store.totalOrders}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button variant="ghost" size="sm" onClick={() => openEditDialog(store)} title="Edit Store">
@@ -442,24 +444,32 @@ export default function Stores() {
                     <Badge className={getStatusColor(selectedStore.status)}>{selectedStore.status}</Badge>
                   </div>
                   <div className="col-span-2">
-                    <p className="text-gray-600">Store URL</p>
-                    <p className="font-medium break-all">{selectedStore.url}</p>
+                    <p className="text-gray-600">Shopify Domain</p>
+                    <p className="font-medium break-all">{selectedStore.shopifyDomain}</p>
                   </div>
                   <div>
-                    <p className="text-gray-600">API Key</p>
-                    <p className="font-medium">{selectedStore.api_key ? "••••••••" : "Not Set"}</p>
+                    <p className="text-gray-600">Access Token</p>
+                    <p className="font-medium">{selectedStore.accessToken ? "••••••••" : "Not Set"}</p>
                   </div>
                   <div>
-                    <p className="text-gray-600">API Secret</p>
-                    <p className="font-medium">{selectedStore.api_secret ? "••••••••" : "Not Set"}</p>
+                    <p className="text-gray-600">Webhook URL</p>
+                    <p className="font-medium">{selectedStore.webhookUrl ? "••••••••" : "Not Set"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Last Sync</p>
+                    <p className="font-medium">{selectedStore.lastSync}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Total Orders</p>
+                    <p className="font-medium">{selectedStore.totalOrders}</p>
                   </div>
                   <div>
                     <p className="text-gray-600">Created</p>
-                    <p className="font-medium">{new Date(selectedStore.created_at).toLocaleDateString()}</p>
+                    <p className="font-medium">{new Date(selectedStore.createdAt).toLocaleDateString()}</p>
                   </div>
                   <div>
                     <p className="text-gray-600">Last Updated</p>
-                    <p className="font-medium">{new Date(selectedStore.updated_at).toLocaleDateString()}</p>
+                    <p className="font-medium">{new Date(selectedStore.updatedAt).toLocaleDateString()}</p>
                   </div>
                 </div>
 
@@ -478,7 +488,7 @@ export default function Stores() {
         <Dialog open={isNewStoreOpen} onOpenChange={setIsNewStoreOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Add New Store</DialogTitle>
+              <DialogTitle>Add New Shopify Store</DialogTitle>
               <DialogDescription>Connect a new Shopify store to your warehouse management system</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -494,38 +504,37 @@ export default function Stores() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label htmlFor="url">Store URL *</label>
+                  <label htmlFor="shopify-domain">Shopify Domain *</label>
                   <Input
-                    id="url"
-                    placeholder="https://mystore.myshopify.com"
-                    value={formData.url}
-                    onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+                    id="shopify-domain"
+                    placeholder="mystore.myshopify.com"
+                    value={formData.shopifyDomain}
+                    onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
                     required
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="api-key">API Key</label>
-                  <Input
-                    id="api-key"
-                    type="password"
-                    placeholder="Your Shopify API Key"
-                    value={formData.apiKey}
-                    onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="api-secret">API Secret</label>
-                  <Input
-                    id="api-secret"
-                    type="password"
-                    placeholder="Your Shopify API Secret"
-                    value={formData.apiSecret}
-                    onChange={(e) => setFormData({ ...formData, apiSecret: e.target.value })}
-                  />
-                </div>
+              <div className="space-y-2">
+                <label htmlFor="access-token">Access Token *</label>
+                <Input
+                  id="access-token"
+                  type="password"
+                  placeholder="Your Shopify Access Token"
+                  value={formData.accessToken}
+                  onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="webhook-url">Webhook URL</label>
+                <Input
+                  id="webhook-url"
+                  placeholder="https://your-app.com/webhooks/shopify"
+                  value={formData.webhookUrl}
+                  onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                />
               </div>
 
               <div className="space-y-2">
@@ -567,38 +576,37 @@ export default function Stores() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label htmlFor="edit-url">Store URL *</label>
+                  <label htmlFor="edit-shopify-domain">Shopify Domain *</label>
                   <Input
-                    id="edit-url"
-                    placeholder="https://mystore.myshopify.com"
-                    value={formData.url}
-                    onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+                    id="edit-shopify-domain"
+                    placeholder="mystore.myshopify.com"
+                    value={formData.shopifyDomain}
+                    onChange={(e) => setFormData({ ...formData, shopifyDomain: e.target.value })}
                     required
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label htmlFor="edit-api-key">API Key</label>
-                  <Input
-                    id="edit-api-key"
-                    type="password"
-                    placeholder="Your Shopify API Key"
-                    value={formData.apiKey}
-                    onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="edit-api-secret">API Secret</label>
-                  <Input
-                    id="edit-api-secret"
-                    type="password"
-                    placeholder="Your Shopify API Secret"
-                    value={formData.apiSecret}
-                    onChange={(e) => setFormData({ ...formData, apiSecret: e.target.value })}
-                  />
-                </div>
+              <div className="space-y-2">
+                <label htmlFor="edit-access-token">Access Token *</label>
+                <Input
+                  id="edit-access-token"
+                  type="password"
+                  placeholder="Your Shopify Access Token"
+                  value={formData.accessToken}
+                  onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-webhook-url">Webhook URL</label>
+                <Input
+                  id="edit-webhook-url"
+                  placeholder="https://your-app.com/webhooks/shopify"
+                  value={formData.webhookUrl}
+                  onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
+                />
               </div>
 
               <div className="space-y-2">

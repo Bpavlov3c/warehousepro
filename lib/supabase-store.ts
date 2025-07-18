@@ -516,9 +516,9 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
     console.log("Adding inventory from delivered PO:", po.po_number)
 
     // ⚠️ Ignore items that have 0 (or negative) quantity – they should not hit inventory
-    const validItems = po.items.filter((it) => it.quantity > 0)
+    const validItems = po.items.filter((it) => it.quantity >= 0)
     if (!validItems.length) {
-      console.log("No valid (qty>0) PO items to add to inventory – skipping")
+      console.log("No valid (qty>=0) PO items to add to inventory – skipping")
       return
     }
 
