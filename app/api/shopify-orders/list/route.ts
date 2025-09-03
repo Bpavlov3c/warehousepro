@@ -4,7 +4,7 @@ import { supabaseStore } from "@/lib/supabase-store"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const limit = Number.parseInt(searchParams.get("limit") || "20")
+    const limit = Number.parseInt(searchParams.get("limit") || "200")
     const offset = Number.parseInt(searchParams.get("offset") || "0")
 
     console.log(`API: Fetching orders with limit=${limit}, offset=${offset}`)

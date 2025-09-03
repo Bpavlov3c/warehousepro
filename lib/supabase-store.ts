@@ -151,6 +151,7 @@ export interface ShopifyOrder {
   total_amount: number
   shipping_cost: number
   tax_amount: number
+  inventory_processed?: boolean
 }
 
 export interface ShopifyOrderStats {
@@ -193,6 +194,23 @@ export interface Return {
   updated_at: string
   return_items: ReturnItem[]
   total_refund?: number
+}
+
+/**
+ * Some preview environments (e.g. brand-new databases) won’t yet have the
+ * `inventory_processed` column.  If Postgres throws the unknown-column error
+ * (code 42703) we safely ignore it and behave as if every order is processed.
+ */
+function ignoreMissingInventoryProcessed<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  return fn().catch((err: any) => {
+    if (err?.code === "42703" || /inventory_processed/.test(err?.message || "")) {
+      console.warn(
+        "[supabase-store] inventory_processed column missing – skipping inventory-processing logic until the migration is applied.",
+      )
+      return fallback
+    }
+    throw err
+  })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -277,7 +295,133 @@ async function calculateReservedQuantities(): Promise<Map<string, number>> {
 }
 
 /**
+ * Calculate quantities that have been sold (fulfilled orders after 2025-07-17)
+ */
+async function calculateSoldQuantities(): Promise<Map<string, number>> {
+  return ignoreMissingInventoryProcessed(async () => {
+    const { data, error } = await supabase
+      .from("shopify_orders")
+      .select(
+        `
+        shopify_order_items ( sku, quantity )
+      `,
+      )
+      .in("status", ["fulfilled", "shipped", "delivered"])
+      .gte("order_date", "2025-07-17")
+      .eq("inventory_processed", true)
+
+    if (error) throw error
+
+    const sold = new Map<string, number>()
+    data?.forEach((order) => {
+      order.shopify_order_items?.forEach((it) => {
+        sold.set(it.sku, (sold.get(it.sku) || 0) + it.quantity)
+      })
+    })
+    return sold
+  }, new Map<string, number>())
+}
+
+/**
+ * Process fulfilled orders for inventory deduction
+ * Only processes orders after 2025-07-17 that haven't been processed yet
+ */
+async function processFulfilledOrdersForInventory(): Promise<void> {
+  await ignoreMissingInventoryProcessed(async () => {
+    const { data: orders, error } = await supabase
+      .from("shopify_orders")
+      .select(
+        `
+        id,
+        order_number,
+        shopify_order_items (
+          sku,
+          product_name,
+          quantity
+        )
+      `,
+      )
+      .in("status", ["fulfilled", "shipped", "delivered"])
+      .gte("order_date", "2025-07-17")
+      .eq("inventory_processed", false)
+
+    if (error) throw error
+    if (!orders?.length) return
+
+    for (const ord of orders) {
+      for (const item of ord.shopify_order_items || []) {
+        await deductInventoryQuantity(item.sku, item.quantity, `Order ${ord.order_number}`)
+      }
+      await supabase.from("shopify_orders").update({ inventory_processed: true }).eq("id", ord.id)
+    }
+  }, undefined)
+}
+
+/**
+ * Deduct quantity from inventory for a specific SKU
+ * Uses FIFO approach - deducts from oldest inventory first
+ */
+async function deductInventoryQuantity(sku: string, quantityToDeduct: number, reason: string): Promise<void> {
+  try {
+    console.log(`Deducting ${quantityToDeduct} units of ${sku} for ${reason}`)
+
+    // Get all inventory records for this SKU ordered by creation date (FIFO)
+    const { data: inventoryRecords, error: fetchError } = await supabase
+      .from("inventory")
+      .select("id, quantity_available")
+      .eq("sku", sku)
+      .gt("quantity_available", 0)
+      .order("created_at", { ascending: true })
+
+    if (fetchError) {
+      console.error(`Error fetching inventory for SKU ${sku}:`, fetchError)
+      return
+    }
+
+    if (!inventoryRecords || inventoryRecords.length === 0) {
+      console.warn(`No available inventory found for SKU ${sku}`)
+      return
+    }
+
+    let remainingToDeduct = quantityToDeduct
+
+    // Deduct from inventory records using FIFO
+    for (const record of inventoryRecords) {
+      if (remainingToDeduct <= 0) break
+
+      const availableInThisRecord = record.quantity_available
+      const deductFromThisRecord = Math.min(remainingToDeduct, availableInThisRecord)
+      const newQuantity = availableInThisRecord - deductFromThisRecord
+
+      // Update the inventory record
+      const { error: updateError } = await supabase
+        .from("inventory")
+        .update({ quantity_available: newQuantity })
+        .eq("id", record.id)
+
+      if (updateError) {
+        console.error(`Error updating inventory record ${record.id}:`, updateError)
+        continue
+      }
+
+      remainingToDeduct -= deductFromThisRecord
+      console.log(`Deducted ${deductFromThisRecord} from inventory record ${record.id}, remaining: ${newQuantity}`)
+    }
+
+    if (remainingToDeduct > 0) {
+      console.warn(`Could not deduct full quantity for ${sku}. Remaining: ${remainingToDeduct}`)
+    } else {
+      console.log(`Successfully deducted ${quantityToDeduct} units of ${sku}`)
+    }
+  } catch (error) {
+    console.error(`Error in deductInventoryQuantity for ${sku}:`, error)
+    throw error
+  }
+}
+
+/**
  * Calculate inventory summary for each SKU including incoming stock from POs and reserved from orders
+ * Now also accounts for sold quantities from fulfilled orders
  */
 async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> {
   try {
@@ -313,8 +457,12 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       throw poError
     }
 
-    // Get latest unit costs and reserved quantities
-    const [latestCosts, reservedQuantities] = await Promise.all([getLatestUnitCosts(), calculateReservedQuantities()])
+    // Get latest unit costs, reserved quantities, and sold quantities
+    const [latestCosts, reservedQuantities, soldQuantities] = await Promise.all([
+      getLatestUnitCosts(),
+      calculateReservedQuantities(),
+      calculateSoldQuantities(),
+    ])
 
     // Create inventory summary map
     const inventoryMap = new Map<string, InventoryItem>()
@@ -335,17 +483,23 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
       }
     })
 
-    // Create inventory items with latest costs and reserved quantities
+    // Create inventory items with latest costs, reserved quantities, and sold quantities
     skuTotals.forEach((totals, sku) => {
       const latestCost = latestCosts.get(sku) || 0 // This is already unit_cost_with_delivery
       const reserved = reservedQuantities.get(sku) || 0
-      console.log(`SKU ${sku}: quantity=${totals.totalQuantity}, total_unit_cost=${latestCost}, reserved=${reserved}`)
+      const sold = soldQuantities.get(sku) || 0
+
+      // The in-stock quantity is already reduced by the inventory deduction process
+      // So we don't need to subtract sold quantities here - they're already deducted
+      const inStock = totals.totalQuantity
+
+      console.log(`SKU ${sku}: quantity=${inStock}, total_unit_cost=${latestCost}, reserved=${reserved}, sold=${sold}`)
 
       inventoryMap.set(sku, {
         id: `summary-${sku}`,
         sku: sku,
         name: totals.productName,
-        inStock: totals.totalQuantity,
+        inStock: inStock,
         incoming: 0,
         reserved: reserved,
         unitCost: latestCost, // This is the total unit cost including shipping
@@ -402,6 +556,9 @@ async function calculateInventorySummary(): Promise<Map<string, InventoryItem>> 
  */
 async function getInventory(): Promise<InventoryItem[]> {
   try {
+    // First process any unprocessed fulfilled orders
+    await processFulfilledOrdersForInventory()
+
     const inventoryMap = await calculateInventorySummary()
     return Array.from(inventoryMap.values())
   } catch (error) {
@@ -1472,6 +1629,7 @@ async function getShopifyOrders(options: PaginationOptions = {}): Promise<Pagina
         total_amount: row.total_amount ?? 0,
         shipping_cost: row.shipping_cost ?? 0,
         tax_amount: row.tax_amount ?? 0,
+        inventory_processed: row.inventory_processed,
       }
     })
 
@@ -1568,10 +1726,12 @@ async function getAllShopifyOrders(): Promise<ShopifyOrder[]> {
 
 /**
  * Insert / update Shopify orders + their line-items.
+ * Now also processes fulfilled orders for inventory deduction.
  *
  * 1. Upsert order **headers** into `shopify_orders`
  * 2. Insert line-items into `shopify_order_items`
  *    (existing items for that order are deleted first)
+ * 3. Process fulfilled orders for inventory deduction if they're after 2025-07-17
  */
 async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
   try {
@@ -1583,6 +1743,7 @@ async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
     const orderHeaders = rawOrders.map(({ items, ...header }) => ({
       ...header,
       profit: header.profit ?? 0, // default profit
+      inventory_processed: false, // new orders start as unprocessed
     }))
 
     const { data: upserted, error: upsertErr } = await supabase
@@ -1621,81 +1782,167 @@ async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
       const affectedOrderIds = Array.from(idMap.values())
       await supabase.from("shopify_order_items").delete().in("order_id", affectedOrderIds)
 
-      // Insert fresh items
-      const { error: itemErr } = await supabase.from("shopify_order_items").insert(itemRows)
-      if (itemErr) throw itemErr
+      // Insert the new items
+      const { data: insertedItems, error: insertErr } = await supabase
+        .from("shopify_order_items")
+        .insert(itemRows)
+        .select()
+
+      if (insertErr) throw insertErr
     }
 
-    /* ----------------------------------------- */
-    /* Return the upserted headers (no items)    */
-    /* ----------------------------------------- */
-    return upserted as ShopifyOrder[]
-  } catch (e) {
-    console.error("Error adding Shopify orders:", e)
-    throw e
+    /* ---------------------------------------------------------------------- */
+    /* 3 ▸ PROCESS FULFILLED ORDERS (deduct inventory if order is fulfilled) */
+    /* ---------------------------------------------------------------------- */
+    for (const order of upserted || []) {
+      if (
+        order.status === "fulfilled" &&
+        new Date(order.order_date) >= new Date("2025-07-17") &&
+        !order.inventory_processed
+      ) {
+        try {
+          console.log(`Processing fulfilled order ${order.order_number} for inventory deduction`)
+
+          // Get the items for this order
+          const { data: orderItems, error: itemsError } = await supabase
+            .from("shopify_order_items")
+            .select("*")
+            .eq("order_id", order.id)
+
+          if (itemsError) {
+            console.error(`Error fetching items for order ${order.order_number}:`, itemsError)
+            continue // Skip to the next order
+          }
+
+          // Deduct quantities from inventory for each item
+          for (const item of orderItems || []) {
+            await deductInventoryQuantity(item.sku, item.quantity, `Order ${order.order_number}`)
+          }
+
+          // Mark order as processed
+          const { error: updateError } = await supabase
+            .from("shopify_orders")
+            .update({ inventory_processed: true })
+            .eq("id", order.id)
+
+          if (updateError) {
+            console.error(`Error marking order ${order.order_number} as processed:`, updateError)
+          } else {
+            console.log(`Order ${order.order_number} marked as processed`)
+          }
+        } catch (error) {
+          console.error(`Error processing order ${order.order_number}:`, error)
+          // Continue with next order even if one fails
+        }
+      }
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* 4 ▸ FETCH ENRICHED ORDERS (with items + costs)                          */
+    /* ---------------------------------------------------------------------- */
+    const latestCosts = await getLatestUnitCosts()
+
+    const enrichedOrders = (upserted || []).map((row: any) => {
+      const itemsWithCosts = itemRows
+        .filter((item) => item.order_id === row.id)
+        .map((it) => ({
+          ...it,
+          cost_price: latestCosts.get(it.sku) ?? 0,
+        }))
+
+      const profit = calculateOrderProfit(
+        {
+          ...row,
+          items: itemsWithCosts,
+          total_amount: row.total_amount ?? 0,
+          tax_amount: row.tax_amount ?? 0,
+          shipping_cost: row.shipping_cost ?? 0,
+        } as unknown as ShopifyOrder,
+        latestCosts,
+      )
+
+      return {
+        id: row.id,
+        storeId: row.store_id,
+        storeName: row.store_name, // Assuming store_name is available in the row
+        shopifyOrderId: row.shopify_order_id,
+        orderNumber: row.order_number,
+        customerName: row.customer_name,
+        customerEmail: row.customer_email,
+        orderDate: row.order_date,
+        status: row.status,
+        totalAmount: row.total_amount ?? 0,
+        shippingCost: row.shipping_cost ?? 0,
+        taxAmount: row.tax_amount ?? 0,
+        items: itemsWithCosts,
+        shippingAddress: row.shipping_address,
+        profit: profit,
+        createdAt: row.created_at,
+        shipping_address: row.shipping_address,
+        total_amount: row.total_amount ?? 0,
+        shipping_cost: row.shipping_cost ?? 0,
+        tax_amount: row.tax_amount ?? 0,
+        inventory_processed: row.inventory_processed,
+      }
+    })
+
+    return enrichedOrders
+  } catch (error) {
+    console.error("Error in addShopifyOrders:", error)
+    throw error
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               Returns APIs                                 */
+/*                               Return APIs                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Fetch all return orders and their items without relying on PostgREST joins.
- */
 async function getReturns(): Promise<Return[]> {
   try {
-    console.log("Fetching returns…")
+    console.log("Fetching returns...")
 
-    // 1. grab all return headers
-    const { data: returnRows, error: returnsErr } = await supabase
+    const { data, error } = await supabase
       .from("returns")
-      .select("*")
+      .select(`
+      id,
+      return_number,
+      customer_name,
+      customer_email,
+      order_number,
+      return_date,
+      status,
+      notes,
+      created_at,
+      updated_at,
+      return_items (
+        id,
+        return_id,
+        sku,
+        product_name,
+        quantity,
+        condition,
+        reason,
+        created_at,
+        total_refund,
+        unit_price
+      ),
+      total_refund
+    `)
       .order("created_at", { ascending: false })
 
-    if (returnsErr) throw returnsErr
-    if (!returnRows?.length) return []
+    if (error) {
+      console.error("Error fetching returns:", error)
+      throw error
+    }
 
-    // 2. collect the ids and pull all items in one query
-    const ids = returnRows.map((r) => r.id)
-    const { data: itemRows, error: itemsErr } = await supabase.from("return_items").select("*").in("return_id", ids)
+    console.log("Fetched returns:", data)
 
-    if (itemsErr) throw itemsErr
-
-    // 3. group items by their return_id for fast lookup
-    const itemMap = new Map<string, ReturnItem[]>()
-    ;(itemRows || []).forEach((it) => {
-      const list = itemMap.get(it.return_id) || []
-      list.push({
-        id: it.id,
-        return_id: it.return_id,
-        sku: it.sku,
-        product_name: it.product_name,
-        quantity: it.quantity,
-        condition: it.condition,
-        reason: it.reason,
-        created_at: it.created_at,
-        total_refund: it.total_refund ?? 0,
-        unit_price: it.unit_price ?? 0,
-      })
-      itemMap.set(it.return_id, list)
-    })
-
-    // 4. stitch rows + items together
-    return returnRows.map((r) => ({
-      id: r.id,
-      return_number: r.return_number,
-      customer_name: r.customer_name,
-      customer_email: r.customer_email ?? undefined,
-      order_number: r.order_number ?? undefined,
-      return_date: r.return_date,
-      status: r.status,
-      notes: r.notes ?? undefined,
-      total_refund: r.total_refund ?? 0,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      return_items: itemMap.get(r.id) ?? [],
-    }))
+    return (
+      data?.map((ret) => ({
+        ...ret,
+        return_items: ret.return_items || [],
+      })) || []
+    )
   } catch (error) {
     console.error("Error in getReturns:", error)
     throw error
@@ -1708,17 +1955,24 @@ async function createReturn(data: {
   order_number?: string
   return_date: string
   status: "Pending" | "Processing" | "Accepted" | "Rejected"
-  items: Array<{
+  notes?: string
+  return_items: Array<{
     sku: string
     product_name: string
     quantity: number
-    condition: string
-    reason: string
-    total_refund: number
+    condition: "Good" | "Used" | "Damaged" | "Defective"
+    reason:
+      | "Defective"
+      | "Wrong Item"
+      | "Not as Described"
+      | "Changed Mind"
+      | "Damaged in Transit"
+      | "Quality Issues"
+      | "Other"
     unit_price?: number
+    total_refund?: number
   }>
-  total_refund: number
-  notes?: string
+  total_refund?: number
 }): Promise<Return> {
   try {
     console.log("Creating return with data:", data)
@@ -1726,18 +1980,18 @@ async function createReturn(data: {
     const returnNumber = generateReturnNumber()
     console.log("Generated return number:", returnNumber)
 
-    // Insert the return order
+    // Insert the return
     const { data: returnData, error: returnError } = await supabase
       .from("returns")
       .insert({
         return_number: returnNumber,
         customer_name: data.customer_name,
-        customer_email: data.customer_email || null,
-        order_number: data.order_number || null,
+        customer_email: data.customer_email,
+        order_number: data.order_number,
         return_date: data.return_date,
         status: data.status,
         notes: data.notes || null,
-        total_refund: data.total_refund,
+        total_refund: data.total_refund || 0,
       })
       .select()
       .single()
@@ -1750,19 +2004,19 @@ async function createReturn(data: {
     console.log("Created return:", returnData)
 
     // Insert the items
-    if (data.items && data.items.length > 0) {
-      const itemsToInsert = data.items.map((item) => ({
+    if (data.return_items && data.return_items.length > 0) {
+      const itemsToInsert = data.return_items.map((item) => ({
         return_id: returnData.id,
         sku: item.sku,
         product_name: item.product_name,
         quantity: item.quantity,
         condition: item.condition,
         reason: item.reason,
-        total_refund: item.total_refund,
-        unit_price: item.unit_price ?? null,
+        unit_price: item.unit_price || 0,
+        total_refund: item.total_refund || 0,
       }))
 
-      console.log("Inserting return items:", itemsToInsert)
+      console.log("Inserting items:", itemsToInsert)
 
       const { data: itemsData, error: itemsError } = await supabase.from("return_items").insert(itemsToInsert).select()
 
@@ -1771,11 +2025,10 @@ async function createReturn(data: {
         throw itemsError
       }
 
-      console.log("Created return items:", itemsData)
+      console.log("Created items:", itemsData)
 
       return {
         ...returnData,
-        total_refund: returnData.total_refund ?? data.total_refund,
         return_items: (itemsData || []).map((row) => ({
           id: row.id,
           return_id: row.return_id,
@@ -1784,9 +2037,9 @@ async function createReturn(data: {
           quantity: row.quantity,
           condition: row.condition,
           reason: row.reason,
-          total_refund: row.total_refund ?? 0,
-          unit_price: row.unit_price ?? 0,
           created_at: row.created_at,
+          total_refund: row.total_refund || 0,
+          unit_price: row.unit_price || 0,
         })),
       }
     }
@@ -1801,43 +2054,12 @@ async function createReturn(data: {
   }
 }
 
+/**
+ * Update an existing return
+ */
 async function updateReturn(id: string, updates: Partial<Return>): Promise<Return | null> {
   try {
     console.log("Updating return:", id, updates)
-
-    // Get the current return to check status change
-    const { data: currentReturn, error: fetchError } = await supabase
-      .from("returns")
-      .select(`
-      id,
-      return_number,
-      customer_name,
-      customer_email,
-      order_number,
-      return_date,
-      status,
-      notes,
-      created_at,
-      return_items (
-        id,
-        return_id,
-        sku,
-        product_name,
-        quantity,
-        condition,
-        reason
-      )
-    `)
-      .eq("id", id)
-      .single()
-
-    if (fetchError) {
-      console.error("Error fetching current return:", fetchError)
-      throw fetchError
-    }
-
-    const previousStatus = currentReturn.status
-    const newStatus = updates.status
 
     // Update the return
     const { data, error } = await supabase
@@ -1863,8 +2085,11 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
         quantity,
         condition,
         reason,
-        created_at
-      )
+        created_at,
+        total_refund,
+        unit_price
+      ),
+      total_refund
     `)
       .single()
 
@@ -1873,147 +2098,203 @@ async function updateReturn(id: string, updates: Partial<Return>): Promise<Retur
       throw error
     }
 
-    const updatedReturn = {
+    return {
       ...data,
-      total_refund: data.total_refund ?? 0,
       return_items: data.return_items || [],
     }
-
-    // Handle status changes that affect inventory
-    if (newStatus && previousStatus !== newStatus) {
-      console.log(`Return status changed from ${previousStatus} to ${newStatus}`)
-
-      // If changing TO "Accepted" from any other status
-      if (newStatus === "Accepted" && previousStatus !== "Accepted") {
-        console.log("Return status changed to Accepted, adding items back to inventory")
-        await addReturnedItemsToInventory(updatedReturn)
-      }
-
-      // If changing FROM "Accepted" to any other status
-      if (previousStatus === "Accepted" && newStatus !== "Accepted") {
-        console.log("Return status changed from Accepted, removing returned items from inventory")
-        await removeReturnedItemsFromInventory(updatedReturn)
-      }
-    }
-
-    return updatedReturn
   } catch (error) {
     console.error("Error in updateReturn:", error)
     throw error
   }
 }
 
-/** Permanently remove a return header + its items */
-async function deleteReturn(id: string): Promise<void> {
-  try {
-    // delete items first (FK constraint safety)
-    const { error: itemsErr } = await supabase.from("return_items").delete().eq("return_id", id)
-    if (itemsErr) throw itemsErr
-
-    const { error } = await supabase.from("returns").delete().eq("id", id)
-    if (error) throw error
-  } catch (e) {
-    console.error("Error deleting return:", e)
-    throw e
-  }
-}
-
 /**
- * Add returned items back to inventory when a return is accepted.
- *   • If a SKU already exists → increment its quantity_available.
- *   • If a SKU does not exist  → create a brand-new inventory record.
+ * Update an existing return with items (comprehensive update)
  */
-async function addReturnedItemsToInventory(returnOrder: Return): Promise<void> {
+async function updateReturnWithItems(
+  id: string,
+  data: {
+    customer_name?: string
+    customer_email?: string
+    order_number?: string
+    return_date?: string
+    status?: "Pending" | "Processing" | "Accepted" | "Rejected"
+    notes?: string
+    return_items?: Array<{
+      sku: string
+      product_name: string
+      quantity: number
+      condition: "Good" | "Used" | "Damaged" | "Defective"
+      reason:
+        | "Defective"
+        | "Wrong Item"
+        | "Not as Described"
+        | "Changed Mind"
+        | "Damaged in Transit"
+        | "Quality Issues"
+        | "Other"
+      unit_price?: number
+      total_refund?: number
+    }>
+    total_refund?: number
+  },
+): Promise<Return | null> {
   try {
-    if (!returnOrder.return_items?.length) return
+    console.log("Updating return with items:", id, data)
 
-    const latestCosts = await getLatestUnitCosts()
+    // Start a transaction-like approach
+    // First, update the return header
+    const headerUpdates: any = {}
+    if (data.customer_name !== undefined) headerUpdates.customer_name = data.customer_name
+    if (data.customer_email !== undefined) headerUpdates.customer_email = data.customer_email
+    if (data.order_number !== undefined) headerUpdates.order_number = data.order_number
+    if (data.return_date !== undefined) headerUpdates.return_date = data.return_date
+    if (data.status !== undefined) headerUpdates.status = data.status
+    if (data.notes !== undefined) headerUpdates.notes = data.notes
+    if (data.total_refund !== undefined) headerUpdates.total_refund = data.total_refund
 
-    for (const item of returnOrder.return_items) {
-      // Get the newest inventory row for this SKU (if any)
-      const { data: existingRows, error: selErr } = await supabase
-        .from("inventory")
-        .select("id, quantity_available")
-        .eq("sku", item.sku)
-        .order("created_at", { ascending: false })
-        .limit(1)
+    const { data: returnData, error: returnError } = await supabase
+      .from("returns")
+      .update(headerUpdates)
+      .eq("id", id)
+      .select()
+      .single()
 
-      if (selErr) {
-        console.error("Inventory lookup failed:", selErr)
-        continue
+    if (returnError) {
+      console.error("Error updating return header:", returnError)
+      throw returnError
+    }
+
+    console.log("Updated return header:", returnData)
+
+    // If items are provided, replace all existing items
+    if (data.return_items) {
+      // Delete existing items
+      const { error: deleteError } = await supabase.from("return_items").delete().eq("return_id", id)
+
+      if (deleteError) {
+        console.error("Error deleting existing return items:", deleteError)
+        throw deleteError
       }
 
-      if (existingRows && existingRows.length) {
-        // Update quantity on the existing row
-        const row = existingRows[0]
-        const { error: upErr } = await supabase
-          .from("inventory")
-          .update({ quantity_available: row.quantity_available + item.quantity })
-          .eq("id", row.id)
+      console.log("Deleted existing items")
 
-        if (upErr) console.error(`Qty update failed for ${item.sku}:`, upErr)
-      } else {
-        // Create a fresh inventory row
-        const { error: insErr } = await supabase.from("inventory").insert({
+      // Insert new items
+      if (data.return_items.length > 0) {
+        const itemsToInsert = data.return_items.map((item) => ({
+          return_id: id,
           sku: item.sku,
           product_name: item.product_name,
-          quantity_available: item.quantity,
-          unit_cost_with_delivery: latestCosts.get(item.sku) ?? 0,
-          po_id: null,
-          purchase_date: new Date().toISOString().split("T")[0],
-        })
-        if (insErr) console.error(`Insert failed for ${item.sku}:`, insErr)
+          quantity: item.quantity,
+          condition: item.condition,
+          reason: item.reason,
+          unit_price: item.unit_price || 0,
+          total_refund: item.total_refund || 0,
+        }))
+
+        console.log("Inserting new items:", itemsToInsert)
+
+        const { data: itemsData, error: itemsError } = await supabase
+          .from("return_items")
+          .insert(itemsToInsert)
+          .select()
+
+        if (itemsError) {
+          console.error("Error creating new return items:", itemsError)
+          throw itemsError
+        }
+
+        console.log("Created new items:", itemsData)
+
+        return {
+          ...returnData,
+          return_items: (itemsData || []).map((row) => ({
+            id: row.id,
+            return_id: row.return_id,
+            sku: row.sku,
+            product_name: row.product_name,
+            quantity: row.quantity,
+            condition: row.condition,
+            reason: row.reason,
+            created_at: row.created_at,
+            total_refund: row.total_refund || 0,
+            unit_price: row.unit_price || 0,
+          })),
+        }
       }
     }
-  } catch (e) {
-    console.error("addReturnedItemsToInventory failed:", e)
-    throw e
-  }
-}
 
-/**
- * Subtract previously-added quantities if an accepted return is reverted.
- */
-async function removeReturnedItemsFromInventory(returnOrder: Return): Promise<void> {
-  try {
-    if (!returnOrder.return_items?.length) return
+    // If no items provided, just return the updated return with existing items
+    const { data: fullReturn, error: fullReturnError } = await supabase
+      .from("returns")
+      .select(`
+      id,
+      return_number,
+      customer_name,
+      customer_email,
+      order_number,
+      return_date,
+      status,
+      notes,
+      created_at,
+      updated_at,
+      return_items (
+        id,
+        return_id,
+        sku,
+        product_name,
+        quantity,
+        condition,
+        reason,
+        created_at,
+        total_refund,
+        unit_price
+      )
+    `)
+      .eq("id", id)
+      .single()
 
-    for (const item of returnOrder.return_items) {
-      // Always work against the newest row for the SKU
-      const { data: existingRows, error: selErr } = await supabase
-        .from("inventory")
-        .select("id, quantity_available")
-        .eq("sku", item.sku)
-        .order("created_at", { ascending: false })
-        .limit(1)
-
-      if (selErr) {
-        console.error("Inventory lookup failed:", selErr)
-        continue
-      }
-
-      if (existingRows && existingRows.length) {
-        const row = existingRows[0]
-        const newQty = Math.max(row.quantity_available - item.quantity, 0)
-
-        const { error: upErr } = await supabase
-          .from("inventory")
-          .update({ quantity_available: newQty })
-          .eq("id", row.id)
-
-        if (upErr) console.error(`Qty decrease failed for ${item.sku}:`, upErr)
-      } else {
-        console.warn(`No inventory row found for SKU ${item.sku} while reverting return.`)
-      }
+    if (fullReturnError) {
+      console.error("Error fetching updated return:", fullReturnError)
+      throw fullReturnError
     }
-  } catch (e) {
-    console.error("removeReturnedItemsFromInventory failed:", e)
-    throw e
+
+    return {
+      ...fullReturn,
+      return_items: fullReturn.return_items || [],
+    }
+  } catch (error) {
+    console.error("Error in updateReturnWithItems:", error)
+    throw error
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/*                           Public export signature                          */
+/*                                Utils                                       */
+/* -------------------------------------------------------------------------- */
+
+function generatePONumber(): string {
+  const now = new Date()
+  const year = now.getFullYear().toString().slice(-2) // Get last 2 digits of year
+  const month = String(now.getMonth() + 1).padStart(2, "0") // Month is 0-indexed
+  const day = String(now.getDate()).padStart(2, "0")
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase() // 4 random characters
+
+  return `PO-${year}${month}${day}-${random}`
+}
+
+function generateReturnNumber(): string {
+  const now = new Date()
+  const year = now.getFullYear().toString().slice(-2) // Get last 2 digits of year
+  const month = String(now.getMonth() + 1).padStart(2, "0") // Month is 0-indexed
+  const day = String(now.getDate()).padStart(2, "0")
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase() // 4 random characters
+
+  return `RET-${year}${month}${day}-${random}`
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Centralised store export object                      */
 /* -------------------------------------------------------------------------- */
 
 export const supabaseStore = {
@@ -2022,9 +2303,12 @@ export const supabaseStore = {
   addManualInventory,
   updateInventoryItem,
   addInventoryFromPO,
+  processFulfilledOrdersForInventory,
 
-  /* Inventory helpers that other screens use */
+  /* Inventory helpers */
   getOrderItemsWithCosts,
+  calculateOrderProfit,
+  debugInventoryCosts,
 
   /* Purchase Orders */
   getPurchaseOrders,
@@ -2036,9 +2320,9 @@ export const supabaseStore = {
   getReturns,
   createReturn,
   updateReturn,
-  deleteReturn,
+  updateReturnWithItems,
 
-  /* Stores */
+  /* Stores (generic) */
   getStores,
   createStore,
   updateStore,
@@ -2052,43 +2336,38 @@ export const supabaseStore = {
 
   /* Shopify Orders */
   getShopifyOrders,
-  getShopifyOrderStats,
   getAllShopifyOrders,
   addShopifyOrders,
+  getShopifyOrderStats,
+}
 
-  /* Debug functions */
+export {
+  getInventory,
+  addManualInventory,
+  updateInventoryItem,
+  addInventoryFromPO,
+  processFulfilledOrdersForInventory,
   debugInventoryCosts,
-
-  /* Minimal stubs (unchanged logic) so other pages keep compiling */
-  getReports: () => Promise.resolve([]),
-}
-
-/**
- * Generate a unique, chronologically sortable Purchase-Order number.
- * Format: POYYYYMMDDHHMM (e.g., PO202412151430)
- */
-function generatePONumber(): string {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, "0")
-  const day = String(now.getDate()).padStart(2, "0")
-  const hour = String(now.getHours()).padStart(2, "0")
-  const minute = String(now.getMinutes()).padStart(2, "0")
-
-  return `PO${year}${month}${day}${hour}${minute}`
-}
-
-/**
- * Generate a unique, chronologically sortable Return number.
- * Format: RTYYYYMMDDHHMM (e.g., RT202412151430)
- */
-function generateReturnNumber(): string {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, "0")
-  const day = String(now.getDate()).padStart(2, "0")
-  const hour = String(now.getHours()).padStart(2, "0")
-  const minute = String(now.getMinutes()).padStart(2, "0")
-
-  return `RT${year}${month}${day}${hour}${minute}`
+  getPurchaseOrders,
+  createPurchaseOrder,
+  updatePurchaseOrder,
+  updatePurchaseOrderWithItems,
+  getReturns,
+  createReturn,
+  updateReturn,
+  updateReturnWithItems,
+  getStores,
+  createStore,
+  updateStore,
+  deleteStore,
+  getShopifyStores,
+  createShopifyStore,
+  updateShopifyStore,
+  deleteShopifyStore,
+  getShopifyOrders,
+  getAllShopifyOrders,
+  addShopifyOrders,
+  getShopifyOrderStats,
+  getOrderItemsWithCosts,
+  calculateOrderProfit,
 }

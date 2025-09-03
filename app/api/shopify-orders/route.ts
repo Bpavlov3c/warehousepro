@@ -77,6 +77,9 @@ export async function POST(request: NextRequest) {
           console.log(`Saving batch ${Math.floor(i / batchSize) + 1} for ${store.name} (${batch.length} orders)`)
 
           await supabaseStore.addShopifyOrders(batch)
+          // Process any new fulfilled orders for inventory deduction
+          console.log(`Processing fulfilled orders for inventory deduction...`)
+          await supabaseStore.processFulfilledOrdersForInventory()
           syncedCount += batch.length
 
           console.log(`Saved ${syncedCount}/${transformedOrders.length} orders for ${store.name}`)
@@ -111,7 +114,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully synced ${totalOrdersSynced} orders from ${connectedStores.length} stores`,
+      message: `Successfully synced ${totalOrdersSynced} orders from ${connectedStores.length} stores and processed inventory deductions`,
       totalOrdersSynced,
       storeResults: results,
     })
