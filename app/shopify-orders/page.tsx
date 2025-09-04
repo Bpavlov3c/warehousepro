@@ -7,7 +7,7 @@ export const revalidate = 0
 export default async function ShopifyOrdersPage() {
   try {
     // Always load fresh data from the database
-    const result = await supabaseStore.getShopifyOrders({ limit: 200, offset: 0 })
+    const result = await supabaseStore.getShopifyOrders({ limit: 20, offset: 0 })
 
     return (
       <ShopifyOrdersClientComponent

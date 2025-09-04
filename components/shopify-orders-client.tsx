@@ -170,7 +170,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
 
     setLoadingMore(true)
     try {
-      const response = await fetch(`/api/shopify-orders/list?limit=200&offset=${orders.length}`)
+      const response = await fetch(`/api/shopify-orders/list?limit=20&offset=${orders.length}`)
       if (!response.ok) throw new Error("Failed to load more orders")
 
       const result = await response.json()
@@ -191,7 +191,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     try {
       // Refresh both orders and stats
       const [ordersResponse, statsResponse] = await Promise.all([
-        fetch("/api/shopify-orders/list?limit=200&offset=0"),
+        fetch("/api/shopify-orders/list?limit=20&offset=0"),
         fetch("/api/shopify-orders/stats"),
       ])
 

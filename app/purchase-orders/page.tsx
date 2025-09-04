@@ -218,8 +218,7 @@ export default function PurchaseOrders() {
     (po) =>
       po.po_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       po.supplier_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      po.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      po.items.some((item) => item.sku.toLowerCase().includes(searchTerm.toLowerCase())),
+      po.status.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
   const calculateOrderStats = (po: PurchaseOrder) => {
