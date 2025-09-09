@@ -43,7 +43,17 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Fetch all orders with progress tracking
+        let createdAtMin: string | undefined
+        if (store.lastSync && store.lastSync !== "Never") {
+          const lastSyncDate = new Date(store.lastSync)
+          const oneHourBuffer = new Date(lastSyncDate.getTime() - 60 * 60 * 1000) // Subtract 1 hour
+          createdAtMin = oneHourBuffer.toISOString()
+          console.log(`Using incremental sync from: ${createdAtMin} (1 hour before last sync: ${store.lastSync})`)
+        } else {
+          console.log(`First sync for store ${store.name} - fetching all orders`)
+        }
+
+        // Fetch orders with progress tracking and optional date filter
         let currentProgress = 0
         let totalEstimate = 0
 
@@ -51,7 +61,7 @@ export async function POST(request: NextRequest) {
           currentProgress = current
           totalEstimate = total
           console.log(`Store ${store.name}: ${current}/${total} orders fetched`)
-        })
+        }, createdAtMin)
 
         console.log(`Fetched ${orders.length} orders from ${store.name}`)
 

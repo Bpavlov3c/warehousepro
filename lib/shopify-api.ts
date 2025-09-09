@@ -268,10 +268,14 @@ export class ShopifyAPI {
     this.config = config
   }
 
-  private async makeRequest(endpoint: string): Promise<{ data: any; headers: Headers }> {
+  private async makeRequest(endpoint: string, retryCount = 0): Promise<{ data: any; headers: Headers }> {
     const url = `https://${this.config.shopDomain}/admin/api/2024-10/${endpoint}`
 
     console.log(`Making Shopify API request to: ${url}`)
+
+    if (retryCount > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 2000)) // 2 second delay on retries
+    }
 
     const response = await fetch(url, {
       headers: {
@@ -280,13 +284,58 @@ export class ShopifyAPI {
       },
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`Shopify API error: ${response.status} ${response.statusText}`, errorText)
-      throw new Error(`Shopify API error: ${response.status} ${response.statusText}`)
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After")
+      const waitTime = retryAfter ? Number.parseInt(retryAfter) * 1000 : Math.pow(2, retryCount + 1) * 2000 // Increased base wait time
+
+      console.log(`Rate limited. Waiting ${waitTime}ms before retry ${retryCount + 1}/5`) // Increased retry count
+
+      if (retryCount < 5) {
+        // Increased retry attempts from 3 to 5
+        await new Promise((resolve) => setTimeout(resolve, waitTime))
+        return this.makeRequest(endpoint, retryCount + 1)
+      } else {
+        throw new Error(`Rate limit exceeded after 5 retries`)
+      }
     }
 
-    const data = await response.json()
+    if (!response.ok) {
+      let errorText: string
+      try {
+        const contentType = response.headers.get("content-type")
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await response.json()
+          errorText = JSON.stringify(errorData)
+        } else {
+          errorText = await response.text()
+        }
+      } catch (parseError) {
+        errorText = `Failed to parse error response (status: ${response.status}): ${parseError}`
+      }
+
+      console.error(`Shopify API error: ${response.status} ${response.statusText}`, errorText)
+      throw new Error(`Shopify API error: ${response.status} ${response.statusText} - ${errorText}`)
+    }
+
+    let data: any
+    try {
+      const contentType = response.headers.get("content-type")
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json()
+      } else {
+        const textResponse = await response.text()
+        console.warn(`Non-JSON response received: ${textResponse}`)
+        if (response.ok && textResponse.trim() === "") {
+          data = {} // Empty successful response
+        } else {
+          throw new Error(`Expected JSON response but got: ${textResponse.substring(0, 100)}...`)
+        }
+      }
+    } catch (parseError) {
+      console.error(`Failed to parse response:`, parseError)
+      throw new Error(`Shopify API returned invalid JSON (status: ${response.status}): ${parseError}`)
+    }
+
     return { data, headers: response.headers }
   }
 
@@ -303,9 +352,19 @@ export class ShopifyAPI {
     return null
   }
 
-  async getAllOrders(onProgress?: (current: number, total: number) => void): Promise<ShopifyOrder[]> {
+  async getAllOrders(
+    onProgress?: (current: number, total: number) => void,
+    createdAtMin?: string, // ISO date string for incremental sync
+  ): Promise<ShopifyOrder[]> {
     const allOrders: ShopifyOrder[] = []
-    let nextUrl: string | null = "orders.json?limit=250&status=any"
+
+    let baseUrl = "orders.json?limit=250&status=any"
+    if (createdAtMin) {
+      baseUrl += `&created_at_min=${encodeURIComponent(createdAtMin)}`
+      console.log(`Fetching orders created after: ${createdAtMin}`)
+    }
+
+    let nextUrl: string | null = baseUrl
     let currentPage = 0
     let totalEstimate = 250 // Initial estimate
 
@@ -324,7 +383,6 @@ export class ShopifyAPI {
 
         // Update progress
         if (onProgress) {
-          // Estimate total based on current progress
           if (orders.length === 250) {
             totalEstimate = Math.max(totalEstimate, allOrders.length * 2)
           } else {
@@ -338,7 +396,6 @@ export class ShopifyAPI {
         nextUrl = this.parseLinkHeader(linkHeader)
 
         if (nextUrl) {
-          // Extract just the path and query from the full URL
           const url = new URL(nextUrl)
           nextUrl = `${url.pathname.replace("/admin/api/2024-10/", "")}${url.search}`
           console.log(`Next page URL: ${nextUrl}`)
@@ -346,12 +403,20 @@ export class ShopifyAPI {
           console.log("No more pages to fetch")
         }
 
-        // Rate limiting: wait 500ms between requests
         if (nextUrl) {
-          await new Promise((resolve) => setTimeout(resolve, 500))
+          await new Promise((resolve) => setTimeout(resolve, 1500)) // Increased from 1000ms to 1500ms
         }
       } catch (error) {
         console.error(`Error fetching page ${currentPage}:`, error)
+        if (
+          error instanceof Error &&
+          (error.message.includes("Rate limit") || error.message.includes("429")) &&
+          currentPage > 1
+        ) {
+          console.log(`Retrying page ${currentPage} after rate limit error...`)
+          await new Promise((resolve) => setTimeout(resolve, 10000)) // Increased from 5000ms to 10000ms
+          continue
+        }
         throw error
       }
     }
