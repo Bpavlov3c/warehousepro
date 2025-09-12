@@ -1,12 +1,26 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Search, Plus, Package, DollarSign, TrendingUp, Calendar, Trash2, Eye, Download, Edit } from "lucide-react"
+import {
+  Search,
+  Plus,
+  Package,
+  DollarSign,
+  TrendingUp,
+  Calendar,
+  Trash2,
+  Eye,
+  Download,
+  Edit,
+  Scan,
+} from "lucide-react"
 import { supabaseStore, type PurchaseOrder } from "@/lib/supabase-store"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -20,6 +34,13 @@ export default function PurchaseOrders() {
   const [isNewPOOpen, setIsNewPOOpen] = useState(false)
   const [isViewPOOpen, setIsViewPOOpen] = useState(false)
   const [isEditPOOpen, setIsEditPOOpen] = useState(false)
+  const [isPOCheckOpen, setIsPOCheckOpen] = useState(false)
+  const [checkingPO, setCheckingPO] = useState<PurchaseOrder | null>(null)
+  const [scannedBarcode, setScannedBarcode] = useState("")
+  const [receivedQuantities, setReceivedQuantities] = useState<Map<string, number>>(new Map())
+  const [scanHistory, setScanHistory] = useState<
+    Array<{ barcode: string; sku: string; productName: string; timestamp: Date }>
+  >([])
   const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
   const [formData, setFormData] = useState({
     supplier: "",
@@ -28,7 +49,7 @@ export default function PurchaseOrders() {
     notes: "",
   })
 
-  const [poItems, setPoItems] = useState([{ sku: "", productName: "", quantity: "", unitCost: "" }])
+  const [poItems, setPoItems] = useState([{ sku: "", productName: "", quantity: "", unitCost: "", barcode: "" }])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -68,6 +89,7 @@ export default function PurchaseOrders() {
             product_name: item.productName,
             quantity: Number.parseInt(item.quantity) || 0,
             unit_cost: Number.parseFloat(item.unitCost) || 0,
+            barcode: item.barcode, // Include barcode in PO item creation
           })),
         notes: formData.notes,
       }
@@ -78,7 +100,7 @@ export default function PurchaseOrders() {
 
       // Reset form
       setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
-      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
+      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "", barcode: "" }])
       setIsNewPOOpen(false)
 
       alert(`Purchase Order ${createdPO.po_number} created successfully!`)
@@ -106,6 +128,7 @@ export default function PurchaseOrders() {
           product_name: item.productName.trim(),
           quantity: Number.parseInt(item.quantity) || 0,
           unit_cost: Number.parseFloat(item.unitCost) || 0,
+          barcode: item.barcode, // Include barcode in PO item updates
         }))
 
       const updateData = {
@@ -126,7 +149,7 @@ export default function PurchaseOrders() {
 
       // Reset form and close dialog
       setFormData({ supplier: "", poDate: "", deliveryCost: "", notes: "" })
-      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "" }])
+      setPoItems([{ sku: "", productName: "", quantity: "", unitCost: "", barcode: "" }])
       setIsEditPOOpen(false)
       setEditingPO(null)
 
@@ -152,11 +175,12 @@ export default function PurchaseOrders() {
       productName: item.product_name,
       quantity: item.quantity.toString(),
       unitCost: item.unit_cost.toString(),
+      barcode: item.barcode || "", // Include barcode in edit form population
     }))
 
     // Ensure at least one empty row
     if (editItems.length === 0) {
-      editItems.push({ sku: "", productName: "", quantity: "", unitCost: "" })
+      editItems.push({ sku: "", productName: "", quantity: "", unitCost: "", barcode: "" })
     }
 
     setPoItems(editItems)
@@ -185,7 +209,7 @@ export default function PurchaseOrders() {
   }
 
   const addPoItem = () => {
-    setPoItems([...poItems, { sku: "", productName: "", quantity: "", unitCost: "" }])
+    setPoItems([...poItems, { sku: "", productName: "", quantity: "", unitCost: "", barcode: "" }])
   }
 
   const removePoItem = (index: number) => {
@@ -222,7 +246,8 @@ export default function PurchaseOrders() {
       po.items.some(
         (item) =>
           item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.product_name.toLowerCase().includes(searchTerm.toLowerCase()),
+          item.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (item.barcode && item.barcode.toLowerCase().includes(searchTerm.toLowerCase())), // Include barcode in search
       ),
   )
 
@@ -264,7 +289,7 @@ export default function PurchaseOrders() {
       [""],
       // Items Header
       ["Items"],
-      ["SKU", "Product Name", "Quantity", "Unit Cost", "Shipping/Unit", "Total Unit Cost", "Line Total"],
+      ["SKU", "Product Name", "Barcode", "Quantity", "Unit Cost", "Shipping/Unit", "Total Unit Cost", "Line Total"], // Added Barcode column to CSV export
       // Items Data
       ...po.items.map((item) => {
         const subtotal = po.items.reduce((sum, item) => sum + item.unit_cost * item.quantity, 0)
@@ -273,6 +298,7 @@ export default function PurchaseOrders() {
         return [
           item.sku,
           item.product_name,
+          item.barcode || "", // Include barcode in CSV export data
           item.quantity.toString(),
           `$${item.unit_cost.toFixed(2)}`,
           `$${shippingCostPerUnit.toFixed(2)}`,
@@ -308,6 +334,74 @@ export default function PurchaseOrders() {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  const openPOCheck = (po: PurchaseOrder) => {
+    setCheckingPO(po)
+    setReceivedQuantities(new Map())
+    setScanHistory([])
+    setScannedBarcode("")
+    setIsPOCheckOpen(true)
+  }
+
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!scannedBarcode.trim() || !checkingPO) return
+
+    // Find matching item in PO by barcode
+    const matchingItem = checkingPO.items.find(
+      (item) => item.barcode && item.barcode.toLowerCase() === scannedBarcode.toLowerCase(),
+    )
+
+    if (matchingItem) {
+      // Increment received quantity
+      const currentReceived = receivedQuantities.get(matchingItem.sku) || 0
+      const newReceived = currentReceived + 1
+      setReceivedQuantities(new Map(receivedQuantities.set(matchingItem.sku, newReceived)))
+
+      // Add to scan history
+      setScanHistory((prev) => [
+        ...prev,
+        {
+          barcode: scannedBarcode,
+          sku: matchingItem.sku,
+          productName: matchingItem.product_name,
+          timestamp: new Date(),
+        },
+      ])
+
+      // Clear barcode input
+      setScannedBarcode("")
+
+      // Show feedback for successful scan
+      console.log(`[v0] Scanned ${matchingItem.sku}: ${newReceived}/${matchingItem.quantity} received`)
+    } else {
+      // Barcode not found in PO
+      alert(`Barcode "${scannedBarcode}" not found in this Purchase Order`)
+      setScannedBarcode("")
+    }
+  }
+
+  const getReceivingProgress = (item: any) => {
+    const received = receivedQuantities.get(item.sku) || 0
+    const expected = item.quantity
+    const percentage = expected > 0 ? (received / expected) * 100 : 0
+    return { received, expected, percentage }
+  }
+
+  const getTotalProgress = () => {
+    if (!checkingPO) return { received: 0, expected: 0, percentage: 0 }
+
+    const totalExpected = checkingPO.items.reduce((sum, item) => sum + item.quantity, 0)
+    const totalReceived = checkingPO.items.reduce((sum, item) => {
+      return sum + (receivedQuantities.get(item.sku) || 0)
+    }, 0)
+
+    return {
+      received: totalReceived,
+      expected: totalExpected,
+      percentage: totalExpected > 0 ? (totalReceived / totalExpected) * 100 : 0,
+    }
   }
 
   if (loading) {
@@ -498,6 +592,10 @@ export default function PurchaseOrders() {
                         Edit
                       </Button>
                     )}
+                    <Button variant="outline" size="sm" onClick={() => openPOCheck(po)}>
+                      <Scan className="w-4 h-4 mr-1" />
+                      Check
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -590,6 +688,10 @@ export default function PurchaseOrders() {
                                 <Edit className="w-4 h-4" />
                               </Button>
                             )}
+
+                            <Button variant="ghost" size="sm" onClick={() => openPOCheck(po)} title="PO Check">
+                              <Scan className="w-4 h-4" />
+                            </Button>
 
                             <Button
                               variant="ghost"
@@ -687,6 +789,9 @@ export default function PurchaseOrders() {
                               <div>
                                 <p className="font-medium text-sm">{item.product_name}</p>
                                 <p className="text-xs text-gray-600 font-mono">{item.sku}</p>
+                                {item.barcode && (
+                                  <p className="text-xs text-gray-500 font-mono">Barcode: {item.barcode}</p>
+                                )}
                               </div>
                               <Badge variant="outline">{item.quantity}</Badge>
                             </div>
@@ -724,6 +829,7 @@ export default function PurchaseOrders() {
                           <TableRow>
                             <TableHead className="w-[100px]">SKU</TableHead>
                             <TableHead className="min-w-[200px]">Product</TableHead>
+                            <TableHead className="w-[120px]">Barcode</TableHead> {/* Added Barcode column */}
                             <TableHead className="w-[80px] text-right">Qty</TableHead>
                             <TableHead className="w-[100px] text-right">Base Unit Cost</TableHead>
                             <TableHead className="w-[100px] text-right">Shipping/Unit</TableHead>
@@ -752,6 +858,8 @@ export default function PurchaseOrders() {
                                     {item.product_name}
                                   </div>
                                 </TableCell>
+                                <TableCell className="text-gray-600 font-mono text-sm">{item.barcode || "-"}</TableCell>{" "}
+                                {/* Added barcode display */}
                                 <TableCell className="text-right">{item.quantity}</TableCell>
                                 <TableCell className="text-right">${item.unit_cost.toFixed(2)}</TableCell>
                                 <TableCell className="text-right">${shippingCostPerUnit.toFixed(2)}</TableCell>
@@ -768,30 +876,288 @@ export default function PurchaseOrders() {
                       </Table>
                     </ScrollArea>
                   </div>
-                </div>
 
-                {/* Summary - Fixed at bottom, mobile responsive */}
-                <div className="flex-shrink-0 bg-gray-50 p-3 rounded-lg">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-gray-600">Total Items</p>
-                      <p className="font-medium">{selectedPO.items.length}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Total Quantity</p>
-                      <p className="font-medium">{selectedPO.items.reduce((sum, item) => sum + item.quantity, 0)}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Subtotal</p>
-                      <p className="font-medium">
-                        ${selectedPO.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Grand Total</p>
-                      <p className="font-bold text-lg">${calculateOrderStats(selectedPO).totalCost.toFixed(2)}</p>
+                  {/* Summary - Fixed at bottom, mobile responsive */}
+                  <div className="flex-shrink-0 bg-gray-50 p-3 rounded-lg">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-600">Total Items</p>
+                        <p className="font-medium">{selectedPO.items.length}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Total Quantity</p>
+                        <p className="font-medium">{selectedPO.items.reduce((sum, item) => sum + item.quantity, 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Subtotal</p>
+                        <p className="font-medium">
+                          ${selectedPO.items.reduce((sum, item) => sum + item.total_cost, 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Grand Total</p>
+                        <p className="font-bold text-lg">${calculateOrderStats(selectedPO).totalCost.toFixed(2)}</p>
+                      </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isPOCheckOpen} onOpenChange={setIsPOCheckOpen}>
+          <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col w-[95vw] lg:w-full">
+            <DialogHeader className="flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle>PO Check - {checkingPO?.po_number}</DialogTitle>
+                  <DialogDescription className="mt-1">
+                    Scan barcodes to receive items and track progress
+                  </DialogDescription>
+                </div>
+                <div className="text-right">
+                  {checkingPO && (
+                    <div className="text-sm">
+                      <div className="font-medium">
+                        Progress: {getTotalProgress().received}/{getTotalProgress().expected} items
+                      </div>
+                      <div className="text-xs text-gray-600">{getTotalProgress().percentage.toFixed(1)}% complete</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </DialogHeader>
+
+            {checkingPO && (
+              <div className="flex-1 overflow-hidden flex flex-col space-y-4">
+                {/* PO Header Info */}
+                <div className="flex-shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm bg-gray-50 p-3 rounded-lg">
+                  <div>
+                    <p className="text-gray-600">Supplier</p>
+                    <p className="font-medium">{checkingPO.supplier_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Date</p>
+                    <p className="font-medium">{new Date(checkingPO.po_date).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Status</p>
+                    <Badge className={getStatusColor(checkingPO.status)}>{checkingPO.status}</Badge>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Shipping Cost</p>
+                    <p className="font-medium">${checkingPO.delivery_cost.toFixed(2)}</p>
+                  </div>
+                </div>
+
+                {/* Barcode Scanner */}
+                <div className="flex-shrink-0 bg-blue-50 p-4 rounded-lg">
+                  <form onSubmit={handleBarcodeSubmit} className="space-y-3">
+                    <div>
+                      <label className="text-sm font-medium text-blue-900">Scan or Enter Barcode</label>
+                      <div className="flex gap-2 mt-1">
+                        <Input
+                          value={scannedBarcode}
+                          onChange={(e) => setScannedBarcode(e.target.value)}
+                          placeholder="Scan barcode here..."
+                          className="flex-1"
+                          autoFocus
+                        />
+                        <Button type="submit" disabled={!scannedBarcode.trim()}>
+                          Add Item
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-blue-700">
+                      Scan or paste barcode to automatically match items and increment received quantities
+                    </p>
+                  </form>
+                </div>
+
+                {/* Progress Overview */}
+                <div className="flex-shrink-0">
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-medium text-green-900">Overall Progress</span>
+                      <span className="text-sm text-green-700">
+                        {getTotalProgress().received} / {getTotalProgress().expected} items
+                      </span>
+                    </div>
+                    <div className="w-full bg-green-200 rounded-full h-2">
+                      <div
+                        className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(getTotalProgress().percentage, 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Items List with Receiving Status */}
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  <p className="text-gray-600 text-sm mb-2 flex-shrink-0">
+                    Items ({checkingPO.items.length}) - Scan barcodes to receive
+                  </p>
+
+                  {/* Mobile Cards View */}
+                  <div className="lg:hidden flex-1 overflow-y-auto space-y-3">
+                    {checkingPO.items.map((item, index) => {
+                      const progress = getReceivingProgress(item)
+                      const isOverReceived = progress.received > progress.expected
+                      const isComplete = progress.received >= progress.expected
+
+                      return (
+                        <Card
+                          key={item.id || index}
+                          className={`p-3 ${isComplete ? "bg-green-50 border-green-200" : isOverReceived ? "bg-red-50 border-red-200" : ""}`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium text-sm">{item.product_name}</p>
+                                <p className="text-xs text-gray-600 font-mono">{item.sku}</p>
+                                {item.barcode && (
+                                  <p className="text-xs text-blue-600 font-mono">Barcode: {item.barcode}</p>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <Badge variant={isComplete ? "default" : isOverReceived ? "destructive" : "outline"}>
+                                  {progress.received}/{progress.expected}
+                                </Badge>
+                                {isOverReceived && <p className="text-xs text-red-600 mt-1">Over-received!</p>}
+                              </div>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className={`h-2 rounded-full transition-all duration-300 ${
+                                  isOverReceived ? "bg-red-500" : isComplete ? "bg-green-500" : "bg-blue-500"
+                                }`}
+                                style={{ width: `${Math.min(progress.percentage, 100)}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        </Card>
+                      )
+                    })}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden lg:block flex-1 border rounded-lg">
+                    <ScrollArea className="h-[300px]">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-10 border-b">
+                          <TableRow>
+                            <TableHead className="w-[100px]">SKU</TableHead>
+                            <TableHead className="min-w-[200px]">Product</TableHead>
+                            <TableHead className="w-[120px]">Barcode</TableHead>
+                            <TableHead className="w-[80px] text-right">Expected</TableHead>
+                            <TableHead className="w-[80px] text-right">Received</TableHead>
+                            <TableHead className="w-[100px] text-right">Progress</TableHead>
+                            <TableHead className="w-[80px] text-right">Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {checkingPO.items.map((item, index) => {
+                            const progress = getReceivingProgress(item)
+                            const isOverReceived = progress.received > progress.expected
+                            const isComplete = progress.received >= progress.expected
+
+                            return (
+                              <TableRow
+                                key={item.id || index}
+                                className={`hover:bg-gray-50 ${isComplete ? "bg-green-50" : isOverReceived ? "bg-red-50" : ""}`}
+                              >
+                                <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                                <TableCell className="max-w-[200px]">
+                                  <div className="truncate" title={item.product_name}>
+                                    {item.product_name}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-blue-600 font-mono text-sm">{item.barcode || "-"}</TableCell>
+                                <TableCell className="text-right">{item.quantity}</TableCell>
+                                <TableCell className="text-right font-medium">{progress.received}</TableCell>
+                                <TableCell className="text-right">
+                                  <div className="w-full bg-gray-200 rounded-full h-2">
+                                    <div
+                                      className={`h-2 rounded-full transition-all duration-300 ${
+                                        isOverReceived ? "bg-red-500" : isComplete ? "bg-green-500" : "bg-blue-500"
+                                      }`}
+                                      style={{ width: `${Math.min(progress.percentage, 100)}%` }}
+                                    ></div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Badge variant={isComplete ? "default" : isOverReceived ? "destructive" : "outline"}>
+                                    {isComplete ? "Complete" : isOverReceived ? "Over" : "Pending"}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </div>
+                </div>
+
+                {/* Scan History */}
+                {scanHistory.length > 0 && (
+                  <div className="flex-shrink-0 max-h-32 overflow-y-auto">
+                    <p className="text-sm font-medium mb-2">Recent Scans ({scanHistory.length})</p>
+                    <div className="space-y-1">
+                      {scanHistory
+                        .slice(-5)
+                        .reverse()
+                        .map((scan, index) => (
+                          <div key={index} className="text-xs bg-gray-100 p-2 rounded flex justify-between">
+                            <span>
+                              {scan.productName} ({scan.sku})
+                            </span>
+                            <span className="text-gray-600">{scan.timestamp.toLocaleTimeString()}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex-shrink-0 flex gap-2 pt-2 border-t">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setReceivedQuantities(new Map())
+                      setScanHistory([])
+                      setScannedBarcode("")
+                    }}
+                  >
+                    Reset All
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      const totalProgress = getTotalProgress()
+                      if (totalProgress.received === 0) {
+                        alert("No items have been scanned yet.")
+                        return
+                      }
+
+                      const hasVariances = checkingPO.items.some((item) => {
+                        const received = receivedQuantities.get(item.sku) || 0
+                        return received !== item.quantity
+                      })
+
+                      if (hasVariances) {
+                        const confirmMessage =
+                          "Some items have quantity variances. Do you want to proceed with partial/over receipt?"
+                        if (!confirm(confirmMessage)) return
+                      }
+
+                      alert(`PO Check completed! ${totalProgress.received}/${totalProgress.expected} items processed.`)
+                      setIsPOCheckOpen(false)
+                    }}
+                    className="flex-1"
+                  >
+                    Complete PO Check
+                  </Button>
                 </div>
               </div>
             )}
@@ -883,6 +1249,14 @@ export default function PurchaseOrders() {
                             onChange={(e) => updatePoItem(index, "productName", e.target.value)}
                           />
                         </div>
+                        <div>
+                          <label className="text-xs">Barcode</label>
+                          <Input
+                            placeholder="123456789012"
+                            value={item.barcode}
+                            onChange={(e) => updatePoItem(index, "barcode", e.target.value)}
+                          />
+                        </div>
                         <div className="flex gap-2">
                           <div className="flex-1">
                             <label className="text-xs">Unit Cost</label>
@@ -910,7 +1284,7 @@ export default function PurchaseOrders() {
 
                       {/* Desktop Layout */}
                       <div className="hidden lg:grid grid-cols-12 gap-2 items-end">
-                        <div className="col-span-3">
+                        <div className="col-span-2">
                           <label className="text-xs">SKU</label>
                           <Input
                             placeholder="SKU"
@@ -918,12 +1292,20 @@ export default function PurchaseOrders() {
                             onChange={(e) => updatePoItem(index, "sku", e.target.value)}
                           />
                         </div>
-                        <div className="col-span-4">
+                        <div className="col-span-3">
                           <label className="text-xs">Product Name</label>
                           <Input
                             placeholder="Product name"
                             value={item.productName}
                             onChange={(e) => updatePoItem(index, "productName", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs">Barcode</label>
+                          <Input
+                            placeholder="123456789012"
+                            value={item.barcode}
+                            onChange={(e) => updatePoItem(index, "barcode", e.target.value)}
                           />
                         </div>
                         <div className="col-span-2">
@@ -1102,6 +1484,14 @@ export default function PurchaseOrders() {
                             onChange={(e) => updatePoItem(index, "productName", e.target.value)}
                           />
                         </div>
+                        <div>
+                          <label className="text-xs">Barcode</label>
+                          <Input
+                            placeholder="123456789012"
+                            value={item.barcode}
+                            onChange={(e) => updatePoItem(index, "barcode", e.target.value)}
+                          />
+                        </div>
                         <div className="flex gap-2">
                           <div className="flex-1">
                             <label className="text-xs">Unit Cost</label>
@@ -1129,7 +1519,7 @@ export default function PurchaseOrders() {
 
                       {/* Desktop Layout */}
                       <div className="hidden lg:grid grid-cols-12 gap-2 items-end">
-                        <div className="col-span-3">
+                        <div className="col-span-2">
                           <label className="text-xs">SKU</label>
                           <Input
                             placeholder="SKU"
@@ -1137,12 +1527,20 @@ export default function PurchaseOrders() {
                             onChange={(e) => updatePoItem(index, "sku", e.target.value)}
                           />
                         </div>
-                        <div className="col-span-4">
+                        <div className="col-span-3">
                           <label className="text-xs">Product Name</label>
                           <Input
                             placeholder="Product name"
                             value={item.productName}
                             onChange={(e) => updatePoItem(index, "productName", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs">Barcode</label>
+                          <Input
+                            placeholder="123456789012"
+                            value={item.barcode}
+                            onChange={(e) => updatePoItem(index, "barcode", e.target.value)}
                           />
                         </div>
                         <div className="col-span-2">

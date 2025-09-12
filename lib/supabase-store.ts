@@ -70,6 +70,7 @@ export interface InventoryItem {
   incoming: number //  DB: incoming
   reserved: number //  DB: reserved
   unitCost: number //  DB: unit_cost
+  barcode?: string //  DB: barcode
 }
 
 export interface PurchaseOrderItem {
@@ -80,6 +81,7 @@ export interface PurchaseOrderItem {
   quantity: number
   unit_cost: number
   total_cost: number
+  barcode?: string
 }
 
 export interface PurchaseOrder {
@@ -128,6 +130,7 @@ export interface ShopifyOrderItem {
   quantity: number
   unit_price: number
   total_price: number
+  barcode?: string
 }
 
 export interface ShopifyOrder {
@@ -722,10 +725,9 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
   try {
     console.log("Adding inventory from delivered PO:", po.po_number)
 
-    // ⚠️ Ignore items that have 0 (or negative) quantity – they should not hit inventory
-    const validItems = po.items.filter((it) => it.quantity >= 0)
+    const validItems = po.items.filter((it) => it.quantity > 0)
     if (!validItems.length) {
-      console.log("No valid (qty>=0) PO items to add to inventory – skipping")
+      console.log("No valid (qty>0) PO items to add to inventory – skipping")
       return
     }
 
@@ -767,15 +769,54 @@ async function addInventoryFromPO(po: PurchaseOrder): Promise<void> {
 
     console.log("Inserting inventory records with total unit costs:", inventoryRecords)
 
-    // Insert all inventory records
-    const { data, error } = await supabase.from("inventory").insert(inventoryRecords).select()
+    for (const record of inventoryRecords) {
+      // Check if inventory record already exists for this SKU
+      const { data: existingInventory, error: checkError } = await supabase
+        .from("inventory")
+        .select("*")
+        .eq("sku", record.sku)
+        .order("purchase_date", { ascending: false })
+        .limit(1)
 
-    if (error) {
-      console.error("Error adding inventory from PO:", error)
-      throw error
+      if (checkError) {
+        console.error("Error checking existing inventory:", checkError)
+        throw checkError
+      }
+
+      if (existingInventory && existingInventory.length > 0) {
+        // Update existing inventory record
+        const existing = existingInventory[0]
+        const updatedQuantity = existing.quantity_available + record.quantity_available
+
+        const { error: updateError } = await supabase
+          .from("inventory")
+          .update({
+            quantity_available: updatedQuantity,
+            unit_cost_with_delivery: record.unit_cost_with_delivery, // Use latest cost
+            purchase_date: record.purchase_date, // Update to latest purchase date
+          })
+          .eq("id", existing.id)
+
+        if (updateError) {
+          console.error("Error updating existing inventory:", updateError)
+          throw updateError
+        }
+
+        console.log(
+          `Updated existing inventory for SKU ${record.sku}: ${existing.quantity_available} + ${record.quantity_available} = ${updatedQuantity}`,
+        )
+      } else {
+        // Create new inventory record
+        const { error: insertError } = await supabase.from("inventory").insert([record])
+
+        if (insertError) {
+          console.error("Error inserting new inventory:", insertError)
+          throw insertError
+        }
+
+        console.log(`Created new inventory record for SKU ${record.sku}: ${record.quantity_available} units`)
+      }
     }
-
-    console.log("Successfully added inventory records:", data)
 
     // Log the total quantities being added for each SKU
     const skuQuantities = new Map<string, number>()
@@ -890,7 +931,7 @@ function calculateOrderProfit(order: ShopifyOrder, costsMap: Map<string, number>
   return (order.total_amount || 0) - (order.tax_amount || 0) - (order.shipping_cost || 0) - itemsCost
 }
 
-export async function syncInventoryFromPurchaseOrders(): Promise<{ created: number; errors: string[] }> {
+async function syncInventoryFromPurchaseOrders(): Promise<{ created: number; errors: string[] }> {
   try {
     console.log("[v0] Starting inventory sync from purchase orders...")
 
@@ -995,6 +1036,159 @@ export async function syncInventoryFromPurchaseOrders(): Promise<{ created: numb
   } catch (error) {
     console.error("[v0] Error syncing inventory from purchase orders:", error)
     return { created: 0, errors: [error instanceof Error ? error.message : String(error)] }
+  }
+}
+
+async function createApiKey(
+  storeId: string,
+  keyData: {
+    key_name: string
+    permissions?: { inventory: boolean; orders: boolean }
+  },
+): Promise<{ api_key: string; api_secret: string }> {
+  try {
+    // Generate secure API key and secret
+    const apiKey = `wms_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`
+    const apiSecret = `wms_secret_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`
+
+    const { data, error } = await supabase
+      .from("api_keys")
+      .insert({
+        store_id: storeId,
+        key_name: keyData.key_name,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        permissions: keyData.permissions || { inventory: true, orders: true },
+        is_active: true,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Error creating API key:", error)
+      throw error
+    }
+
+    return { api_key: apiKey, api_secret: apiSecret }
+  } catch (error) {
+    console.error("Error in createApiKey:", error)
+    throw error
+  }
+}
+
+async function getApiKeys(storeId: string): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from("api_keys")
+      .select("id, key_name, api_key, permissions, is_active, last_used, created_at")
+      .eq("store_id", storeId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching API keys:", error)
+      throw error
+    }
+
+    return data || []
+  } catch (error) {
+    console.error("Error in getApiKeys:", error)
+    throw error
+  }
+}
+
+async function updateApiKey(
+  keyId: string,
+  updates: {
+    key_name?: string
+    permissions?: { inventory: boolean; orders: boolean }
+    is_active?: boolean
+  },
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("api_keys").update(updates).eq("id", keyId)
+
+    if (error) {
+      console.error("Error updating API key:", error)
+      throw error
+    }
+  } catch (error) {
+    console.error("Error in updateApiKey:", error)
+    throw error
+  }
+}
+
+async function deleteApiKey(keyId: string): Promise<void> {
+  try {
+    const { error } = await supabase.from("api_keys").delete().eq("id", keyId)
+
+    if (error) {
+      console.error("Error deleting API key:", error)
+      throw error
+    }
+  } catch (error) {
+    console.error("Error in deleteApiKey:", error)
+    throw error
+  }
+}
+
+async function createOpenApiStore(storeData: {
+  name: string
+  api_endpoint?: string
+  notes?: string
+}): Promise<{ store: any; api_credentials: { api_key: string; api_secret: string } }> {
+  try {
+    console.log("Creating Open API store with data:", storeData)
+
+    // Create the store record
+    const { data: store, error: storeError } = await supabase
+      .from("shopify_stores")
+      .insert({
+        store_name: storeData.name,
+        shopify_domain: storeData.api_endpoint || "",
+        access_token: "", // Will be populated with API key
+        store_type: "open_api",
+        api_endpoint: storeData.api_endpoint,
+        status: "Connected",
+        notes: storeData.notes,
+        total_orders: 0,
+        monthly_revenue: 0,
+        last_sync: new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (storeError) {
+      console.error("Error creating Open API store:", storeError)
+      throw storeError
+    }
+
+    // Create API key for this store
+    const apiCredentials = await createApiKey(store.id, {
+      key_name: "Default API Key",
+      permissions: { inventory: true, orders: true },
+    })
+
+    // Update store with the API key
+    await supabase.from("shopify_stores").update({ access_token: apiCredentials.api_key }).eq("id", store.id)
+
+    console.log("Created Open API store:", store)
+
+    return {
+      store: {
+        id: store.id,
+        name: store.store_name,
+        store_type: store.store_type,
+        api_endpoint: store.api_endpoint,
+        status: store.status,
+        notes: store.notes,
+        created_at: store.created_at,
+        updated_at: store.updated_at,
+      },
+      api_credentials: apiCredentials,
+    }
+  } catch (error) {
+    console.error("Error in createOpenApiStore:", error)
+    throw error
   }
 }
 
@@ -1595,6 +1789,8 @@ async function getShopifyStores(): Promise<ShopifyStore[]> {
       notes: store.notes,
       createdAt: store.created_at,
       updatedAt: store.updated_at,
+      ...(store.store_type && { store_type: store.store_type }),
+      ...(store.api_endpoint && { api_endpoint: store.api_endpoint }),
     }))
   } catch (error) {
     console.error("Error fetching Shopify stores:", error)
@@ -1712,7 +1908,7 @@ interface PaginatedResult<T> {
 
 async function getShopifyOrders(options: PaginationOptions = {}): Promise<PaginatedResult<ShopifyOrder>> {
   try {
-    const { limit = 20, offset = 0 } = options
+    const { limit = 100, offset = 0 } = options
 
     console.log(`Fetching Shopify orders with limit: ${limit}, offset: ${offset}`)
 
@@ -2538,4 +2734,9 @@ export const supabaseStore = {
   generatePONumber,
   generateReturnNumber,
   syncInventoryFromPurchaseOrders,
+  createApiKey,
+  getApiKeys,
+  updateApiKey,
+  deleteApiKey,
+  createOpenApiStore,
 }

@@ -36,6 +36,7 @@ export default function InventoryPage() {
     name: "",
     quantity: 0,
     unitCost: 0,
+    barcode: "",
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -96,6 +97,7 @@ export default function InventoryPage() {
           name: formData.name,
           quantity: formData.quantity,
           unitCost: formData.unitCost,
+          barcode: formData.barcode,
         })
         setIsEditDialogOpen(false)
         setEditingItem(null)
@@ -106,6 +108,7 @@ export default function InventoryPage() {
           name: formData.name,
           quantity: formData.quantity,
           unitCost: formData.unitCost,
+          barcode: formData.barcode,
         })
         setIsAddDialogOpen(false)
       }
@@ -116,6 +119,7 @@ export default function InventoryPage() {
         name: "",
         quantity: 0,
         unitCost: 0,
+        barcode: "",
       })
 
       // Reload inventory
@@ -135,6 +139,7 @@ export default function InventoryPage() {
       name: item.name,
       quantity: item.inStock,
       unitCost: item.unitCost,
+      barcode: item.barcode || "",
     })
     setIsEditDialogOpen(true)
   }
@@ -146,13 +151,24 @@ export default function InventoryPage() {
   }
 
   const exportToCSV = useCallback(() => {
-    const headers = ["SKU", "Product Name", "In Stock", "Incoming", "Reserved", "Unit Cost", "Total Value", "Status"]
+    const headers = [
+      "SKU",
+      "Product Name",
+      "Barcode",
+      "In Stock",
+      "Incoming",
+      "Reserved",
+      "Unit Cost",
+      "Total Value",
+      "Status",
+    ]
 
     const csvData = filteredInventory.map((item) => {
       const status = getStockStatus(item)
       return [
         `"${item.sku}"`,
         `"${item.name}"`,
+        `"${item.barcode || ""}"`,
         item.inStock,
         item.incoming,
         item.reserved,
@@ -337,6 +353,7 @@ export default function InventoryPage() {
                   <TableRow>
                     <TableHead>SKU</TableHead>
                     <TableHead>Product Name</TableHead>
+                    <TableHead>Barcode</TableHead>
                     <TableHead>In Stock</TableHead>
                     <TableHead>Incoming</TableHead>
                     <TableHead>Reserved</TableHead>
@@ -353,6 +370,7 @@ export default function InventoryPage() {
                       <TableRow key={item.id}>
                         <TableCell className="font-medium">{item.sku}</TableCell>
                         <TableCell>{item.name}</TableCell>
+                        <TableCell className="text-gray-600">{item.barcode || "-"}</TableCell>
                         <TableCell>{item.inStock}</TableCell>
                         <TableCell className="text-blue-600">{item.incoming}</TableCell>
                         <TableCell className="text-orange-600">{item.reserved}</TableCell>
@@ -402,6 +420,16 @@ export default function InventoryPage() {
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Product Name"
                   required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="barcode">Barcode</Label>
+                <Input
+                  id="barcode"
+                  value={formData.barcode}
+                  onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                  placeholder="123456789012"
                 />
               </div>
 
@@ -469,6 +497,16 @@ export default function InventoryPage() {
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Product Name"
                   required
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="edit-barcode">Barcode</Label>
+                <Input
+                  id="edit-barcode"
+                  value={formData.barcode}
+                  onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                  placeholder="123456789012"
                 />
               </div>
 

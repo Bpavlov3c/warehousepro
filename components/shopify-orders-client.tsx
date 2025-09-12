@@ -170,7 +170,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
 
     setLoadingMore(true)
     try {
-      const response = await fetch(`/api/shopify-orders/list?limit=20&offset=${orders.length}`)
+      const response = await fetch(`/api/shopify-orders/list?limit=100&offset=${orders.length}`)
       if (!response.ok) throw new Error("Failed to load more orders")
 
       const result = await response.json()
@@ -191,7 +191,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
     try {
       // Refresh both orders and stats
       const [ordersResponse, statsResponse] = await Promise.all([
-        fetch("/api/shopify-orders/list?limit=20&offset=0"),
+        fetch("/api/shopify-orders/list?limit=100&offset=0"),
         fetch("/api/shopify-orders/stats"),
       ])
 
@@ -287,7 +287,13 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
           order.orderNumber.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
           order.customerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
           order.customerEmail.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-          order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()),
+          order.storeName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          order.items.some(
+            (item) =>
+              item.sku.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+              item.product_name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+              (item.barcode && item.barcode.toLowerCase().includes(debouncedSearchTerm.toLowerCase())),
+          ),
       )
     }
 
@@ -820,6 +826,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                         <TableRow>
                           <TableHead>SKU</TableHead>
                           <TableHead>Product</TableHead>
+                          <TableHead>Barcode</TableHead> {/* Added Barcode column to order items table */}
                           <TableHead className="w-[80px]">Qty</TableHead>
                           <TableHead className="w-[100px]">Unit Price</TableHead>
                           <TableHead className="w-[100px]">Unit Cost</TableHead>
@@ -836,6 +843,8 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                             <TableRow key={index}>
                               <TableCell className="font-medium">{item.sku}</TableCell>
                               <TableCell>{item.product_name}</TableCell>
+                              <TableCell className="text-gray-600 font-mono text-sm">{item.barcode || "-"}</TableCell>{" "}
+                              {/* Display barcode field for each order item */}
                               <TableCell className="text-center">{item.quantity}</TableCell>
                               <TableCell>${item.unit_price.toFixed(2)}</TableCell>
                               <TableCell className="text-orange-600">${itemCost.toFixed(2)}</TableCell>

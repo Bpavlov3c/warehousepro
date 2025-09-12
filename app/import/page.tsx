@@ -173,6 +173,7 @@ export default function ImportPage() {
             items: Array<{
               sku: string
               product_name: string
+              barcode: string
               quantity: number
               unit_cost: number
             }>
@@ -188,6 +189,7 @@ export default function ImportPage() {
         )
         const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
         const productIndex = headers.findIndex((h) => h.toLowerCase() === "product")
+        const barcodeIndex = headers.findIndex((h) => h.toLowerCase() === "barcode")
         const quantityIndex = headers.findIndex((h) => h.toLowerCase() === "quantity")
         const unitCostIndex = headers.findIndex(
           (h) => h.toLowerCase() === "unit cost" || h.toLowerCase() === "unit_cost",
@@ -227,6 +229,7 @@ export default function ImportPage() {
             const item = {
               sku: row[skuIndex] || `SKU-${i + 1}`,
               product_name: row[productIndex] || `Product ${i + 1}`,
+              barcode: row[barcodeIndex] || "",
               quantity: safeInt(row[quantityIndex], 1),
               unit_cost: safeFloat(row[unitCostIndex]),
             }
@@ -257,6 +260,7 @@ export default function ImportPage() {
 
             const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
             const nameIndex = headers.findIndex((h) => h.toLowerCase() === "name" || h.toLowerCase() === "product")
+            const barcodeIndex = headers.findIndex((h) => h.toLowerCase() === "barcode")
             const quantityIndex = headers.findIndex(
               (h) => h.toLowerCase() === "quantity" || h.toLowerCase() === "stock",
             )
@@ -267,6 +271,7 @@ export default function ImportPage() {
             const inventoryData = {
               sku: row[skuIndex] || `SKU-${i + 1}`,
               name: row[nameIndex] || `Product ${i + 1}`,
+              barcode: row[barcodeIndex] || "",
               quantity: safeInt(row[quantityIndex]),
               unitCost: safeFloat(row[unitCostIndex]),
             }
@@ -298,6 +303,7 @@ export default function ImportPage() {
             items: Array<{
               sku: string
               product_name: string
+              barcode: string
               quantity: number
               unit_price: number
               total_price: number
@@ -320,6 +326,7 @@ export default function ImportPage() {
         const addressIndex = headers.findIndex((h) => h.toLowerCase() === "address")
         const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
         const productIndex = headers.findIndex((h) => h.toLowerCase() === "product")
+        const barcodeIndex = headers.findIndex((h) => h.toLowerCase() === "barcode")
         const quantityIndex = headers.findIndex((h) => h.toLowerCase() === "quantity")
         const priceIndex = headers.findIndex(
           (h) => h.toLowerCase() === "price" || h.toLowerCase() === "unit price" || h.toLowerCase() === "unit_price",
@@ -361,6 +368,7 @@ export default function ImportPage() {
             const item = {
               sku: row[skuIndex] || `SKU-${i + 1}`,
               product_name: row[productIndex] || `Product ${i + 1}`,
+              barcode: row[barcodeIndex] || "",
               quantity: safeInt(row[quantityIndex], 1),
               unit_price: safeFloat(row[priceIndex]),
               total_price: safeFloat(row[totalIndex]),
@@ -398,6 +406,7 @@ export default function ImportPage() {
             items: Array<{
               sku: string
               product_name: string
+              barcode: string
               quantity: number
               condition: string
               reason: string
@@ -422,6 +431,7 @@ export default function ImportPage() {
         const notesIndex = headers.findIndex((h) => h.toLowerCase() === "notes")
         const skuIndex = headers.findIndex((h) => h.toLowerCase() === "sku")
         const productIndex = headers.findIndex((h) => h.toLowerCase() === "product")
+        const barcodeIndex = headers.findIndex((h) => h.toLowerCase() === "barcode")
         const quantityIndex = headers.findIndex((h) => h.toLowerCase() === "quantity")
         const conditionIndex = headers.findIndex((h) => h.toLowerCase() === "condition")
         const reasonIndex = headers.findIndex((h) => h.toLowerCase() === "reason")
@@ -462,6 +472,7 @@ export default function ImportPage() {
             const item = {
               sku: row[skuIndex] || `SKU-${i + 1}`,
               product_name: row[productIndex] || `Product ${i + 1}`,
+              barcode: row[barcodeIndex] || "",
               quantity: safeInt(row[quantityIndex], 1),
               condition: row[conditionIndex] || "Good",
               reason: row[reasonIndex] || "Other",
@@ -514,7 +525,7 @@ export default function ImportPage() {
 
   const downloadSample = useCallback((type: string) => {
     const link = document.createElement("a")
-    link.href = `/samples/sample-${type}.csv`
+    link.href = `/api/samples/${type}`
     link.download = `sample-${type}.csv`
     document.body.appendChild(link)
     link.click()
@@ -540,7 +551,8 @@ export default function ImportPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Expected columns: Supplier, Date, Status, SKU, Product, Quantity, Unit Cost, Delivery Cost, Notes
+                Expected columns: Supplier, Date, Status, SKU, Product, Barcode, Quantity, Unit Cost, Delivery Cost,
+                Notes
               </p>
               <p className="text-xs text-blue-600">
                 Multiple rows with the same Supplier + Date + Status will be grouped into one PO with multiple items.
@@ -562,7 +574,7 @@ export default function ImportPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Expected columns: SKU, Name/Product, Quantity/Stock, Unit Cost/Cost
+                Expected columns: SKU, Name/Product, Barcode, Quantity/Stock, Unit Cost/Cost
               </p>
               <Button variant="outline" size="sm" onClick={() => downloadSample("inventory")} className="w-full">
                 <Download className="h-4 w-4 mr-2" />
@@ -581,8 +593,8 @@ export default function ImportPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Expected columns: Order ID, Order Number, Customer, Email, Date, Status, SKU, Product, Quantity, Price,
-                Total, Shipping, Tax, Address
+                Expected columns: Order ID, Order Number, Customer, Email, Date, Status, SKU, Product, Barcode,
+                Quantity, Price, Total, Shipping, Tax, Address
               </p>
               <p className="text-xs text-blue-600">
                 Multiple rows with the same Order ID will be grouped into one order with multiple items.
@@ -604,8 +616,8 @@ export default function ImportPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Expected columns: Return Number, Customer, Email, Order Number, Date, Status, SKU, Product, Quantity,
-                Condition, Reason, Refund
+                Expected columns: Return Number, Customer, Email, Order Number, Date, Status, SKU, Product, Barcode,
+                Quantity, Condition, Reason, Refund
               </p>
               <p className="text-xs text-blue-600">
                 Multiple rows with the same Return Number will be grouped into one return with multiple items.
