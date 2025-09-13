@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Filter,
   X,
+  Printer,
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -33,6 +34,155 @@ function useDebounce<T>(value: T, delay = 300): T {
     return () => clearTimeout(id)
   }, [value, delay])
   return debounced
+}
+
+const generatePackingSlipPDF = (order: ShopifyOrder) => {
+  const printWindow = window.open("", "_blank")
+  if (!printWindow) return
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Packing Slip - ${order.orderNumber}</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
+        .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+        .company-name { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+        .document-title { font-size: 18px; color: #666; }
+        .order-info { display: flex; justify-content: space-between; margin-bottom: 30px; }
+        .info-section { flex: 1; margin-right: 20px; }
+        .info-section:last-child { margin-right: 0; }
+        .info-title { font-weight: bold; font-size: 14px; margin-bottom: 10px; color: #333; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+        .info-content { font-size: 12px; line-height: 1.4; }
+        .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        .items-table th, .items-table td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+        .items-table th { background-color: #f5f5f5; font-weight: bold; }
+        .items-table .sku { font-family: monospace; }
+        .items-table .barcode { font-family: monospace; font-size: 11px; }
+        .items-table .qty { text-align: center; }
+        .summary { margin-top: 30px; }
+        .summary-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; }
+        .summary-row.total { font-weight: bold; font-size: 14px; border-top: 1px solid #333; padding-top: 5px; margin-top: 10px; }
+        .footer { margin-top: 40px; text-align: center; font-size: 10px; color: #666; border-top: 1px solid #ddd; padding-top: 20px; }
+        .packing-notes { margin-top: 30px; padding: 15px; background-color: #f9f9f9; border: 1px solid #ddd; }
+        .packing-notes h4 { margin: 0 0 10px 0; font-size: 14px; }
+        .checkbox-line { margin: 10px 0; font-size: 12px; }
+        .checkbox { display: inline-block; width: 12px; height: 12px; border: 1px solid #333; margin-right: 8px; }
+        @media print {
+          body { margin: 0; }
+          .no-print { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="company-name">Warehouse Management System</div>
+        <div class="document-title">PACKING SLIP</div>
+      </div>
+
+      <div class="order-info">
+        <div class="info-section">
+          <div class="info-title">Order Information</div>
+          <div class="info-content">
+            <strong>Order #:</strong> ${order.orderNumber}<br>
+            <strong>Order Date:</strong> ${new Date(order.orderDate).toLocaleDateString()}<br>
+            <strong>Store:</strong> ${order.storeName}<br>
+            <strong>Status:</strong> ${order.status}
+          </div>
+        </div>
+        
+        <div class="info-section">
+          <div class="info-title">Customer Information</div>
+          <div class="info-content">
+            <strong>Name:</strong> ${order.customerName}<br>
+            <strong>Email:</strong> ${order.customerEmail}
+          </div>
+        </div>
+        
+        <div class="info-section">
+          <div class="info-title">Shipping Address</div>
+          <div class="info-content">
+            ${order.shippingAddress.replace(/,/g, "<br>")}
+          </div>
+        </div>
+      </div>
+
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width: 15%;">SKU</th>
+            <th style="width: 35%;">Product Name</th>
+            <th style="width: 15%;">Barcode</th>
+            <th style="width: 10%;">Qty</th>
+            <th style="width: 25%;">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${order.items
+            .map(
+              (item) => `
+            <tr>
+              <td class="sku">${item.sku}</td>
+              <td>${item.product_name}</td>
+              <td class="barcode">${item.barcode || "-"}</td>
+              <td class="qty">${item.quantity}</td>
+              <td style="border-left: none; border-right: none;"></td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+
+      <div class="summary">
+        <div class="summary-row">
+          <span>Total Items:</span>
+          <span>${order.items.reduce((sum, item) => sum + item.quantity, 0)}</span>
+        </div>
+        <div class="summary-row">
+          <span>Unique Products:</span>
+          <span>${order.items.length}</span>
+        </div>
+        <div class="summary-row">
+          <span>Shipping Cost:</span>
+          <span>$${order.shippingCost.toFixed(2)}</span>
+        </div>
+        <div class="summary-row total">
+          <span>Order Total:</span>
+          <span>$${order.totalAmount.toFixed(2)}</span>
+        </div>
+      </div>
+
+      <div class="packing-notes">
+        <h4>Packing Checklist</h4>
+        <div class="checkbox-line"><span class="checkbox"></span> All items picked and verified</div>
+        <div class="checkbox-line"><span class="checkbox"></span> Items properly packaged</div>
+        <div class="checkbox-line"><span class="checkbox"></span> Shipping label attached</div>
+        <div class="checkbox-line"><span class="checkbox"></span> Packing slip included</div>
+        <div class="checkbox-line"><span class="checkbox"></span> Quality check completed</div>
+        <br>
+        <strong>Packed by:</strong> _________________________ <strong>Date:</strong> _____________
+      </div>
+
+      <div class="footer">
+        <p>Generated on ${new Date().toLocaleString()} | Order ID: ${order.id}</p>
+      </div>
+
+      <script>
+        window.onload = function() {
+          window.print();
+          window.onafterprint = function() {
+            window.close();
+          };
+        };
+      </script>
+    </body>
+    </html>
+  `
+
+  printWindow.document.write(html)
+  printWindow.document.close()
 }
 
 /* ------------------------------ skeletons ----------------------------- */
@@ -638,18 +788,29 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                     </div>
                   </div>
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedOrder(order)
-                      setIsViewOrderOpen(true)
-                    }}
-                    className="w-full"
-                  >
-                    <Eye className="w-4 h-4 mr-2" />
-                    View Details
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedOrder(order)
+                        setIsViewOrderOpen(true)
+                      }}
+                      className="flex-1"
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      View Details
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => generatePackingSlipPDF(order)}
+                      className="flex-1"
+                    >
+                      <Printer className="w-4 h-4 mr-2" />
+                      Packing Slip
+                    </Button>
+                  </div>
                 </Card>
               ))}
 
@@ -693,7 +854,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                     <TableHead className="w-[80px]">Status</TableHead>
                     <TableHead className="w-[100px]">Total</TableHead>
                     <TableHead className="w-[100px]">Profit</TableHead>
-                    <TableHead className="w-[80px]">Actions</TableHead>
+                    <TableHead className="w-[120px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -729,17 +890,27 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                             </span>
                           </TableCell>
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedOrder(order)
-                                setIsViewOrderOpen(true)
-                              }}
-                              title="View Order Details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedOrder(order)
+                                  setIsViewOrderOpen(true)
+                                }}
+                                title="View Order Details"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => generatePackingSlipPDF(order)}
+                                title="Print Packing Slip"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -903,6 +1074,14 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                       </div>
                     </div>
                   </div>
+                </div>
+
+                {/* Print Packing Slip Button */}
+                <div className="flex justify-end pt-4 border-t">
+                  <Button onClick={() => generatePackingSlipPDF(selectedOrder)} className="flex items-center gap-2">
+                    <Printer className="w-4 h-4" />
+                    Print Packing Slip
+                  </Button>
                 </div>
               </div>
             )}
