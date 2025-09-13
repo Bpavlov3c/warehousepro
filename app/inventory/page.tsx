@@ -28,6 +28,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
@@ -59,31 +60,27 @@ export default function InventoryPage() {
     }
   }
 
-  // Filter inventory based on search term
+  // Filter inventory based on search term and stock level
   const filteredInventory = useMemo(() => {
-    if (!searchTerm) return inventory
+    let filtered = inventory
 
-    return inventory.filter(
-      (item) =>
-        item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()),
-    )
-  }, [inventory, searchTerm])
-
-  // Calculate stats
-  const stats = useMemo(() => {
-    const totalItems = inventory.length
-    const totalValue = inventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0)
-    const lowStockItems = inventory.filter((item) => item.inStock <= 10).length
-    const outOfStockItems = inventory.filter((item) => item.inStock === 0).length
-
-    return {
-      totalItems,
-      totalValue,
-      lowStockItems,
-      outOfStockItems,
+    // Apply search filter
+    if (searchTerm) {
+      filtered = filtered.filter(
+        (item) =>
+          item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.name.toLowerCase().includes(searchTerm.toLowerCase()),
+      )
     }
-  }, [inventory])
+
+    if (stockFilter === "low") {
+      filtered = filtered.filter((item) => item.inStock > 0 && item.inStock <= 10)
+    } else if (stockFilter === "out") {
+      filtered = filtered.filter((item) => item.inStock === 0)
+    }
+
+    return filtered
+  }, [inventory, searchTerm, stockFilter])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -268,7 +265,7 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600">Total Items</p>
-                  <p className="text-2xl font-bold">{stats.totalItems}</p>
+                  <p className="text-2xl font-bold">{inventory.length}</p>
                 </div>
                 <Package className="w-8 h-8 text-blue-600" />
               </div>
@@ -280,7 +277,9 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600">Total Value</p>
-                  <p className="text-2xl font-bold">${stats.totalValue.toLocaleString()}</p>
+                  <p className="text-2xl font-bold">
+                    ${inventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0).toLocaleString()}
+                  </p>
                 </div>
                 <TrendingUp className="w-8 h-8 text-green-600" />
               </div>
@@ -292,7 +291,9 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600">Low Stock</p>
-                  <p className="text-2xl font-bold text-yellow-600">{stats.lowStockItems}</p>
+                  <p className="text-2xl font-bold text-yellow-600">
+                    {inventory.filter((item) => item.inStock > 0 && item.inStock <= 10).length}
+                  </p>
                 </div>
                 <AlertTriangle className="w-8 h-8 text-yellow-600" />
               </div>
@@ -304,7 +305,9 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600">Out of Stock</p>
-                  <p className="text-2xl font-bold text-red-600">{stats.outOfStockItems}</p>
+                  <p className="text-2xl font-bold text-red-600">
+                    {inventory.filter((item) => item.inStock === 0).length}
+                  </p>
                 </div>
                 <AlertTriangle className="w-8 h-8 text-red-600" />
               </div>
@@ -312,15 +315,43 @@ export default function InventoryPage() {
           </Card>
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <Input
-            placeholder="Search inventory..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
+        {/* Search and Filters */}
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              placeholder="Search inventory..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              variant={stockFilter === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStockFilter("all")}
+            >
+              All Items
+            </Button>
+            <Button
+              variant={stockFilter === "low" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStockFilter("low")}
+              className={stockFilter === "low" ? "bg-yellow-600 hover:bg-yellow-700" : ""}
+            >
+              Low Stock
+            </Button>
+            <Button
+              variant={stockFilter === "out" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStockFilter("out")}
+              className={stockFilter === "out" ? "bg-red-600 hover:bg-red-700" : ""}
+            >
+              Out of Stock
+            </Button>
+          </div>
         </div>
 
         {/* Inventory Table */}
