@@ -19,6 +19,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useSidebar } from "@/components/ui/sidebar"
 import { useEffect, useState } from "react"
+import { LogoutButton } from "@/components/logout-button"
 
 const menuItems = [
   {
@@ -176,7 +177,7 @@ export function AppSidebar() {
         </div>
 
         {/* Footer */}
-        <div className="p-2 border-t border-sidebar-border">
+        <div className="p-2 border-t border-sidebar-border space-y-1">
           <Link
             href="/admin"
             className={cn(
@@ -191,6 +192,8 @@ export function AppSidebar() {
               <span className="truncate">Admin Panel</span>
             )}
           </Link>
+
+          {((isExpanded && !isMobile) || (isMobile && mobileExpanded)) && <LogoutButton />}
         </div>
       </div>
     </>

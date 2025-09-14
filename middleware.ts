@@ -1,9 +1,15 @@
+import { updateSession } from "@/lib/supabase/middleware"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   console.log("[v0] Middleware called for:", request.nextUrl.pathname)
   console.log("[v0] Request method:", request.method)
+
+  if (!request.nextUrl.pathname.startsWith("/api/v1/")) {
+    console.log("[v0] Processing Supabase authentication")
+    return await updateSession(request)
+  }
 
   // Handle API routes that require authentication
   if (request.nextUrl.pathname.startsWith("/api/v1/")) {
@@ -49,5 +55,15 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/v1/:path*"],
+  matcher: [
+    /*
+     * Match all request paths except:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
+     * Feel free to modify this pattern to include more paths.
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 }

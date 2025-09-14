@@ -19,9 +19,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Package, TrendingUp, AlertTriangle, Search, Edit, Download, RefreshCw } from "lucide-react"
+import { Plus, Package, TrendingUp, AlertTriangle, Search, Edit, Download, RefreshCw, PackagePlus } from "lucide-react"
 import { supabaseStore } from "@/lib/supabase-store"
 import type { InventoryItem } from "@/lib/supabase-store"
+import { AddMissingSKUModal } from "@/components/add-missing-sku-modal"
 
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
@@ -31,6 +32,7 @@ export default function InventoryPage() {
   const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isMissingSKUModalOpen, setIsMissingSKUModalOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [formData, setFormData] = useState({
     sku: "",
@@ -217,6 +219,9 @@ export default function InventoryPage() {
             <Button onClick={exportToCSV} size="sm" variant="outline" className="lg:hidden bg-transparent">
               <Download className="w-4 h-4" />
             </Button>
+            <Button onClick={() => setIsMissingSKUModalOpen(true)} size="sm" variant="outline" className="lg:hidden">
+              <PackagePlus className="w-4 h-4" />
+            </Button>
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="sm">
@@ -240,6 +245,10 @@ export default function InventoryPage() {
             <Button onClick={exportToCSV} size="sm" variant="outline">
               <Download className="w-4 h-4 mr-2" />
               Export CSV
+            </Button>
+            <Button onClick={() => setIsMissingSKUModalOpen(true)} size="sm" variant="outline">
+              <PackagePlus className="w-4 h-4 mr-2" />
+              Add Missing SKU
             </Button>
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
@@ -585,6 +594,13 @@ export default function InventoryPage() {
             </form>
           </DialogContent>
         </Dialog>
+
+        {/* Add Missing SKU Modal */}
+        <AddMissingSKUModal
+          isOpen={isMissingSKUModalOpen}
+          onClose={() => setIsMissingSKUModalOpen(false)}
+          onSuccess={loadInventory}
+        />
       </div>
     </div>
   )
