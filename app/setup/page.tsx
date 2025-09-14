@@ -15,6 +15,8 @@ export default function SetupPage() {
     setMessage("")
 
     try {
+      console.log("[v0] Starting admin user creation...")
+
       // Create the admin user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: "bogomilpavlov@bebemama.bg",
@@ -25,29 +27,35 @@ export default function SetupPage() {
       })
 
       if (authError) {
-        console.error("Auth error:", authError)
+        console.error("[v0] Auth error:", authError)
         setMessage(`Error creating user: ${authError.message}`)
         return
       }
 
+      console.log("[v0] User created:", authData.user?.id)
+
       if (authData.user) {
-        // Create profile for the user
-        const { error: profileError } = await supabase.from("profiles").insert({
+        const profileData = {
           id: authData.user.id,
           email: "bogomilpavlov@bebemama.bg",
           full_name: "Admin User",
           role: "admin",
-        })
+        }
+
+        console.log("[v0] Creating profile with data:", profileData)
+
+        const { error: profileError } = await supabase.from("profiles").insert(profileData)
 
         if (profileError) {
-          console.error("Profile error:", profileError)
-          setMessage(`User created but profile error: ${profileError.message}`)
+          console.error("[v0] Profile error:", profileError)
+          setMessage(`User created but profile error: ${profileError.message || JSON.stringify(profileError)}`)
         } else {
+          console.log("[v0] Profile created successfully")
           setMessage("✅ Admin user created successfully! You can now login with: bogomilpavlov@bebemama.bg / Bob1rad1")
         }
       }
     } catch (error) {
-      console.error("Setup error:", error)
+      console.error("[v0] Setup error:", error)
       setMessage(`Setup error: ${error}`)
     } finally {
       setIsCreating(false)
