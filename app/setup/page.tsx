@@ -8,21 +8,24 @@ import { createClient } from "@/lib/supabase/client"
 export default function SetupPage() {
   const [isCreating, setIsCreating] = useState(false)
   const [message, setMessage] = useState("")
-  const supabase = createClient()
 
   const createAdminUser = async () => {
     setIsCreating(true)
     setMessage("")
 
     try {
+      const supabase = createClient()
       console.log("[v0] Starting admin user creation...")
 
-      // Create the admin user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: "bogomilpavlov@bebemama.bg",
         password: "Bob1rad1",
         options: {
           emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || window.location.origin,
+          data: {
+            full_name: "Admin User",
+            role: "admin",
+          },
         },
       })
 
@@ -35,24 +38,10 @@ export default function SetupPage() {
       console.log("[v0] User created:", authData.user?.id)
 
       if (authData.user) {
-        const profileData = {
-          id: authData.user.id,
-          email: "bogomilpavlov@bebemama.bg",
-          full_name: "Admin User",
-          role: "admin",
-        }
-
-        console.log("[v0] Creating profile with data:", profileData)
-
-        const { error: profileError } = await supabase.from("profiles").insert(profileData)
-
-        if (profileError) {
-          console.error("[v0] Profile error:", profileError)
-          setMessage(`User created but profile error: ${profileError.message || JSON.stringify(profileError)}`)
-        } else {
-          console.log("[v0] Profile created successfully")
-          setMessage("✅ Admin user created successfully! You can now login with: bogomilpavlov@bebemama.bg / Bob1rad1")
-        }
+        console.log("[v0] User created successfully, profile will be created by trigger")
+        setMessage(
+          "✅ Admin user created successfully! The profile will be created automatically. You can now login with: bogomilpavlov@bebemama.bg / Bob1rad1",
+        )
       }
     } catch (error) {
       console.error("[v0] Setup error:", error)
