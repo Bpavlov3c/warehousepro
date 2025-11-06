@@ -12,6 +12,7 @@ import {
   Menu,
   X,
   RotateCcw,
+  ArrowUpDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -41,6 +42,11 @@ const menuItems = [
     title: "Inventory",
     url: "/inventory",
     icon: Package,
+  },
+  {
+    title: "Stock Movement",
+    url: "/stock-movement",
+    icon: ArrowUpDown,
   },
   {
     title: "Orders",

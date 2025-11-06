@@ -81,7 +81,7 @@ export interface PurchaseOrderItem {
   quantity: number
   unit_cost: number
   total_cost: number
-  barcode?: string
+  barcode?: string // Added for barcode
 }
 
 export interface PurchaseOrder {
@@ -131,6 +131,7 @@ export interface ShopifyOrderItem {
   unit_price: number
   total_price: number
   barcode?: string
+  cost_price?: number // Added for cost tracking
 }
 
 export interface ShopifyOrder {
@@ -226,11 +227,11 @@ function ignoreMissingInventoryProcessed<T>(fn: () => Promise<T>, fallback: T): 
  */
 async function getLatestUnitCosts(): Promise<Map<string, number>> {
   try {
-    // Get the most recent inventory record for each SKU
+    // Get the most recent inventory record for each SKU based on purchase date
     const { data: inventoryData, error: inventoryError } = await supabase
       .from("inventory")
       .select("sku, unit_cost_with_delivery, purchase_date, created_at")
-      .order("created_at", { ascending: false })
+      .order("purchase_date", { ascending: false })
 
     if (inventoryError) {
       console.error("Error fetching latest unit costs:", inventoryError)
@@ -311,7 +312,7 @@ async function calculateReservedQuantities(): Promise<Map<string, number>> {
         quantity
       )
     `)
-      .not("status", "in", "(fulfilled,shipped,delivered,cancelled)")
+      .not("status", "in", ["fulfilled", "shipped", "delivered", "cancelled"])
 
     if (ordersError) {
       console.error("Error fetching pending orders:", ordersError)
@@ -376,7 +377,10 @@ async function processFulfilledOrdersForInventory(): Promise<void> {
         `
         id,
         order_number,
+        order_date,
+        status,
         shopify_order_items (
+          id,
           sku,
           product_name,
           quantity
@@ -392,7 +396,8 @@ async function processFulfilledOrdersForInventory(): Promise<void> {
 
     for (const ord of orders) {
       for (const item of ord.shopify_order_items || []) {
-        await deductInventoryQuantity(item.sku, item.quantity, `Order ${ord.order_number}`)
+        // Pass item.id as orderItemId for sales_fulfillment tracking
+        await deductInventoryQuantity(item.sku, item.quantity, `Order ${ord.order_number}`, item.id)
       }
       await supabase.from("shopify_orders").update({ inventory_processed: true }).eq("id", ord.id)
     }
@@ -401,19 +406,24 @@ async function processFulfilledOrdersForInventory(): Promise<void> {
 
 /**
  * Deduct quantity from inventory for a specific SKU
- * Uses FIFO approach - deducts from oldest inventory first
+ * Uses LIFO approach for cost assignment - uses newest inventory first for cost tracking
+ * but FIFO for actual quantity deduction to maintain proper inventory flow
  */
-async function deductInventoryQuantity(sku: string, quantityToDeduct: number, reason: string): Promise<void> {
+async function deductInventoryQuantity(
+  sku: string,
+  quantityToDeduct: number,
+  reason: string,
+  orderItemId?: string,
+): Promise<void> {
   try {
-    console.log(`Deducting ${quantityToDeduct} units of ${sku} for ${reason}`)
+    console.log(`[v0] Deducting ${quantityToDeduct} units of ${sku} for ${reason}`)
 
-    // Get all inventory records for this SKU ordered by creation date (FIFO)
     const { data: inventoryRecords, error: fetchError } = await supabase
       .from("inventory")
-      .select("id, quantity_available")
+      .select("id, quantity_available, unit_cost_with_delivery, purchase_date, po_id")
       .eq("sku", sku)
       .gt("quantity_available", 0)
-      .order("created_at", { ascending: true })
+      .order("purchase_date", { ascending: false }) // LIFO for cost assignment
 
     if (fetchError) {
       console.error(`Error fetching inventory for SKU ${sku}:`, fetchError)
@@ -427,7 +437,6 @@ async function deductInventoryQuantity(sku: string, quantityToDeduct: number, re
 
     let remainingToDeduct = quantityToDeduct
 
-    // Deduct from inventory records using FIFO
     for (const record of inventoryRecords) {
       if (remainingToDeduct <= 0) break
 
@@ -446,14 +455,33 @@ async function deductInventoryQuantity(sku: string, quantityToDeduct: number, re
         continue
       }
 
+      if (orderItemId) {
+        const { error: fulfillmentError } = await supabase.from("sales_fulfillment").insert({
+          order_item_id: orderItemId,
+          inventory_id: record.id,
+          quantity_used: deductFromThisRecord,
+          unit_cost: record.unit_cost_with_delivery || 0,
+        })
+
+        if (fulfillmentError) {
+          console.error(`Error creating sales_fulfillment record:`, fulfillmentError)
+        } else {
+          console.log(
+            `[v0] Created sales_fulfillment: ${deductFromThisRecord} units at $${record.unit_cost_with_delivery} from PO date ${record.purchase_date}`,
+          )
+        }
+      }
+
       remainingToDeduct -= deductFromThisRecord
-      console.log(`Deducted ${deductFromThisRecord} from inventory record ${record.id}, remaining: ${newQuantity}`)
+      console.log(
+        `[v0] Deducted ${deductFromThisRecord} from inventory record ${record.id} (PO date: ${record.purchase_date}), remaining: ${newQuantity}`,
+      )
     }
 
     if (remainingToDeduct > 0) {
       console.warn(`Could not deduct full quantity for ${sku}. Remaining: ${remainingToDeduct}`)
     } else {
-      console.log(`Successfully deducted ${quantityToDeduct} units of ${sku}`)
+      console.log(`[v0] Successfully deducted ${quantityToDeduct} units of ${sku} using LIFO cost assignment`)
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes("JSON")) {
@@ -1219,7 +1247,8 @@ async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
         product_name,
         quantity,
         unit_cost,
-        total_cost
+        total_cost,
+        barcode
       )
     `)
       .order("created_at", { ascending: false })
@@ -1460,6 +1489,7 @@ async function updatePurchaseOrderWithItems(
       product_name: string
       quantity: number
       unit_cost: number
+      barcode?: string // Added barcode field to items interface
     }>
   },
 ): Promise<PurchaseOrder | null> {
@@ -1533,6 +1563,7 @@ async function updatePurchaseOrderWithItems(
           quantity: item.quantity,
           unit_cost: item.unit_cost,
           total_cost: item.quantity * item.unit_cost,
+          barcode: item.barcode || null, // Include barcode field when inserting items
         }))
 
         console.log("Inserting new items:", itemsToInsert)
@@ -2170,7 +2201,8 @@ async function addShopifyOrders(rawOrders: any[]): Promise<ShopifyOrder[]> {
 
           // Deduct inventory for each item in the order
           for (const item of orderItems || []) {
-            await deductInventoryQuantity(item.sku, item.quantity, `Order ${order.order_number}`)
+            // Pass item.id as orderItemId for sales_fulfillment tracking
+            await deductInventoryQuantity(item.sku, item.quantity, `Order ${order.order_number}`, item.id)
           }
 
           // Mark the order as inventory processed
