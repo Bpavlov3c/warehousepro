@@ -109,6 +109,11 @@ export interface ShopifyStore {
   notes?: string
   createdAt: string
   updatedAt: string
+  // Scheduler fields
+  syncEnabled?: boolean
+  syncScheduleHour?: number
+  lastScheduledSync?: string
+  nextScheduledSync?: string
 }
 
 export interface StoreData {
@@ -1836,6 +1841,8 @@ async function createShopifyStore(storeData: {
   status: string
   webhook_url?: string
   notes?: string
+  sync_enabled?: boolean
+  sync_schedule_hour?: number
 }): Promise<ShopifyStore> {
   try {
     const { data, error } = await supabase
@@ -1849,6 +1856,8 @@ async function createShopifyStore(storeData: {
         notes: storeData.notes,
         total_orders: 0,
         monthly_revenue: 0,
+        sync_enabled: storeData.sync_enabled || false,
+        sync_schedule_hour: storeData.sync_schedule_hour || 1,
       })
       .select()
       .single()
@@ -1868,6 +1877,10 @@ async function createShopifyStore(storeData: {
       notes: data.notes,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
+      syncEnabled: data.sync_enabled,
+      syncScheduleHour: data.sync_schedule_hour,
+      lastScheduledSync: data.last_scheduled_sync,
+      nextScheduledSync: data.next_scheduled_sync,
     }
   } catch (error) {
     console.error("Error creating Shopify store:", error)
@@ -1887,6 +1900,10 @@ async function updateShopifyStore(id: string, updates: Partial<ShopifyStore>): P
     if (updates.monthlyRevenue !== undefined) dbUpdates.monthly_revenue = updates.monthlyRevenue
     if (updates.webhookUrl) dbUpdates.webhook_url = updates.webhookUrl
     if (updates.notes) dbUpdates.notes = updates.notes
+    if (updates.syncEnabled !== undefined) dbUpdates.sync_enabled = updates.syncEnabled
+    if (updates.syncScheduleHour !== undefined) dbUpdates.sync_schedule_hour = updates.syncScheduleHour
+    if (updates.lastScheduledSync) dbUpdates.last_scheduled_sync = updates.lastScheduledSync
+    if (updates.nextScheduledSync) dbUpdates.next_scheduled_sync = updates.nextScheduledSync
 
     const { data, error } = await supabase.from("shopify_stores").update(dbUpdates).eq("id", id).select().single()
 
@@ -1905,6 +1922,10 @@ async function updateShopifyStore(id: string, updates: Partial<ShopifyStore>): P
       notes: data.notes,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
+      syncEnabled: data.sync_enabled,
+      syncScheduleHour: data.sync_schedule_hour,
+      lastScheduledSync: data.last_scheduled_sync,
+      nextScheduledSync: data.next_scheduled_sync,
     }
   } catch (error) {
     console.error("Error updating Shopify store:", error)
@@ -1918,6 +1939,67 @@ async function deleteShopifyStore(id: string): Promise<void> {
     if (error) throw error
   } catch (error) {
     console.error("Error deleting Shopify store:", error)
+    throw error
+  }
+}
+
+/**
+ * Update scheduler settings for a Shopify store
+ * Allows enabling/disabling daily sync and setting the sync hour
+ */
+async function updateStoreScheduler(
+  id: string,
+  syncEnabled: boolean,
+  syncScheduleHour: number,
+): Promise<ShopifyStore | null> {
+  try {
+    if (syncScheduleHour < 0 || syncScheduleHour > 23) {
+      throw new Error("Sync hour must be between 0 and 23 UTC")
+    }
+
+    // Calculate next scheduled sync time
+    const now = new Date()
+    const nextSync = new Date(now)
+    nextSync.setUTCHours(syncScheduleHour, 0, 0, 0)
+
+    // If the hour has already passed today, schedule for tomorrow
+    if (nextSync <= now) {
+      nextSync.setUTCDate(nextSync.getUTCDate() + 1)
+    }
+
+    const { data, error } = await supabase
+      .from("shopify_stores")
+      .update({
+        sync_enabled: syncEnabled,
+        sync_schedule_hour: syncScheduleHour,
+        next_scheduled_sync: nextSync.toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return {
+      id: data.id,
+      name: data.store_name,
+      shopifyDomain: data.shopify_domain,
+      accessToken: data.access_token,
+      status: data.status,
+      lastSync: data.last_sync || "Never",
+      totalOrders: data.total_orders || 0,
+      monthlyRevenue: data.monthly_revenue || 0,
+      webhookUrl: data.webhook_url,
+      notes: data.notes,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      syncEnabled: data.sync_enabled,
+      syncScheduleHour: data.sync_schedule_hour,
+      lastScheduledSync: data.last_scheduled_sync,
+      nextScheduledSync: data.next_scheduled_sync,
+    }
+  } catch (error) {
+    console.error("Error updating store scheduler:", error)
     throw error
   }
 }
@@ -2721,6 +2803,7 @@ export {
   getShopifyStores,
   createShopifyStore,
   updateShopifyStore,
+  updateStoreScheduler,
   deleteShopifyStore,
   getShopifyOrders,
   getAllShopifyOrders,
@@ -2754,6 +2837,7 @@ export const supabaseStore = {
   getShopifyStores,
   createShopifyStore,
   updateShopifyStore,
+  updateStoreScheduler,
   deleteShopifyStore,
   getShopifyOrders,
   getAllShopifyOrders,

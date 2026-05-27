@@ -38,22 +38,29 @@ export async function POST(request: NextRequest) {
     const stores = await supabaseStore.getShopifyStores()
     const connectedStores = stores.filter((store) => store.status === "Connected" || store.status === "Testing")
 
-    if (connectedStores.length === 0) {
-      console.log("[CRON] No connected Shopify stores found")
+    // Filter to only stores with sync_enabled = true
+    const scheduledStores = connectedStores.filter((store) => store.syncEnabled === true)
+    const disabledStores = connectedStores.filter((store) => store.syncEnabled !== true)
+
+    if (scheduledStores.length === 0) {
+      console.log(`[CRON] No stores with automatic sync enabled (${disabledStores.length} stores have sync disabled)`)
       return NextResponse.json({
         success: true,
-        message: "No connected Shopify stores found",
+        message: "No stores with automatic sync enabled",
         storeCount: 0,
         totalOrdersSynced: 0,
+        disabledStoresCount: disabledStores.length,
       })
     }
 
-    console.log(`[CRON] Found ${connectedStores.length} connected store(s) to sync`)
+    console.log(
+      `[CRON] Found ${scheduledStores.length} store(s) with automatic sync enabled${disabledStores.length > 0 ? ` (${disabledStores.length} disabled)` : ""}`,
+    )
 
     let totalOrdersSynced = 0
     const results = []
 
-    for (const store of connectedStores) {
+    for (const store of scheduledStores) {
       try {
         console.log(`[CRON] Syncing orders for store: ${store.name}`)
 
@@ -102,6 +109,10 @@ export async function POST(request: NextRequest) {
             ordersSynced: 0,
             message: "No new orders",
           })
+          // Update last_scheduled_sync timestamp even for no new orders
+          await supabaseStore.updateShopifyStore(store.id, {
+            lastScheduledSync: new Date().toISOString(),
+          })
           continue
         }
 
@@ -126,9 +137,19 @@ export async function POST(request: NextRequest) {
         console.log(`[CRON] Processing fulfilled orders for inventory deduction...`)
         await supabaseStore.processFulfilledOrdersForInventory()
 
-        // Update store sync status
+        // Calculate next scheduled sync
+        const now = new Date()
+        const nextSync = new Date(now)
+        nextSync.setUTCHours(store.syncScheduleHour || 1, 0, 0, 0)
+        if (nextSync <= now) {
+          nextSync.setUTCDate(nextSync.getUTCDate() + 1)
+        }
+
+        // Update store sync status with scheduler timestamps
         await supabaseStore.updateShopifyStore(store.id, {
           lastSync: new Date().toISOString(),
+          lastScheduledSync: new Date().toISOString(),
+          nextScheduledSync: nextSync.toISOString(),
           totalOrders: orders.length,
         })
 
@@ -137,6 +158,7 @@ export async function POST(request: NextRequest) {
           store: store.name,
           success: true,
           ordersSynced: syncedCount,
+          nextScheduledSync: nextSync.toISOString(),
         })
 
         console.log(`[CRON] Completed sync for ${store.name}: ${syncedCount} orders saved`)

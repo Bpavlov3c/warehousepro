@@ -44,6 +44,8 @@ export default function StoresPage() {
     webhookUrl: "",
     notes: "",
     apiEndpoint: "",
+    syncEnabled: false,
+    syncScheduleHour: 1,
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
@@ -118,6 +120,12 @@ export default function StoresPage() {
           webhookUrl: formData.webhookUrl || undefined,
           notes: formData.notes || undefined,
         })
+        // Update scheduler settings
+        await supabaseStore.updateStoreScheduler(
+          editingStore.id,
+          formData.syncEnabled,
+          formData.syncScheduleHour,
+        )
         setIsEditDialogOpen(false)
         setEditingStore(null)
       } else {
@@ -132,14 +140,24 @@ export default function StoresPage() {
           setShowApiCredentials(true)
         } else {
           // Create Shopify store
-          await supabaseStore.createShopifyStore({
+          const createdStore = await supabaseStore.createShopifyStore({
             name: formData.name,
             shopify_domain: formData.shopifyDomain,
             access_token: formData.accessToken,
             status: formData.status,
             webhook_url: formData.webhookUrl || undefined,
             notes: formData.notes || undefined,
+            sync_enabled: formData.syncEnabled,
+            sync_schedule_hour: formData.syncScheduleHour,
           })
+          // Update scheduler settings for new store
+          if (formData.syncEnabled) {
+            await supabaseStore.updateStoreScheduler(
+              createdStore.id,
+              formData.syncEnabled,
+              formData.syncScheduleHour,
+            )
+          }
         }
         setIsAddDialogOpen(false)
       }
@@ -153,6 +171,8 @@ export default function StoresPage() {
         webhookUrl: "",
         notes: "",
         apiEndpoint: "",
+        syncEnabled: false,
+        syncScheduleHour: 1,
       })
       setFormErrors({})
 
@@ -179,6 +199,8 @@ export default function StoresPage() {
       webhookUrl: store.webhookUrl || "",
       notes: store.notes || "",
       apiEndpoint: (store as any).api_endpoint || "",
+      syncEnabled: store.syncEnabled || false,
+      syncScheduleHour: store.syncScheduleHour || 1,
     })
     setFormErrors({})
     setIsEditDialogOpen(true)
@@ -365,6 +387,48 @@ export default function StoresPage() {
                           placeholder="Additional notes about this store..."
                           rows={3}
                         />
+                      </div>
+
+                      {/* Sync Schedule Section */}
+                      <div className="space-y-4 border-t pt-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label className="text-base font-semibold">Sync Schedule</Label>
+                            <p className="text-sm text-gray-500 mt-1">Enable automatic daily order syncing</p>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={formData.syncEnabled}
+                            onChange={(e) => setFormData({ ...formData, syncEnabled: e.target.checked })}
+                            className="h-5 w-5"
+                          />
+                        </div>
+
+                        {formData.syncEnabled && (
+                          <div>
+                            <Label htmlFor="syncHour">Sync Time (UTC)</Label>
+                            <Select
+                              value={String(formData.syncScheduleHour)}
+                              onValueChange={(value) =>
+                                setFormData({ ...formData, syncScheduleHour: parseInt(value) })
+                              }
+                            >
+                              <SelectTrigger id="syncHour">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 24 }, (_, i) => (
+                                  <SelectItem key={i} value={String(i)}>
+                                    {String(i).padStart(2, "0")}:00 UTC
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-gray-500 mt-2">
+                              Daily sync will run at {String(formData.syncScheduleHour).padStart(2, "0")}:00 UTC
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex justify-end gap-2">
@@ -558,6 +622,7 @@ export default function StoresPage() {
                     <TableHead>Type</TableHead>
                     <TableHead>Domain/Endpoint</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Sync Schedule</TableHead>
                     <TableHead>Last Sync</TableHead>
                     <TableHead>Orders</TableHead>
                     <TableHead>Revenue</TableHead>
@@ -595,6 +660,20 @@ export default function StoresPage() {
                           {getStatusIcon(store.status)}
                           <Badge className={getStatusColor(store.status)}>{store.status}</Badge>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {store.syncEnabled ? (
+                          <div className="text-sm">
+                            <Badge variant="secondary" className="mb-1">
+                              Auto
+                            </Badge>
+                            <p className="text-xs text-gray-600">
+                              {String(store.syncScheduleHour || 1).padStart(2, "0")}:00 UTC
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-500">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-gray-600">{store.lastSync}</TableCell>
                       <TableCell>{store.totalOrders.toLocaleString()}</TableCell>
@@ -854,6 +933,53 @@ export default function StoresPage() {
                     placeholder="Additional notes about this store..."
                     rows={3}
                   />
+                </div>
+
+                {/* Sync Schedule Section */}
+                <div className="space-y-4 border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-base font-semibold">Sync Schedule</Label>
+                      <p className="text-sm text-gray-500 mt-1">Enable automatic daily order syncing</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formData.syncEnabled}
+                      onChange={(e) => setFormData({ ...formData, syncEnabled: e.target.checked })}
+                      className="h-5 w-5"
+                    />
+                  </div>
+
+                  {formData.syncEnabled && (
+                    <div>
+                      <Label htmlFor="edit-syncHour">Sync Time (UTC)</Label>
+                      <Select
+                        value={String(formData.syncScheduleHour)}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, syncScheduleHour: parseInt(value) })
+                        }
+                      >
+                        <SelectTrigger id="edit-syncHour">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <SelectItem key={i} value={String(i)}>
+                              {String(i).padStart(2, "0")}:00 UTC
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Daily sync will run at {String(formData.syncScheduleHour).padStart(2, "0")}:00 UTC
+                      </p>
+                      {editingStore?.nextScheduledSync && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Next scheduled sync: {new Date(editingStore.nextScheduledSync).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-2">
