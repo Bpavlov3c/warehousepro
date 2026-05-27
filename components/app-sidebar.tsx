@@ -9,12 +9,9 @@ import {
   TrendingUp,
   Upload,
   Users,
-  Menu,
-  X,
   RotateCcw,
   ArrowUpDown,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -133,21 +130,6 @@ export function AppSidebar() {
                 <span className="truncate text-xs text-sidebar-foreground/70">Management System</span>
               </div>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleMobileToggle}
-              className={cn(
-                "h-8 w-8 text-sidebar-foreground hover:bg-sidebar-accent",
-                (isExpanded && !isMobile) || (isMobile && mobileExpanded) ? "ml-auto" : "ml-0",
-              )}
-            >
-              {(isExpanded && !isMobile) || (isMobile && mobileExpanded) ? (
-                <X className="h-4 w-4" />
-              ) : (
-                <Menu className="h-4 w-4" />
-              )}
-            </Button>
           </div>
         </div>
 
