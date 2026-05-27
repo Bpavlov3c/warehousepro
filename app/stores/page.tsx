@@ -566,24 +566,6 @@ export default function StoresPage() {
       </header>
 
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
-        {error && (
-          <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded">
-            {error}
-          </div>
-        )}
-
-        {resyncError && (
-          <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded">
-            {resyncError}
-          </div>
-        )}
-
-        {resyncSuccess && (
-          <div className="p-4 bg-green-100 border border-green-400 text-green-700 rounded">
-            {resyncSuccess}
-          </div>
-        )}
-
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Stores</h1>
           <div className="hidden lg:flex items-center gap-2">
@@ -605,6 +587,18 @@ export default function StoresPage() {
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-red-600">{error}</p>
+          </div>
+        )}
+
+        {resyncError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-600">{resyncError}</p>
+          </div>
+        )}
+
+        {resyncSuccess && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <p className="text-green-600">{resyncSuccess}</p>
           </div>
         )}
 
