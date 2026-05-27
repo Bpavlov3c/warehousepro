@@ -222,14 +222,6 @@ export default function InventoryPage() {
             <Button onClick={() => setIsMissingSKUModalOpen(true)} size="sm" variant="outline" className="lg:hidden">
               <PackagePlus className="w-4 h-4" />
             </Button>
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Item
-                </Button>
-              </DialogTrigger>
-            </Dialog>
           </div>
         </div>
       </header>
@@ -250,14 +242,6 @@ export default function InventoryPage() {
               <PackagePlus className="w-4 h-4 mr-2" />
               Add Missing SKU
             </Button>
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Item
-                </Button>
-              </DialogTrigger>
-            </Dialog>
           </div>
         </div>
 
