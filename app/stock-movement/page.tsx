@@ -70,13 +70,7 @@ export default function StockMovementPage() {
         .limit(100)
 
       if (movementsError) {
-        // Check if table doesn't exist
-        if (movementsError.message.includes("does not exist")) {
-          console.log("[v0] Stock movements table doesn't exist yet")
-          setMovements([])
-        } else {
-          throw movementsError
-        }
+        throw movementsError
       } else {
         setMovements(movementsData || [])
       }
@@ -437,31 +431,6 @@ export default function StockMovementPage() {
           )}
         </CardContent>
       </Card>
-
-      {movements.length === 0 && inventory.length === 0 && !loading && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardHeader>
-            <CardTitle className="text-yellow-800">Database Setup Required</CardTitle>
-            <CardDescription className="text-yellow-700">
-              The stock movements table hasn't been created yet. Please run the SQL script to set up the required
-              database tables.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-yellow-700 mb-4">
-              Run the script:{" "}
-              <code className="bg-yellow-100 px-2 py-1 rounded">scripts/create-stock-movements-table.sql</code>
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => window.open("/scripts/create-stock-movements-table.sql", "_blank")}
-              className="border-yellow-300 text-yellow-800 hover:bg-yellow-100"
-            >
-              View SQL Script
-            </Button>
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }
