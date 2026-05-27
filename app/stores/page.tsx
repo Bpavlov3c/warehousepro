@@ -23,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Store, Globe, CheckCircle, XCircle, AlertCircle, Edit, Trash2, RefreshCw, Key, Copy } from "lucide-react"
 import { supabaseStore } from "@/lib/supabase-store"
+import { formatEUR } from "@/lib/utils"
 import type { ShopifyStore } from "@/lib/supabase-store"
 
 export default function StoresPage() {
@@ -36,6 +37,9 @@ export default function StoresPage() {
   const [apiKeys, setApiKeys] = useState<any[]>([])
   const [showApiCredentials, setShowApiCredentials] = useState(false)
   const [newApiCredentials, setNewApiCredentials] = useState<{ api_key: string; api_secret: string } | null>(null)
+  const [isResyncing, setIsResyncing] = useState(false)
+  const [resyncError, setResyncError] = useState<string | null>(null)
+  const [resyncSuccess, setResyncSuccess] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     shopifyDomain: "",
@@ -224,6 +228,43 @@ export default function StoresPage() {
     }
   }
 
+  const handleResyncAllOrders = async () => {
+    if (!confirm("This will resync ALL orders from all connected Shopify stores from the beginning. This may take a while. Continue?")) {
+      return
+    }
+
+    setIsResyncing(true)
+    setResyncError(null)
+    setResyncSuccess(null)
+
+    try {
+      const response = await fetch("/api/admin/resync-all-orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET || ""}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Resync failed: " + response.statusText)
+      }
+
+      const data = await response.json()
+      setResyncSuccess(
+        `Resync completed! Synced ${data.totalOrdersSynced} orders from ${data.storeCount} store(s).`,
+      )
+
+      // Reload stores to show updated sync times
+      await loadStores()
+    } catch (err) {
+      console.error("Error resyncing orders:", err)
+      setResyncError("Failed to resync orders: " + (err instanceof Error ? err.message : "Unknown error"))
+    } finally {
+      setIsResyncing(false)
+    }
+  }
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
   }
@@ -288,6 +329,10 @@ export default function StoresPage() {
             <Button onClick={loadStores} size="sm" variant="outline">
               <RefreshCw className="w-4 h-4" />
             </Button>
+            <Button onClick={handleResyncAllOrders} size="sm" variant="destructive" disabled={isResyncing}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${isResyncing ? "animate-spin" : ""}`} />
+              {isResyncing ? "Resyncing..." : "Resync All"}
+            </Button>
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="sm">
@@ -295,12 +340,13 @@ export default function StoresPage() {
                   Add Store
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-md max-h-[90vh] flex flex-col">
                 <DialogHeader>
                   <DialogTitle>Add New Store</DialogTitle>
                   <DialogDescription>Connect a new store to sync orders and manage inventory.</DialogDescription>
                 </DialogHeader>
 
+                <div className="flex-1 overflow-y-auto pr-4">
                 <Tabs value={storeType} onValueChange={(value) => setStoreType(value as "shopify" | "open_api")}>
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="shopify">Shopify Store</TabsTrigger>
@@ -512,6 +558,7 @@ export default function StoresPage() {
                     </form>
                   </TabsContent>
                 </Tabs>
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -519,6 +566,24 @@ export default function StoresPage() {
       </header>
 
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
+        {error && (
+          <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+            {error}
+          </div>
+        )}
+
+        {resyncError && (
+          <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+            {resyncError}
+          </div>
+        )}
+
+        {resyncSuccess && (
+          <div className="p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+            {resyncSuccess}
+          </div>
+        )}
+
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold hidden lg:block">Stores</h1>
           <div className="hidden lg:flex items-center gap-2">
@@ -677,7 +742,7 @@ export default function StoresPage() {
                       </TableCell>
                       <TableCell className="text-sm text-gray-600">{store.lastSync}</TableCell>
                       <TableCell>{store.totalOrders.toLocaleString()}</TableCell>
-                      <TableCell>${store.monthlyRevenue.toLocaleString()}</TableCell>
+                      <TableCell>{formatEUR(store.monthlyRevenue)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleEdit(store)}>
@@ -779,13 +844,14 @@ export default function StoresPage() {
 
         {/* Edit Store Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>Edit Store</DialogTitle>
               <DialogDescription>Update store information and settings.</DialogDescription>
             </DialogHeader>
 
-            {editingStore && (editingStore as any).store_type === "open_api" ? (
+            <div className="flex-1 overflow-y-auto pr-4">
+              {editingStore && (editingStore as any).store_type === "open_api" ? (
               // Open API Store Edit Form
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
@@ -1000,6 +1066,7 @@ export default function StoresPage() {
                 </div>
               </form>
             )}
+            </div>
           </DialogContent>
         </Dialog>
       </div>

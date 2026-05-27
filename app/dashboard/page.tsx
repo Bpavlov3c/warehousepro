@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Package, ShoppingCart, TrendingUp, AlertTriangle, DollarSign, Users, Calendar, BarChart3 } from "lucide-react"
 import { supabaseStore } from "@/lib/supabase-store"
+import { formatEUR } from "@/lib/utils"
 import type { InventoryItem, PurchaseOrder, ShopifyOrder, Return } from "@/lib/supabase-store"
 
 // Skeleton components for loading states
@@ -288,7 +289,7 @@ export default function Dashboard() {
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${orderMetrics.totalRevenue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(orderMetrics.totalRevenue)}</div>
                   <p className="text-xs text-muted-foreground">{orderMetrics.totalOrders} orders</p>
                 </CardContent>
               </Card>
@@ -299,7 +300,7 @@ export default function Dashboard() {
                   <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${orderMetrics.totalProfit.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(orderMetrics.totalProfit)}</div>
                   <p className="text-xs text-muted-foreground">
                     Avg: ${orderMetrics.avgOrderValue.toFixed(2)} per order
                   </p>
@@ -312,7 +313,7 @@ export default function Dashboard() {
                   <Package className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${inventoryMetrics.totalValue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(inventoryMetrics.totalValue)}</div>
                   <p className="text-xs text-muted-foreground">{inventoryMetrics.totalStock} units in stock</p>
                 </CardContent>
               </Card>
@@ -359,7 +360,7 @@ export default function Dashboard() {
                   <BarChart3 className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${poMetrics.totalPOValue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(poMetrics.totalPOValue)}</div>
                   <p className="text-xs text-muted-foreground">Total purchase orders</p>
                 </CardContent>
               </Card>
@@ -381,7 +382,7 @@ export default function Dashboard() {
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${returnMetrics.totalRefunds.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(returnMetrics.totalRefunds)}</div>
                   <p className="text-xs text-muted-foreground">All returns</p>
                 </CardContent>
               </Card>

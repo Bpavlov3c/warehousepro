@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Search, Package, DollarSign, TrendingDown, Users, Eye, Download, Plus } from "lucide-react"
 import { supabaseStore, type Return } from "@/lib/supabase-store"
+import { formatEUR } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -346,7 +347,7 @@ export default function ReturnsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Total Refund</p>
-                    <p className="text-lg font-bold">${metrics.totalRefund.toLocaleString()}</p>
+                    <p className="text-lg font-bold">{formatEUR(metrics.totalRefund)}</p>
                   </div>
                   <DollarSign className="w-5 h-5 text-red-600" />
                 </div>

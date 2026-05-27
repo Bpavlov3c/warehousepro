@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { DateRangePicker } from "@/components/date-range-picker"
+import { formatEUR } from "@/lib/utils"
 import {
   BarChart3,
   TrendingUp,
@@ -296,7 +297,7 @@ export default function Reports() {
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${metrics.totalRevenue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(metrics.totalRevenue)}</div>
                   <p className="text-xs text-muted-foreground">{metrics.totalOrders} orders</p>
                 </CardContent>
               </Card>
@@ -307,7 +308,7 @@ export default function Reports() {
                   <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${metrics.totalProfit.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(metrics.totalProfit)}</div>
                   <p className="text-xs text-muted-foreground">Avg: ${metrics.avgOrderValue.toFixed(2)} per order</p>
                 </CardContent>
               </Card>
@@ -318,7 +319,7 @@ export default function Reports() {
                   <Package className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${metrics.totalInventoryValue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(metrics.totalInventoryValue)}</div>
                   <p className="text-xs text-muted-foreground">{metrics.lowStockItems} low stock items</p>
                 </CardContent>
               </Card>
@@ -330,7 +331,7 @@ export default function Reports() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{metrics.returnRate.toFixed(1)}%</div>
-                  <p className="text-xs text-muted-foreground">${metrics.totalRefunds.toLocaleString()} refunded</p>
+                  <p className="text-xs text-muted-foreground">{formatEUR(metrics.totalRefunds)} refunded</p>
                 </CardContent>
               </Card>
             </>
@@ -353,7 +354,7 @@ export default function Reports() {
                   <ShoppingCart className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">${metrics.totalPOValue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatEUR(metrics.totalPOValue)}</div>
                   <p className="text-xs text-muted-foreground">{filteredData.purchaseOrders.length} orders in period</p>
                 </CardContent>
               </Card>

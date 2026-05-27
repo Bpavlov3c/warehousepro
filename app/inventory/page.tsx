@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { formatEUR } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -287,7 +288,7 @@ export default function InventoryPage() {
                 <div>
                   <p className="text-sm text-gray-600">Total Value</p>
                   <p className="text-2xl font-bold">
-                    ${inventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0).toLocaleString()}
+                    {formatEUR(inventory.reduce((sum, item) => sum + item.inStock * item.unitCost, 0))}
                   </p>
                 </div>
                 <TrendingUp className="w-8 h-8 text-green-600" />

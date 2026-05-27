@@ -23,6 +23,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { ShopifyOrder, ShopifyOrderStats } from "@/lib/supabase-store"
+import { formatEUR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 /* ------------------------------ helpers ------------------------------- */
@@ -596,7 +597,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Total Revenue</p>
-                    <p className="text-lg font-bold">${globalStats.totalRevenue.toLocaleString()}</p>
+                    <p className="text-lg font-bold">{formatEUR(globalStats.totalRevenue)}</p>
                   </div>
                   <DollarSign className="w-5 h-5 text-green-600" />
                 </div>
@@ -606,7 +607,7 @@ export default function ShopifyOrdersClient({ initialOrders, initialTotal, initi
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-gray-600">Total Profit</p>
-                    <p className="text-lg font-bold">${globalStats.totalProfit.toLocaleString()}</p>
+                    <p className="text-lg font-bold">{formatEUR(globalStats.totalProfit)}</p>
                   </div>
                   <TrendingUp className="w-5 h-5 text-green-600" />
                 </div>
