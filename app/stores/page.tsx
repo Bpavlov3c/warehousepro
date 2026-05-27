@@ -36,6 +36,7 @@ export default function StoresPage() {
   const [apiKeys, setApiKeys] = useState<any[]>([])
   const [showApiCredentials, setShowApiCredentials] = useState(false)
   const [newApiCredentials, setNewApiCredentials] = useState<{ api_key: string; api_secret: string } | null>(null)
+  const [apiOrigin, setApiOrigin] = useState("")
   const [formData, setFormData] = useState({
     name: "",
     shopifyDomain: "",
@@ -50,6 +51,7 @@ export default function StoresPage() {
 
   // Load stores on component mount
   useEffect(() => {
+    setApiOrigin(window.location.origin)
     loadStores()
   }, [])
 
@@ -401,9 +403,9 @@ export default function StoresPage() {
                         <Label htmlFor="apiEndpoint">Domain/Endpoint</Label>
                         <Input
                           id="apiEndpoint"
-                          value={formData.apiEndpoint || `${window.location.origin}/api/v1`}
+                          value={formData.apiEndpoint || `${apiOrigin}/api/v1`}
                           onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
-                          placeholder={`${window.location.origin}/api/v1`}
+                          placeholder={`${apiOrigin}/api/v1`}
                         />
                         <p className="text-sm text-gray-500 mt-1">Your API base URL for external integrations</p>
                       </div>
@@ -727,7 +729,7 @@ export default function StoresPage() {
                     id="edit-apiEndpoint"
                     value={formData.apiEndpoint}
                     onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
-                    placeholder={`${window.location.origin}/api/v1`}
+                    placeholder={`${apiOrigin}/api/v1`}
                   />
                   <p className="text-sm text-gray-500 mt-1">Your API base URL for external integrations</p>
                 </div>
