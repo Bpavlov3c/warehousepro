@@ -49,6 +49,7 @@ export default function Dashboard() {
   const [returns, setReturns] = useState<Return[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState("")
 
   // Load critical data first, then secondary data
   const loadData = useCallback(async () => {
@@ -73,6 +74,7 @@ export default function Dashboard() {
       setError(err instanceof Error ? err.message : "Failed to load dashboard data")
     } finally {
       setLoading(false)
+      setLastUpdated(new Date().toLocaleTimeString())
     }
   }, [])
 
@@ -268,7 +270,7 @@ export default function Dashboard() {
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 ml-16 lg:ml-0">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold hidden lg:block">Dashboard</h1>
-          <div className="text-sm text-gray-500">Last updated: {new Date().toLocaleTimeString()}</div>
+          <div className="text-sm text-gray-500">Last updated: {lastUpdated}</div>
         </div>
 
         {/* Key Metrics */}
